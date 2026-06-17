@@ -12,6 +12,12 @@ cpp/ros2/build/
 cpp/ros2/install/
 cpp/ros2/log/
 
+# Isaac glue: python cache + run outputs (the loop writes these)
+__pycache__/
+*.py[cod]
+isaac/isaac_flown.csv
+isaac/isaac_flown.png
+
 # editor + local logs
 .vscode/
 *.log
