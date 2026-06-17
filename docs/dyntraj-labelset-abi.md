@@ -81,3 +81,27 @@ if self.label_set:
 3. 新增微测(python/test):建一个 id<200 的 traj、显式塞 `label_set=[1]`(vehicle-like,无 human)
    → 经 bridge 跑 plan,验证它被当**软**(wall)处理,而非 id 启发式的硬(human)→ 证明 ABI 通了。
 4. 反向:`label_set=[0]`(human)→ 硬。空集合 → 退回 id 启发式。
+
+## 6. 实现落定 + 对抗 review 结果(2026-06-17)
+
+实现时 gating 决策抽成纯函数 `DynTraj::derived_class()`(types.hpp),snapshot 循环调它。
+**验收已升级到 ctest 20/20**(19 golden + 新增 `dyntraj_labelset` 单测,覆盖 human_in_set 真值表
++ derived_class 全分支含 id 边界 199/200/300)+ **ROS2 端到端** `cpp/ros2/test_labelset_ros2.py`
+(9 个 id×label 组合,经 DynTraj.msg→sando_node→planner→`obst_class_codes` 读回断言)。
+
+跑了 5-lens 对抗 review,据其确认的发现做了如下加固:
+- **读回按 id 对齐,不按位置**:snapshot 会过滤(出图/超 horizon 的障碍被丢)+ 重排,所以加了
+  `get_obst_id()` / capi `sando_get_obst_ids` / bridge 返回 `(id,code)` 对;ROS 走 `[id,code]` flat。
+- **读回报真硬度(含动态重分类)**:快速 "wall"(`speed≥dynamic_speed_thresh`)在 planner 里被重分类成
+  硬 dynamic;读回若用重分类前的 class 会把它误报软。改为存 `obst_hard`(与重分类同条件)并读它。
+- **新鲜度**:`obst_class/obst_id/obst_hard` 只在真 replan 刷新(need_replan==false 时跳过)。暴露
+  `get_obst_snapshot_time()`(capi + ROS `obst_snapshot_time` Float64 话题),消费者据此辨别 stale。
+
+**Phase 2 待办(review 标的,本期不做)**:
+- **空集合二义**:目前 `空 label_set = 无分类器 → id 启发式`。但真 conformal 预测器也可能吐**空集合**
+  (最大不确定),按 spec §5 应 **unknown→硬**。Phase 2 接真分类器时要区分「没分类器」与「分类器吐空集」
+  (加 has_classifier 标志或哨兵),否则一个落在 wall-id 段的真人会被误判软。当前可由 producer 端把
+  最大不确定编码成含 0 的硬集合规避,无需改 ABI。
+- **id 启发式 `id>=200`(开区间)** 与 Python oracle 的 `[200,300)` 有意分歧:C++ 让 id≥300 的墙保持软
+  (老 [200,300) 把它们判硬→stall)。仅 fallback 路径生效(label_set 一旦给出即覆盖)。已被单测锁定
+  (id=300/350→soft);label_set 成为主信号后,长期应弃用 id 段重载。

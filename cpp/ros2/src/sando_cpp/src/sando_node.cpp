@@ -4,6 +4,8 @@
 // DynTraj -> add_traj, replan timer -> replan(), goal timer -> get_next_goal() -> Goal.
 #include <rclcpp/rclcpp.hpp>
 #include <geometry_msgs/msg/pose_stamped.hpp>
+#include <std_msgs/msg/int32_multi_array.hpp>
+#include <std_msgs/msg/float64.hpp>
 #include <dynus_interfaces/msg/state.hpp>
 #include <dynus_interfaces/msg/goal.hpp>
 #include <dynus_interfaces/msg/dyn_traj.hpp>
@@ -45,6 +47,13 @@ class SandoNode : public rclcpp::Node {
     sub_trajs_ = create_subscription<dynus_interfaces::msg::DynTraj>(
         "trajs", 50, std::bind(&SandoNode::trajs_cb, this, std::placeholders::_1));
     pub_goal_ = create_publisher<dynus_interfaces::msg::Goal>("goal", 10);
+    // safety-layer readback: per-snapshot TRUE gated hardness, flat [id0,code0, id1,code1, ...]
+    // with code 1=hard / 0=soft (incl. fast-wall->dynamic reclassification). Latches the last
+    // REFRESHED snapshot — pair it with obst_snapshot_time (below) to tell fresh from stale: the
+    // snapshot only advances on a real replan, so an unchanged time means the codes are stale
+    // (replan was skipped this tick, e.g. need_replan==false).
+    pub_classes_ = create_publisher<std_msgs::msg::Int32MultiArray>("obst_class_codes", 10);
+    pub_snap_t_ = create_publisher<std_msgs::msg::Float64>("obst_snapshot_time", 10);
 
     planner_->update_occupancy_map_ptr({});  // rviz_only map pre-seed -> map_initialized
 
@@ -76,6 +85,7 @@ class SandoNode : public rclcpp::Node {
     sando::DynTraj dt;
     dt.id = msg->id;
     dt.is_agent = msg->is_agent;
+    dt.label_set.assign(msg->label_set.begin(), msg->label_set.end());  // conformal set (empty -> id heuristic)
     if (msg->bbox.size() >= 3) dt.bbox = Eigen::Vector3d(msg->bbox[0], msg->bbox[1], msg->bbox[2]);
     dt.mode = "Analytic";
     if (msg->function.size() == 3) {
@@ -92,6 +102,22 @@ class SandoNode : public rclcpp::Node {
     auto t0 = std::chrono::steady_clock::now();
     planner_->replan(last_rt_, now_s());
     last_rt_ = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+    // Publish the latest snapshot hardness as flat [id, code] pairs (1=hard, 0=soft). This LATCHES the
+    // last refreshed snapshot (replan() skips the snapshot on need_replan==false / not-ready ticks);
+    // obst_snapshot_time lets a consumer detect staleness (unchanged time -> codes are stale).
+    auto ids = planner_->get_obst_id();
+    auto hard = planner_->get_obst_hard();
+    std_msgs::msg::Int32MultiArray cm;
+    size_t n = std::min(ids.size(), hard.size());
+    cm.data.reserve(2 * n);
+    for (size_t i = 0; i < n; ++i) {
+      cm.data.push_back(ids[i]);
+      cm.data.push_back(hard[i]);
+    }
+    pub_classes_->publish(cm);
+    std_msgs::msg::Float64 st;
+    st.data = planner_->get_obst_snapshot_time();
+    pub_snap_t_->publish(st);
   }
 
   void publish_goal() {
@@ -115,6 +141,8 @@ class SandoNode : public rclcpp::Node {
   rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr sub_goal_;
   rclcpp::Subscription<dynus_interfaces::msg::DynTraj>::SharedPtr sub_trajs_;
   rclcpp::Publisher<dynus_interfaces::msg::Goal>::SharedPtr pub_goal_;
+  rclcpp::Publisher<std_msgs::msg::Int32MultiArray>::SharedPtr pub_classes_;
+  rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr pub_snap_t_;
   rclcpp::TimerBase::SharedPtr timer_replan_, timer_goal_;
 };
 

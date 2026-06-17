@@ -18,6 +18,7 @@
 #include <cmath>
 #include <cstddef>
 #include <memory>
+#include <algorithm>
 
 namespace sando {
 
@@ -366,6 +367,28 @@ class DynTraj {
   double time_received = 0.0;
   double tracking_utility = 0.0;
   double communication_delay = 0.0;
+
+  // conformal classification set (Mondrian class codes: 0=HUMAN, 1=VEHICLE_LIKE, 2=OTHER).
+  // EMPTY = no classifier info -> downstream (planner.hpp class derivation) falls back to the
+  // legacy id heuristic. Set across the C ABI via traj_set_label_set(). The latch rule (once
+  // human, always human) is a per-track concern owned by the tracker side, not stored here.
+  std::vector<int> label_set;
+
+  // human (Mondrian code 0) present in the conformal classification set?
+  bool human_in_set() const {
+    return std::find(label_set.begin(), label_set.end(), 0) != label_set.end();
+  }
+
+  // hard/soft class for avoidance: ① conformal label-set primary — human in set -> "human" (hard),
+  // else "wall" (soft); ② EMPTY set -> legacy id heuristic (id>=200 -> "wall"/soft, else "human"/hard).
+  // NOTE: open-ended id>=200 (not Python's bounded [200,300)) is a deliberate C++ choice so id>=300
+  // walls stay soft (the old [200,300) marked them HARD -> stall); see docs/dyntraj-labelset-abi.md.
+  // This is the STATIC class; a fast "wall" is later reclassified to a hard dynamic agent in the
+  // planner snapshot (needs speed + params), so it is not decided here.
+  std::string derived_class() const {
+    if (!label_set.empty()) return human_in_set() ? "human" : "wall";
+    return (id >= 200) ? "wall" : "human";
+  }
 
   void set_piecewise(const PieceWisePol& p) {
     mode = "Piecewise";

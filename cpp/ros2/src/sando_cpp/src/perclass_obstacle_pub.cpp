@@ -29,13 +29,15 @@ class PerClassObstaclePub : public rclcpp::Node {
   }
 
  private:
-  dynus_interfaces::msg::DynTraj make(int id, const std::vector<double>& bbox,
+  dynus_interfaces::msg::DynTraj make(int id, const std::vector<int>& label_set,
+                                      const std::vector<double>& bbox,
                                       const std::string& fx, const std::string& fy, const std::string& fz,
                                       const std::string& vx, const std::string& vy, const std::string& vz,
                                       double px, double py, double pz) {
     dynus_interfaces::msg::DynTraj m;
     m.header.stamp = now(); m.header.frame_id = frame_;
     m.id = id; m.is_agent = false;
+    m.label_set = label_set;          // conformal class set (0=HUMAN,1=VEHICLE_LIKE,2=OTHER)
     m.bbox = bbox;
     m.function = {fx, fy, fz};
     m.velocity = {vx, vy, vz};
@@ -46,11 +48,11 @@ class PerClassObstaclePub : public rclcpp::Node {
     double t = now().seconds();
     double hpy = amp_ * std::sin(w_ * (t - t0_));
     std::string arg = "(t - " + num(t0_) + ")";
-    auto human = make(100, {0.6, 0.6, 1.8},
+    auto human = make(100, {0}, {0.6, 0.6, 1.8},                    // label {0}=HUMAN -> hard
                       num(hx_), num(amp_) + "*sin(" + num(w_) + "*" + arg + ")", num(hz_),
                       "0.0", num(amp_ * w_) + "*cos(" + num(w_) + "*" + arg + ")", "0.0",
                       hx_, hpy, hz_);
-    auto wall = make(200, we_, num(wc_[0]), num(wc_[1]), num(wc_[2]),
+    auto wall = make(200, {2}, we_, num(wc_[0]), num(wc_[1]), num(wc_[2]),   // label {2}=OTHER -> soft
                      "0.0", "0.0", "0.0", wc_[0], wc_[1], wc_[2]);
     pub_->publish(human);
     pub_->publish(wall);

@@ -140,6 +140,15 @@ SANDO_API void traj_eval(void* h, double t, double* out3) {
     out3[0] = p[0]; out3[1] = p[1]; out3[2] = p[2];
   } catch (...) { out3[0] = out3[1] = out3[2] = 0.0; }
 }
+// set the conformal label-set on a DynTraj handle (Mondrian class codes: 0=HUMAN, 1=VEHICLE_LIKE,
+// 2=OTHER). n<=0 clears it -> downstream falls back to the legacy id heuristic. Call after traj_create.
+SANDO_API void traj_set_label_set(void* h, const int* codes, int n) {
+  try {
+    auto* d = static_cast<DynTraj*>(h);
+    if (n > 0 && codes) d->label_set.assign(codes, codes + n);
+    else                d->label_set.clear();
+  } catch (...) {}
+}
 
 // ===========================================================================
 // SANDO lifecycle + the Isaac-loop API surface.
@@ -240,4 +249,34 @@ SANDO_API int sando_get_corridor(void* h, double* out, int max_n) {
     }
     return n;
   } catch (...) { return 0; }
+}
+
+// per-snapshot derived obstacle hardness from the LAST refreshed snapshot: out[i] = 1 (hard) or
+// 0 (soft), TRUE gated hardness incl. fast-wall->dynamic reclassification. returns count (<=max_n).
+// The snapshot is FILTERED (out-of-map / beyond-horizon obstacles dropped) and ordered by the
+// internal trajs order, so callers MUST align by id via sando_get_obst_ids() — never positionally.
+SANDO_API int sando_get_obst_class_codes(void* h, int* out, int max_n) {
+  try {
+    auto hard = static_cast<SANDO*>(h)->get_obst_hard();
+    int n = static_cast<int>(hard.size());
+    if (n > max_n) n = max_n;
+    for (int i = 0; i < n; ++i) out[i] = hard[i];
+    return n;
+  } catch (...) { return 0; }
+}
+// detected-obstacle ids, parallel to sando_get_obst_class_codes (for id-aligned readback).
+SANDO_API int sando_get_obst_ids(void* h, int* out, int max_n) {
+  try {
+    auto ids = static_cast<SANDO*>(h)->get_obst_id();
+    int n = static_cast<int>(ids.size());
+    if (n > max_n) n = max_n;
+    for (int i = 0; i < n; ++i) out[i] = ids[i];
+    return n;
+  } catch (...) { return 0; }
+}
+// wall-clock time the readback snapshot was taken; only advances on a real (non-skipped) replan,
+// so a consumer can detect a stale readback (same value as last call -> no fresh snapshot).
+SANDO_API double sando_get_obst_snapshot_time(void* h) {
+  try { return static_cast<SANDO*>(h)->get_obst_snapshot_time(); }
+  catch (...) { return 0.0; }
 }

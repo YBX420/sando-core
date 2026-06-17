@@ -47,6 +47,7 @@ def _load():
 
 _LIB, DLL_PATH = _load()
 _dbl = C.POINTER(C.c_double)
+_intp = C.POINTER(C.c_int)
 
 
 def _sig(name, restype, *argtypes):
@@ -66,6 +67,8 @@ _traj_create = _sig("traj_create", C.c_void_p, C.c_int, C.c_double, C.c_double, 
                     C.c_char_p, C.c_char_p, C.c_char_p, C.c_char_p, C.c_char_p, C.c_char_p)
 _traj_destroy = _sig("traj_destroy", None, C.c_void_p)
 _traj_eval = _sig("traj_eval", None, C.c_void_p, C.c_double, _dbl)
+# conformal label-set on a DynTraj: codes are Mondrian class ids (0=HUMAN,1=VEHICLE_LIKE,2=OTHER)
+_traj_set_label_set = _sig("traj_set_label_set", None, C.c_void_p, _intp, C.c_int)
 _sando_create = _sig("sando_create", C.c_void_p, C.c_void_p)
 _sando_destroy = _sig("sando_destroy", None, C.c_void_p)
 _sando_update_state = _sig("sando_update_state", None, C.c_void_p, _dbl, _dbl, _dbl, C.c_double)
@@ -77,6 +80,9 @@ _sando_get_next_goal = _sig("sando_get_next_goal", C.c_int, C.c_void_p, _dbl)
 _sando_get_drone_status = _sig("sando_get_drone_status", C.c_int, C.c_void_p)
 _sando_get_global_path = _sig("sando_get_global_path", C.c_int, C.c_void_p, _dbl, C.c_int)
 _sando_get_corridor = _sig("sando_get_corridor", C.c_int, C.c_void_p, _dbl, C.c_int)
+_sando_get_obst_class_codes = _sig("sando_get_obst_class_codes", C.c_int, C.c_void_p, _intp, C.c_int)
+_sando_get_obst_ids = _sig("sando_get_obst_ids", C.c_int, C.c_void_p, _intp, C.c_int)
+_sando_get_obst_snapshot_time = _sig("sando_get_obst_snapshot_time", C.c_double, C.c_void_p)
 
 
 def _p(arr):
@@ -220,6 +226,7 @@ class DynTraj:
         self.traj_x = self.traj_y = self.traj_z = "0.0"
         self.traj_vx = self.traj_vy = self.traj_vz = ""
         self.is_agent = False
+        self.label_set = []          # conformal Mondrian class codes; [] -> legacy id heuristic
         self._handle = None
 
     def compile_analytic(self):
@@ -233,6 +240,13 @@ class DynTraj:
         self._handle = _traj_create(int(self.id), float(b[0]), float(b[1]), float(b[2]),
                                     enc(self.traj_x), enc(self.traj_y), enc(self.traj_z),
                                     enc(self.traj_vx), enc(self.traj_vy), enc(self.traj_vz))
+        # push the conformal label-set onto the freshly (re)created handle (after traj_create resets it)
+        if self.label_set:
+            n = len(self.label_set)
+            arr = (C.c_int * n)(*[int(x) for x in self.label_set])
+            _traj_set_label_set(self._handle, arr, n)
+        else:
+            _traj_set_label_set(self._handle, None, 0)
         return True
 
     def eval(self, t):
@@ -267,6 +281,8 @@ class SANDO:
         self._h = _sando_create(par._handle)
         self._gp_buf = (C.c_double * (3 * 4096))()  # global-path scratch
         self._corr_buf = (C.c_double * (9 * 64))()  # space-time corridor scratch (9 doubles/cuboid)
+        self._cls_buf = (C.c_int * 1024)()          # per-obstacle hardness-code scratch
+        self._oid_buf = (C.c_int * 1024)()          # per-obstacle id scratch
 
     def update_state(self, data: RobotState):
         _, pp = _p(data.pos)
@@ -311,6 +327,19 @@ class SANDO:
         n = _sando_get_global_path(self._h, C.cast(self._gp_buf, _dbl), 4096)
         return [np.array([self._gp_buf[3 * i], self._gp_buf[3 * i + 1], self._gp_buf[3 * i + 2]])
                 for i in range(n)]
+
+    def get_obst_class_codes(self):
+        """Per-obstacle TRUE gated hardness from the LAST refreshed snapshot, as (id, code) pairs
+        (1=hard, 0=soft). The snapshot is filtered/reordered, so align by id — NEVER positionally.
+        Use get_obst_snapshot_time() to tell a fresh snapshot from a stale (skipped-replan) readback."""
+        n = _sando_get_obst_class_codes(self._h, C.cast(self._cls_buf, _intp), 1024)
+        ni = _sando_get_obst_ids(self._h, C.cast(self._oid_buf, _intp), 1024)
+        m = min(n, ni)
+        return [(int(self._oid_buf[i]), int(self._cls_buf[i])) for i in range(m)]
+
+    def get_obst_snapshot_time(self):
+        """Wall-clock the readback snapshot was taken; only advances on a real (non-skipped) replan."""
+        return float(_sando_get_obst_snapshot_time(self._h))
 
     def get_corridor(self):
         """Last committed space-time corridor: list of {lo,hi,t_l,t_u,seg} (empty when off)."""

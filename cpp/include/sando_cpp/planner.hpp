@@ -246,6 +246,9 @@ class SANDO {
   std::vector<Eigen::Vector3d> obst_pos;
   std::vector<Eigen::Vector3d> obst_bbox;
   std::vector<std::string> obst_class;
+  std::vector<int> obst_id;            // detected-obstacle id, parallel to obst_class (for class readback)
+  std::vector<int> obst_hard;          // 1=hard / 0=soft, parallel to obst_id; TRUE gated hardness
+                                       // (incl. fast-wall->dynamic reclassification), for readback
   std::vector<Eigen::Vector3d> obst_vel;
   std::vector<Eigen::Vector3d> obst_accel;
   double obst_snapshot_time_ = 0.0;   // #1: wall-clock at which obst_pos was sampled (eval(current_time))
@@ -344,6 +347,15 @@ class SANDO {
     return state;
   }
   std::vector<DynTraj> get_trajs() const { return trajs; }
+  // per-snapshot readback for the safety-layer monitor, all parallel arrays from the LAST refreshed
+  // snapshot. get_obst_hard() is the TRUE gated hardness (1=hard,0=soft) incl. fast-wall->dynamic
+  // reclassification — prefer it over get_obst_class() (which is the pre-reclassification static label).
+  // get_obst_snapshot_time() is the wall-clock the snapshot was taken; it only advances on a real
+  // replan, so a consumer can detect a stale (un-refreshed) readback on skipped replan cycles.
+  std::vector<std::string> get_obst_class() const { return obst_class; }
+  std::vector<int> get_obst_id() const { return obst_id; }       // ids parallel to get_obst_hard()
+  std::vector<int> get_obst_hard() const { return obst_hard; }   // 1=hard / 0=soft, parallel to ids
+  double get_obst_snapshot_time() const { return obst_snapshot_time_; }
   std::vector<Eigen::Vector3d> get_global_path() const { return global_path_; }
   const std::vector<SpaceTimeCuboid>& get_corridor() const { return last_corridor_; }
   double get_corridor_A_time() const { return last_A_time_; }
@@ -481,6 +493,8 @@ class SANDO {
     std::vector<DynTraj> local_trajs = get_trajs();
 
     std::vector<std::string> oclass;
+    std::vector<int> oid;
+    std::vector<int> ohard;
     std::vector<Eigen::Vector3d> ovel, oaccel;
     std::vector<DynTraj> selected;
     for (auto& traj : local_trajs) {
@@ -492,19 +506,26 @@ class SANDO {
       if (dist > par.horizon) continue;
       opos.push_back(p);
       obbox.push_back(t.bbox);
-      int tid = t.id;
-      // class source (placeholder): id>=200 -> wall (soft), else human (hard). Was [200,300)
-      // which silently misclassified the 100th+ wall (id>=300) as a HARD human -> the local solve
-      // could not thread past those phantom-hard boxes -> stall. id>=200 supports >100 walls.
-      oclass.push_back((tid >= 200) ? "wall" : "human");
-      ovel.push_back(t.velocity(current_time));
+      // class source: conformal label-set primary, legacy id heuristic fallback (see DynTraj::derived_class).
+      std::string cls = t.derived_class();
+      oclass.push_back(cls);
+      oid.push_back(t.id);
+      Eigen::Vector3d ov = t.velocity(current_time);
+      ovel.push_back(ov);
       oaccel.push_back(t.accel(current_time));
+      // readback hardness MUST match the actual gating in obstacles_from_snapshot: a "wall" moving at
+      // >= dynamic_speed_thresh is reclassified to a HARD dynamic agent. Mirror that exact test so the
+      // safety-layer readback reports true hardness (1=hard, 0=soft), not the pre-reclassification class.
+      bool is_dyn = (par.dynamic_speed_thresh > 0.0 && ov.norm() >= par.dynamic_speed_thresh);
+      ohard.push_back((cls != "wall" || is_dyn) ? 1 : 0);
       selected.push_back(t);
     }
 
     obst_pos = opos;
     obst_bbox = obbox;
     obst_class = oclass;
+    obst_id = oid;
+    obst_hard = ohard;
     obst_vel = ovel;
     obst_accel = oaccel;
     obst_snapshot_time_ = current_time;   // #1: remember WHEN this snapshot was taken

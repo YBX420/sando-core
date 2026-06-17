@@ -74,3 +74,7 @@ add_test(NAME basis_converter COMMAND test_basis_converter ${CMAKE_CURRENT_SOURC
 
 add_executable(test_obstacle_tracker test/test_obstacle_tracker.cpp)
 add_test(NAME obstacle_tracker COMMAND test_obstacle_tracker ${CMAKE_CURRENT_SOURCE_DIR}/golden/obstacle_tracker_cases.txt)
+
+# DynTraj conformal label-set primitive (human_in_set truth table) — self-contained, no golden file.
+add_executable(test_dyntraj_labelset test/test_dyntraj_labelset.cpp)
+add_test(NAME dyntraj_labelset COMMAND test_dyntraj_labelset)
