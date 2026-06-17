@@ -1,0 +1,17 @@
+# C++ build artifacts
+cpp/build/
+build/
+
+# compiled capi shared lib (rebuilt by hand: g++ -O2 -shared -fPIC ... -o capi/sando_capi.so)
+cpp/capi/sando_capi.so
+cpp/build/sando_capi.so
+cpp/capi/sando_capi.dll
+
+# ROS 2 / colcon (under cpp/ros2 — source is tracked, build output is not)
+cpp/ros2/build/
+cpp/ros2/install/
+cpp/ros2/log/
+
+# editor + local logs
+.vscode/
+*.log
