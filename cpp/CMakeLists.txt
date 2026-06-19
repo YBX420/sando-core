@@ -93,3 +93,8 @@ add_test(NAME deficit_gate COMMAND test_deficit_gate)
 # head-on falls back to instant stop (safe), lateral/forward-open smooths (jerk 2.5->~0), never regresses.
 add_executable(test_recovery_closedloop test/test_recovery_closedloop.cpp)
 add_test(NAME recovery_closedloop COMMAND test_recovery_closedloop)
+
+# C2 yaw governor (minco_yaw_c2_smooth) — drives SANDO::get_next_goal over a 90-deg heading step;
+# ON bounds yaw-accel (|d(dyaw)| <= accel_max*dc) vs OFF's rate-step spike. Cert-orthogonal.
+add_executable(test_yaw_smooth test/test_yaw_smooth.cpp)
+add_test(NAME yaw_smooth COMMAND test_yaw_smooth)

@@ -238,6 +238,7 @@ class SANDO {
   double A_time = 0.0;
   std::deque<RobotState> plan;
   double previous_yaw = 0.0;
+  double previous_dyaw = 0.0;            // last committed yaw-rate (for the C2 yaw governor; default-OFF path never reads it)
 
   // shared pwp
   QuinticPieceWisePol pwp_to_share;
@@ -1436,23 +1437,50 @@ class SANDO {
     }
 
     if (drone_status_ != DroneStatus::GOAL_REACHED) {
-      if (replanning_failure_count > par.yaw_spinning_threshold &&
-          drone_status_ != DroneStatus::HOVER_AVOIDING) {
-        next_goal.yaw = previous_yaw + par.yaw_spinning_dyaw * par.dc;
-        next_goal.dyaw = par.yaw_spinning_dyaw;
-        previous_yaw = next_goal.yaw;
-      } else if (local_plan.size() < 5 && drone_status_ != DroneStatus::YAWING &&
-                 drone_status_ != DroneStatus::HOVER_AVOIDING) {
-        next_goal.yaw = previous_yaw;
-        next_goal.dyaw = 0.0;
+      if (par.minco_yaw_c2_smooth) {
+        // Unified C2 yaw governor (default OFF): pick a target yaw-rate by state, then JERK-LIMIT the
+        // change in dyaw (|d(dyaw)| <= minco_yaw_accel_max*dc). dyaw stays continuous across the
+        // spin/freeze/travel switches (the original branches step dyaw 0->w_max in one tick = infinite
+        // yaw-jerk) and low-speed uses hysteresis instead of an atan2-jitter freeze. Cert-orthogonal:
+        // yaw enters no safety geometry, so this cannot affect P(collision)<=eps.
+        double target_dyaw = 0.0;
+        const bool spinning = (replanning_failure_count > par.yaw_spinning_threshold &&
+                               drone_status_ != DroneStatus::HOVER_AVOIDING);
+        if (spinning) {
+          target_dyaw = par.yaw_spinning_dyaw;
+        } else if (drone_status_ == DroneStatus::TRAVELING || drone_status_ == DroneStatus::GOAL_SEEN) {
+          double speed_xy = std::hypot(next_goal.vel(0), next_goal.vel(1));
+          if (speed_xy >= par.minco_yaw_lowspeed_lo) {       // else hold heading (target 0) -> dyaw ramps to 0
+            double desired = std::atan2(next_goal.vel(1), next_goal.vel(0));
+            target_dyaw = angle_wrap(desired - previous_yaw) / par.dc;
+          }
+        }
+        target_dyaw = clamp_scalar(target_dyaw, -par.w_max, par.w_max);          // yaw-rate limit
+        const double dmax = par.minco_yaw_accel_max * par.dc;                    // yaw-accel limit
+        double dyaw = clamp_scalar(target_dyaw, previous_dyaw - dmax, previous_dyaw + dmax);
+        next_goal.dyaw = dyaw;
+        next_goal.yaw = previous_yaw + dyaw * par.dc;
+        previous_yaw = next_goal.yaw; previous_dyaw = dyaw;
       } else {
-        // get_desired_yaw (TRAVELING/GOAL_SEEN speed-direction branch).
-        get_desired_yaw_traveling(next_goal);
+        if (replanning_failure_count > par.yaw_spinning_threshold &&
+            drone_status_ != DroneStatus::HOVER_AVOIDING) {
+          next_goal.yaw = previous_yaw + par.yaw_spinning_dyaw * par.dc;
+          next_goal.dyaw = par.yaw_spinning_dyaw;
+          previous_yaw = next_goal.yaw;
+        } else if (local_plan.size() < 5 && drone_status_ != DroneStatus::YAWING &&
+                   drone_status_ != DroneStatus::HOVER_AVOIDING) {
+          next_goal.yaw = previous_yaw;
+          next_goal.dyaw = 0.0;
+        } else {
+          // get_desired_yaw (TRAVELING/GOAL_SEEN speed-direction branch).
+          get_desired_yaw_traveling(next_goal);
+        }
+        next_goal.dyaw = clamp_scalar(next_goal.dyaw, -par.w_max, par.w_max);
       }
-      next_goal.dyaw = clamp_scalar(next_goal.dyaw, -par.w_max, par.w_max);
     } else {
       next_goal.yaw = previous_yaw;
       next_goal.dyaw = 0.0;
+      previous_dyaw = 0.0;
     }
     return {true, next_goal};
   }

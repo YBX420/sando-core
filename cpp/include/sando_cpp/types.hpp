@@ -673,6 +673,9 @@ struct Parameters {
   bool minco_use_topology = false;     // True -> deterministic H-signature passing-side seed
   bool minco_deficit_cert = false;     // True -> exact continuous-time Bernstein deficit mover gate (S3); default OFF = byte-identical
   bool minco_recovery_smooth_brake = false;  // True -> recovery brake = min-jerk decel from committed (v,a) (no instant-zero C1 break); default OFF
+  bool minco_yaw_c2_smooth = false;        // True -> jerk-limited C2 yaw governor (no yaw-rate step / freeze-spin dyaw jumps); default OFF
+  double minco_yaw_accel_max = 6.0;        // yaw-accel limit (rad/s^2) for the C2 yaw governor
+  double minco_yaw_lowspeed_lo = 0.05;     // below this xy speed, hold heading (no atan2 jitter); governor ramps dyaw->0
   // retime-on-overshoot: a pure velocity/acceleration overshoot is collision-SAFE; instead of the
   // gatekeeper holding (braking to 0 -> large average-speed loss), dilate the committed setpoints so
   // EXECUTED speed respects v_max (fly the same path a bit slower). Clearance/hard violations still
