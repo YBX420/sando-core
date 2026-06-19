@@ -88,3 +88,8 @@ add_test(NAME bernstein_cert COMMAND test_bernstein_cert)
 # real-time, no liveness regression on easy cases, and ON-valid trajectories are cert-clean.
 add_executable(test_deficit_gate test/test_deficit_gate.cpp)
 add_test(NAME deficit_gate COMMAND test_deficit_gate)
+
+# Smooth recovery brake (minco_recovery_smooth_brake) — closed-loop on the real SANDO::recovery_yield:
+# head-on falls back to instant stop (safe), lateral/forward-open smooths (jerk 2.5->~0), never regresses.
+add_executable(test_recovery_closedloop test/test_recovery_closedloop.cpp)
+add_test(NAME recovery_closedloop COMMAND test_recovery_closedloop)
