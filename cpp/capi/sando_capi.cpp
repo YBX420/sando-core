@@ -87,6 +87,7 @@ SANDO_API void params_set_bool(void* ph, const char* name, int v) {
   B(static_heat_exclude_dynamic); B(use_soft_cost_obstacles); B(use_dynamic_factor);
   B(inflate_unknown_boundary); B(using_variable_elimination); B(skip_initial_yawing);
   B(minco_use_topology); B(minco_retime_overshoot); B(recovery_enabled); B(inflate_walls_by_body);
+  B(minco_deficit_cert);
   B(use_spacetime_corridor); B(use_st_graph); B(minco_pass_behind);
   B(force_goal_z); B(debug_verbose); B(ignore_other_trajs); B(hover_avoidance_enabled);
   B(hover_avoidance_2d);

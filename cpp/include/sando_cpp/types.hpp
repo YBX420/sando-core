@@ -671,6 +671,7 @@ struct Parameters {
   // every golden byte-identical; the deterministic certificate-first stack activates only when set.
   double minco_time_budget_ms = 0.0;   // >0 -> hard per-replan compute deadline for plan_minco
   bool minco_use_topology = false;     // True -> deterministic H-signature passing-side seed
+  bool minco_deficit_cert = false;     // True -> exact continuous-time Bernstein deficit mover gate (S3); default OFF = byte-identical
   // retime-on-overshoot: a pure velocity/acceleration overshoot is collision-SAFE; instead of the
   // gatekeeper holding (braking to 0 -> large average-speed loss), dilate the committed setpoints so
   // EXECUTED speed respects v_max (fly the same path a bit slower). Clearance/hard violations still

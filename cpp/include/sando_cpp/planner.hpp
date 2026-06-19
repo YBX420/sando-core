@@ -1136,6 +1136,7 @@ class SANDO {
     opt.est_pos_err  = par.minco_est_pos_err;
     opt.est_vel_err  = par.minco_est_vel_err;
     opt.tau_trust    = par.minco_tau_trust;
+    opt.minco_deficit_cert = par.minco_deficit_cert;   // S3 continuous-time deficit mover gate (default OFF)
     // gatekeeper / anytime: hard compute deadline + deterministic topology seed (mirrors
     // planner.py). Both default OFF -> behaviour unchanged. plan_minco returns only certified-
     // feasible trajectories within the budget; an uncertified solve fails the valid gate below
