@@ -672,6 +672,7 @@ struct Parameters {
   double minco_time_budget_ms = 0.0;   // >0 -> hard per-replan compute deadline for plan_minco
   bool minco_use_topology = false;     // True -> deterministic H-signature passing-side seed
   bool minco_deficit_cert = false;     // True -> exact continuous-time Bernstein deficit mover gate (S3); default OFF = byte-identical
+  bool minco_recovery_smooth_brake = false;  // True -> recovery brake = min-jerk decel from committed (v,a) (no instant-zero C1 break); default OFF
   // retime-on-overshoot: a pure velocity/acceleration overshoot is collision-SAFE; instead of the
   // gatekeeper holding (braking to 0 -> large average-speed loss), dilate the committed setpoints so
   // EXECUTED speed respects v_max (fly the same path a bit slower). Clearance/hard violations still

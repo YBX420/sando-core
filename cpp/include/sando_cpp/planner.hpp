@@ -1304,6 +1304,45 @@ class SANDO {
       if (yield_clr < stay_clr) brake = true;
     }
     if (brake) {                                          // brake to rest + HOLD at A (never worsen)
+      // SMOOTH brake (default OFF): a min-jerk deceleration from the committed (pos,vel,accel) to rest,
+      // instead of an instant vel/accel = 0 jump (the C1 break that causes the recovery jerk). GUARDED:
+      // only used if the decel curve does NOT worsen human clearance vs the instant-stop hold; otherwise
+      // fall through to the original (proven) instant stop. Flag OFF -> byte-identical.
+      if (par.minco_recovery_smooth_brake && local_A.vel.norm() > 0.05) {
+        const double vmag = local_A.vel.norm();
+        const double a_dec = 2.0;                                  // conservative decel (m/s^2)
+        const double Tb = std::max(dc * 2.0, vmag / a_dec);
+        Eigen::Vector3d stop = local_A.pos + local_A.vel * (0.5 * Tb);   // natural coast-to-rest point
+        Eigen::MatrixXd wp(2, 3); wp.row(0) = local_A.pos.transpose(); wp.row(1) = stop.transpose();
+        Eigen::VectorXd Tv(1); Tv(0) = Tb;
+        MinjerkTraj bmj(wp, Tv, local_A.vel, local_A.accel,
+                        Eigen::Vector3d::Zero(), Eigen::Vector3d::Zero());
+        double stay_clr = reach_avoid_clearance(local_A.pos, humans, 0.0, horizon);
+        double brake_clr = 1e18;
+        for (int s = 0; s <= 12; ++s) {
+          double tl = bmj.t_end * s / 12.0;
+          brake_clr = std::min(brake_clr, reach_avoid_clearance(bmj.eval(tl), humans, tl, 0.0));
+        }
+        if (brake_clr >= stay_clr) {                              // decel no worse than holding -> smooth it
+          int n = std::max(2, static_cast<int>(std::ceil((horizon + Tb) / dc)));
+          for (int i = 0; i < n; ++i) {
+            double tl = (i + 1) * dc;
+            RobotState s; s.t = A_time_local + tl;
+            if (tl < bmj.t_end) {
+              s.pos = bmj.eval_deriv(tl, 0); s.vel = bmj.eval_deriv(tl, 1);
+              s.accel = bmj.eval_deriv(tl, 2); s.jerk = bmj.eval_deriv(tl, 3);
+            } else {                                              // reached rest -> hold
+              s.pos = bmj.eval_deriv(bmj.t_end, 0);
+              s.vel.setZero(); s.accel.setZero(); s.jerk.setZero();
+            }
+            setpoints.push_back(s);
+          }
+          goal_setpoints = setpoints; last_minco_traj = std::make_shared<MinjerkTraj>(bmj);
+          cps = bmj.control_points(); pwp_to_share = minjerk_to_pwp(bmj, A_time_local);
+          successful_factor = 1.0; cvx_decomp_time = 0.0; return true;
+        }
+        // else: smooth decel would worsen clearance -> fall through to the safe instant stop
+      }
       int n = std::max(2, static_cast<int>(std::ceil(horizon / dc)));
       for (int i = 0; i < n; ++i) {
         RobotState s; s.t = A_time_local + (i + 1) * dc; s.pos = local_A.pos;
