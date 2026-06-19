@@ -83,3 +83,8 @@ add_test(NAME dyntraj_labelset COMMAND test_dyntraj_labelset)
 # self-contained: cross-checks the certificate vs dense brute-force, asserts no false-certify.
 add_executable(test_bernstein_cert test/test_bernstein_cert.cpp)
 add_test(NAME bernstein_cert COMMAND test_bernstein_cert)
+
+# S3 deficit certificate wired as the mover GATE (opt.minco_deficit_cert) — OFF vs ON integration:
+# real-time, no liveness regression on easy cases, and ON-valid trajectories are cert-clean.
+add_executable(test_deficit_gate test/test_deficit_gate.cpp)
+add_test(NAME deficit_gate COMMAND test_deficit_gate)

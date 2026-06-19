@@ -101,6 +101,20 @@ inline void subdiv10(const std::array<Iv, 11>& b, std::array<Iv, 11>& L, std::ar
   }
 }
 
+// Left sub-curve on [0,u] of a degree-10 Bernstein coeff vector (de Casteljau at u, left edge):
+// used to enforce a MOVING obstacle only up to the trusted horizon t_hi.
+inline std::array<Iv, 11> left_subcurve(const std::array<Iv, 11>& b, double u) {
+  std::array<Iv, 11> cur = b, L;
+  const Iv U = iv_pt(u), Um = iv_sub(iv_pt(1.0), U);   // 1-u, outward-rounded
+  L[0] = cur[0];
+  for (int lvl = 1; lvl <= 10; ++lvl) {
+    for (int k = 0; k <= 10 - lvl; ++k)
+      cur[k] = iv_add(iv_mul(Um, cur[k]), iv_mul(U, cur[k + 1]));
+    L[lvl] = cur[0];
+  }
+  return L;
+}
+
 // Worst deficit upper bound over a sub-interval, ADAPTIVELY subdividing (de Casteljau)
 // until the Bernstein hull certifies the sub-interval (hull<=0) or maxdepth is hit.
 // Subdivision tightens the hull to the true polynomial (2^{-2r} convergence), so a
@@ -120,20 +134,25 @@ inline double seg_worst(const std::array<Iv, 11>& S, const Iv& R2, int depth, in
 // Whole committed trajectory vs ONE spherical obstacle whose centre is the analytic
 // polynomial  c(t) = c0 + vel*t + 0.5*acc*t^2  (t in the trajectory's own time frame;
 // vel=acc=0 => static).  R = total inflated radius (incl. r_body + d_safe + q_conformal).
-// maxdepth = max de Casteljau subdivision per segment (adaptive: stops early once certified).
+// t_hi_in = enforce only up to this absolute trajectory time (MOVING obstacle -> t_start+tau_trust;
+// static / default +inf -> whole trajectory).  maxdepth = max de Casteljau subdivision per segment.
 inline Verdict certify_traj_vs_sphere(const MinjerkTraj& tr, const Eigen::Vector3d& c0,
                                       const Eigen::Vector3d& vel, const Eigen::Vector3d& acc,
-                                      double R, int maxdepth = 16) {
+                                      double R, double t_hi_in = std::numeric_limits<double>::infinity(),
+                                      int maxdepth = 16) {
   static const long C5[6] = {1, 5, 10, 10, 5, 1};
   static const long C10[11] = {1, 10, 45, 120, 210, 252, 210, 120, 45, 10, 1};
   const auto& C2B = C2B_int();
   const Iv R2 = iv_mul(iv_pt(R), iv_pt(R));
+  const double t_hi = std::min(t_hi_in, tr.t_end);
 
   double worst_hi = -std::numeric_limits<double>::infinity();  // max over segs,k of b_hi_k
   bool certified = true;
 
   for (int i = 0; i < tr.M; ++i) {
     const double Ti = tr.T(i), u0 = tr.cum(i);
+    const double seg_hi = u0 + Ti;
+    if (u0 >= t_hi) continue;   // segment entirely beyond the trusted horizon -> not enforced
     // interval powers D[j] = Ti^j, j=0..5
     std::array<Iv, 6> D;
     D[0] = iv_pt(1.0);
@@ -185,8 +204,15 @@ inline Verdict certify_traj_vs_sphere(const MinjerkTraj& tr, const Eigen::Vector
       }
     }
 
-    // adaptive de Casteljau subdivision tightens the deg-10 hull to the true deficit.
-    const double sw = seg_worst(S, R2, 0, maxdepth);
+    // adaptive de Casteljau subdivision tightens the deg-10 hull to the true deficit;
+    // clip the straddling segment to the trusted horizon (moving obstacles enforced only to t_hi).
+    std::array<Iv, 11> Suse = S;
+    if (seg_hi > t_hi) {
+      double s_cut = (t_hi - u0) / Ti;
+      if (s_cut > 1.0) s_cut = 1.0; else if (s_cut < 0.0) s_cut = 0.0;
+      Suse = left_subcurve(S, s_cut);
+    }
+    const double sw = seg_worst(Suse, R2, 0, maxdepth);
     if (sw > worst_hi) worst_hi = sw;
   }
   certified = (worst_hi <= 0.0);

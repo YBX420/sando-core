@@ -35,6 +35,7 @@
 #include "sando_cpp/minco_cost_grad.hpp"     // minco_cost_grad + CostGradOptParams + AlmState
 #include "sando_cpp/local_opt_hardalm.hpp"   // seg_normals / trust_mask / alm_constraints / pred_margin / eps_track / hard_d_safe / is_moving
 #include "sando_cpp/minjerk_traj.hpp"
+#include "sando_cpp/bernstein_cert.hpp"      // S3 exact continuous-time deficit certificate (mover gate, default OFF)
 #include "sando_cpp/obstacles.hpp"
 #include "sando_cpp/avoid_config.hpp"        // AvoidParams + resolve_mode
 #include "sando_cpp/st_graph.hpp"            // space-time front-end (ST-graph speed planner, default OFF)
@@ -102,6 +103,11 @@ struct PlanOptParams {
   double v_max_human = 0.0;
   double est_pos_err = 0.0;
   double est_vel_err = 0.0;
+  // S3 continuous-time Bernstein deficit certificate as an ADDITIONAL sound mover gate (default OFF
+  // => byte-identical: the sampled hard_clearance_trusted gate is unchanged). ON: each SPHERE hard
+  // obstacle must ALSO pass the exact continuous-time certificate (kills between-sample graze accepts).
+  bool   minco_deficit_cert = false;
+
   // Soft flight-corridor (SFC): tube radius + weight. 0 => OFF (golden-safe). The tube CENTRES
   // (seed/guide waypoints) are wired in alm_solve where q0 is known.
   double sfc_radius  = 0.0;
@@ -917,6 +923,29 @@ inline MincoCandidate optimise_one_minco(const Eigen::MatrixXd& seed_path,
 
   double extra = pred_margin(opt.hard_alm()) + eps_track(opt.hard_alm());
   bool hard_violation = (!safety_obs.empty()) && (max_breach + extra > opt.clearance_tol);
+  // S3 continuous-time certificate (default OFF): an ADDITIONAL sound gate for SPHERE hard obstacles.
+  // The sampled gate above can FALSE-ACCEPT a between-sample graze (esp. movers); the exact Bernstein
+  // deficit certificate rejects it. Same trusted horizon (mover -> tau_trust, static -> full); R matches
+  // the sampled threshold: safe <=> ||p-c(t)|| >= radius + d_safe + extra - clearance_tol for all t.
+  // Non-sphere hard obstacles keep the sampled verdict.
+  if (opt.minco_deficit_cert && !hard_violation && !safety_obs.empty()) {
+    const double R_extra = extra - opt.clearance_tol;
+    const double tau = opt.hard_alm().tau_trust;
+    for (const Obstacle* o : safety_obs) {
+      const auto* s = dynamic_cast<const SphereObstacle*>(o);
+      if (!s) continue;                                   // non-sphere -> keep the sampled gate verdict
+      auto it = avoid_cfg.find(s->class_name);
+      const double d_safe = (it != avoid_cfg.end()) ? it->second.d_safe : 0.8;
+      const double Rcert = s->radius + d_safe + R_extra;
+      if (Rcert <= 0.0) continue;
+      const bool moving = (s->vel.norm() > 0.0 || s->accel.norm() > 0.0);
+      const double t_hi = moving ? std::min(tr.t_end, tr.t_start + tau) : tr.t_end;
+      if (!bcert::certify_traj_vs_sphere(tr, s->centre0, s->vel, s->accel, Rcert, t_hi).certified) {
+        hard_violation = true;
+        break;
+      }
+    }
+  }
   if (hard_violation) {
     feas.trajectory_valid = false;
     feas.failure_reason = "clearance_violation";
