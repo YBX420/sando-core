@@ -141,7 +141,7 @@ MetaUrban GT class → conformal Mondrian label 码 → C++ `DynTraj::derived_cl
 - **消融中 static 未在时限内到达终点**:静障是 **soft 场**(惩罚而非硬禁),在孤立窄走廊里障碍正中时无人机"挤过去"很慢(但确实绕过:swerve 0.84m、clearance 0.97m)——这是 soft≠hard 的正确体现。**全量 demo 里静障经 heat-A* 地图干净绕过**(5/5 都到达,静障间隙 0.37–0.61m)。
 - **无人机为运动学受控实体**(非 MetaUrban 物理 agent):因 MetaUrban 原生无飞行 agent(连行人都是轮式 BulletVehicle)。算法控制与碰撞度量均由本闭环精确计算,不依赖 MetaUrban 的轮式物理。
 - **感知用 GT**(按要求,暂不接检测模型)。`run_demo.py` 的 `classify()` 按 isinstance 读 MetaUrban 真值类。
-- **渲染**:核心 demo 走 headless(稳),artifact 为 matplotlib 俯视图;MetaUrban 离屏渲染(挂 drone/animal glb 出视频)留作后续。
+- **渲染**:核心 demo 走 headless(稳),artifact 为 matplotlib 俯视图(`drone_topdown.png` 全场景 + `ablation.png` 分类对比)。**已验证 MetaUrban 的 BEV top-down 渲染在本机 headless 可用**(`env.render(mode="topdown", window=False)` 返回 (800,800,3) 数组),即下一步可直接出"无人机在真实 MetaUrban 场景里穿行 + 真实动物 glb"的渲染视频/GIF(只差世界→BEV 像素叠加的标定),留作快速后续。
 
 ---
 
