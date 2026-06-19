@@ -379,14 +379,28 @@ class DynTraj {
     return std::find(label_set.begin(), label_set.end(), 0) != label_set.end();
   }
 
-  // hard/soft class for avoidance: ① conformal label-set primary — human in set -> "human" (hard),
-  // else "wall" (soft); ② EMPTY set -> legacy id heuristic (id>=200 -> "wall"/soft, else "human"/hard).
+  // per-class avoidance class from the conformal label-set (Mondrian codes 0=HUMAN,1=VEHICLE_LIKE,2=OTHER).
+  // ① label-set primary (overrides id heuristic, both directions):
+  //      human(0) ∈ set -> "human" (hard, d_safe 0.8) — human dominates, fail-safe.
+  //      else, non-human set -> per-class behaviour, failing toward the LARGER clearance when ambiguous:
+  //        OTHER(2)        -> "animal"  (hard, d_safe 0.7 — erratic mover, treated unknown->hard per spec §5)
+  //        VEHICLE_LIKE(1) -> "vehicle" (hard, d_safe 0.5 — fast but predictable mover)
+  //        neither         -> "wall"    (soft EGO field)
+  // ② EMPTY set -> legacy id heuristic (id>=200 -> "wall"/soft, else "human"/hard).
   // NOTE: open-ended id>=200 (not Python's bounded [200,300)) is a deliberate C++ choice so id>=300
   // walls stay soft (the old [200,300) marked them HARD -> stall); see docs/dyntraj-labelset-abi.md.
-  // This is the STATIC class; a fast "wall" is later reclassified to a hard dynamic agent in the
-  // planner snapshot (needs speed + params), so it is not decided here.
+  // A static structure passed as a fast "wall" is later reclassified to a hard dynamic agent in the
+  // planner snapshot (needs speed + params); vehicle/animal are already hard here.
   std::string derived_class() const {
-    if (!label_set.empty()) return human_in_set() ? "human" : "wall";
+    if (!label_set.empty()) {
+      if (human_in_set()) return "human";
+      auto has = [&](int code) {
+        return std::find(label_set.begin(), label_set.end(), code) != label_set.end();
+      };
+      if (has(2)) return "animal";
+      if (has(1)) return "vehicle";
+      return "wall";
+    }
     return (id >= 200) ? "wall" : "human";
   }
 

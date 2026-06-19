@@ -984,10 +984,14 @@ class SANDO {
           out.push_back(o.get());
         }
       } else {
+        // hard moving agent: "human" | "vehicle" | "animal" (per-class d_safe looked up downstream by
+        // class_name via avoid_cfg). Preserve the class string so each gets its own clearance; an
+        // unknown/legacy tag falls back to "human" (fail-safe hard, the widest 0.8 d_safe).
         Eigen::Vector3d vel = (k < ovel.size()) ? ovel[k] : Eigen::Vector3d::Zero();
         Eigen::Vector3d acc = (k < oaccel.size()) ? oaccel[k] : Eigen::Vector3d::Zero();
         double rad = 0.5 * sz.maxCoeff();
-        auto o = std::make_shared<SphereObstacle>(c, rad, vel, "human", acc);
+        std::string hard_cls = (cls == "vehicle" || cls == "animal") ? cls : std::string("human");
+        auto o = std::make_shared<SphereObstacle>(c, rad, vel, hard_cls, acc);
         owned.push_back(o);
         out.push_back(o.get());
       }

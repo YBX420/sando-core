@@ -43,13 +43,14 @@ int main() {
   DynTraj b = a;
   check("copied [0,2] -> human", b.human_in_set(), true);
 
-  // --- derived_class(): the shipped hard/soft gating decision ---
-  // label-set primary (overrides id heuristic, both directions)
-  check_cls("id=5  [1]   -> wall(soft)", mk(5,   {1}).derived_class(),    "wall");   // overrides id<200
-  check_cls("id=250 [0]  -> human(hard)", mk(250, {0}).derived_class(),   "human");  // overrides id>=200
-  check_cls("id=5  [2]   -> wall(soft)", mk(5,   {2}).derived_class(),    "wall");
-  check_cls("id=250 [2,0]-> human(hard)", mk(250, {2, 0}).derived_class(), "human");
-  check_cls("id=5  [1,2] -> wall(soft)", mk(5,   {1, 2}).derived_class(), "wall");
+  // --- derived_class(): the shipped per-class gating decision (4-class conformal refinement) ---
+  // label-set primary (overrides id heuristic, both directions). human(0) dominates; non-human maps
+  // OTHER(2)->animal, VEHICLE_LIKE(1)->vehicle, failing toward the larger clearance (animal) when ambiguous.
+  check_cls("id=5  [1]   -> vehicle(hard)", mk(5,   {1}).derived_class(),    "vehicle"); // overrides id<200
+  check_cls("id=250 [0]  -> human(hard)",   mk(250, {0}).derived_class(),    "human");   // overrides id>=200
+  check_cls("id=5  [2]   -> animal(hard)",  mk(5,   {2}).derived_class(),    "animal");
+  check_cls("id=250 [2,0]-> human(hard)",   mk(250, {2, 0}).derived_class(), "human");   // human dominates
+  check_cls("id=5  [1,2] -> animal(hard)",  mk(5,   {1, 2}).derived_class(), "animal");  // ambiguous -> larger clearance
   // empty set -> legacy id heuristic, including the deliberate open-ended id>=200 (boundaries + >=300)
   check_cls("id=5   [] -> human(hard)", mk(5,   {}).derived_class(),  "human");
   check_cls("id=199 [] -> human(hard)", mk(199, {}).derived_class(),  "human");  // boundary just below

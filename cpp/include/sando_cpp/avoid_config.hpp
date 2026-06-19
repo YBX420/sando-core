@@ -21,6 +21,12 @@ inline std::map<std::string, AvoidParams> default_config() {
       // tighter d_safe than a human so a dense crowd is not inflated to infeasibility. The per-class
       // axis is static-structure(soft) vs dynamic-agent(hard), keyed on motion (dynamic_speed_thresh).
       {"dynamic", AvoidParams{"dynamic", "hard", 0.5, 1.0e4}},
+      // per-class conformal refinement (Mondrian VEHICLE_LIKE / OTHER, see DynTraj::derived_class):
+      //   vehicle — a fast but PREDICTABLE mover (car/bike). Hard; tight d_safe like a dynamic agent.
+      //   animal  — an ERRATIC mover (dog/cat/cow/sheep). Hard; wider d_safe than a vehicle (less
+      //             predictable heading) but below a human so a herd does not inflate to infeasibility.
+      {"vehicle", AvoidParams{"vehicle", "hard", 0.5, 1.0e4}},
+      {"animal", AvoidParams{"animal", "hard", 0.7, 1.0e4}},
   };
 }
 
