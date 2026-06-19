@@ -135,6 +135,27 @@ MetaUrban GT class → conformal Mondrian label 码 → C++ `DynTraj::derived_cl
 
 ---
 
+## 5.4 可视化 / 实时渲染
+
+三种视图(`metaurban/` 下):
+
+| 脚本 | 视图 | 说明 |
+|---|---|---|
+| `run_demo.py` / `ablation.py` | matplotlib 俯视 | headless 最稳,出 `out/drone_topdown.png` / `out/ablation.png` |
+| `render_live.py --no_show --mp4` | **BEV 俯视实时/录像** | MetaUrban 原生 BEV(原生人群)+ cv2 叠加无人机/关卡;`--no_show` 出 `out/drone_live.mp4` |
+| `render_3d_video.py --live` | **真实 3D 第三人称实时** | **离屏 GPU 渲 3D + 真实 drone/动物 glb 网格 + cv2 实时窗口**;`--mp4` 录 `out/drone_3d.mp4` |
+
+**关键发现(踩坑)**:本机 `DISPLAY=:1` 是**软件 GL(llvmpipe)虚拟显示**——MetaUrban 的 onscreen 3D 窗口(`use_render=True`)着色器地形画不出 → **灰屏**(HUD/fps 能画)。但**离屏 RGB 相机渲染走 GPU/EGL 正常出 3D**。故实时 3D 方案 = **离屏 GPU 渲 3D 帧 → `cv2.imshow` 实时窗口**(cv2 在 :1 是 2D blit,可用),~16fps。无人机/动物用 `custom_glb_object.py`(子类化 TrafficObject 挂 glb,kinematic `set_position` 移动)spawn 为真实 3D 对象。
+- **`cv2` 必须在 `panda3d/metaurban` 之前 import**(否则 GL/X 库符号冲突段错误)。
+- 实时 3D 在**有 GPU 硬件显示的机器**上也能直接 `use_render=True` 开原生 3D 窗口(非软件 GL 时不灰)。
+
+实时 3D 命令:
+```bash
+cd /media/boxuan/Data21/projects/metaurban
+DISPLAY=:1 ~/miniconda3/envs/metaurban/bin/python \
+  /media/boxuan/Data21/projects/sando_py/sando-core/metaurban/render_3d_video.py --seed 3 --live --loop_scene
+```
+
 ## 6. 局限与诚实记录
 
 - **快速横穿载具是最紧 case**:纯空间 keep-out 下 seed 7 曾擦碰(-0.32m)。**优化算法**(开 STC 时空走廊 + vehicle d_safe 0.5→0.6 + dyn 膨胀 0.2 + 感知半径 30m)后**5/5 seed 全部零碰撞**,但 seed 7 载具间隙仅 +0.39m(最紧)。极限密度下后续可接 speed-scaled 膨胀 / 更长预测窗进一步加裕度。
