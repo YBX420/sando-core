@@ -25,7 +25,7 @@ inline std::map<std::string, AvoidParams> default_config() {
       //   vehicle — a fast but PREDICTABLE mover (car/bike). Hard; tight d_safe like a dynamic agent.
       //   animal  — an ERRATIC mover (dog/cat/cow/sheep). Hard; wider d_safe than a vehicle (less
       //             predictable heading) but below a human so a herd does not inflate to infeasibility.
-      {"vehicle", AvoidParams{"vehicle", "hard", 0.5, 1.0e4}},
+      {"vehicle", AvoidParams{"vehicle", "hard", 0.6, 1.0e4}},
       {"animal", AvoidParams{"animal", "hard", 0.7, 1.0e4}},
   };
 }

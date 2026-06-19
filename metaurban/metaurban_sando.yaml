@@ -1,0 +1,72 @@
+# MetaUrban <-> C++ SANDO closed-loop config.
+# Mirrors isaac/isaac_sando.yaml param semantics; tuned for a low-cruise delivery drone
+# weaving a >=50m sidewalk corridor through GT pedestrians / vehicles / animals / static objects.
+planner:
+  sim_env: rviz_only
+  use_hardware: false
+  vehicle_type: uav
+  local_solver: minco
+  global_planner: astar_heat
+  skip_initial_yawing: true
+  use_state_update: true
+  use_heat_map: true
+  dynamic_heat_enabled: true
+  dynamic_as_occupied_current: true
+  static_heat_enabled: true
+  inflation_hgp: 0.45
+  res: 0.3
+  factor_hgp: 1.0
+  horizon: 14.0
+  num_P: 6
+  max_dist_vertexes: 1.0
+  max_num_expansion: 100000
+  hgp_timeout_duration_ms: 1000
+  global_planner_heuristic_weight: 2.0
+  use_free_start: true
+  free_start_factor: 2.0
+  use_free_goal: false
+  dc: 0.02
+  v_max: 6.0
+  a_max: 10.0
+  j_max: 100.0
+  drone_bbox: [0.3, 0.3, 0.3]
+  drone_radius: 0.25
+  minco_w_time: 2500.0
+  minco_retime_overshoot: true
+  minco_epsilon_track: 0.0
+  # static = SOFT EGO field, but inflate it by the drone body + a margin so the PLAN keeps real
+  # clearance and the flown drone does not graze static structure (the per-class "static" behaviour
+  # stays soft/route-around, just not graze-tolerant).
+  inflate_walls_by_body: true
+  minco_wall_margin: 0.3
+  minco_pass_behind: true          # crossing-agent: yield to the side the agent is leaving
+  # per-class slow-down near MOVERS (human/vehicle/animal): keep speed sane in the crowd
+  minco_human_slow_vmax: 2.0
+  minco_human_slow_near: 3.0
+  minco_human_slow_far: 9.0
+  # dynamic obstacle handling: a GT mover above this speed is treated as a hard dynamic agent
+  dynamic_speed_thresh: 0.15
+  dyn_base_inflation_m: 0.2
+  # operating box: low cruise over a long sidewalk corridor
+  z_min: 0.6
+  z_max: 3.0
+  default_goal_z: 1.5
+  force_goal_z: true
+  goal_radius: 1.0
+  goal_seen_radius: 3.0
+  recovery_enabled: true           # freeze-yield backup on a failed forward replan
+  # Safe-Interval SPACE-TIME corridor: reason about where the drone can be AND WHEN, carving a
+  # static-free + mover-free time window through fast crossing traffic — the right tool for a 4.5 m/s
+  # vehicle cutting across the corridor (pure spatial keep-out can be caught out by bad timing).
+  use_spacetime_corridor: true
+  stc_d_safe_dyn: 0.8
+  stc_Th: 2.5
+  stc_time_dt: 0.1
+
+loop:
+  headless: true
+  replan_dt: 0.1                   # planner cadence (s)
+  t_max: 90.0                      # wall-time budget for the episode (s)
+  sense_cull_r: 30.0               # only feed obstacles within this radius of the drone
+  cruise_z: 1.5                    # drone cruise altitude (m)
+  min_goal_dist: 50.0              # acceptance: start->goal must be >= this

@@ -18,6 +18,11 @@ __pycache__/
 isaac/isaac_flown.csv
 isaac/isaac_flown.png
 
+# MetaUrban demo run outputs: ignore bulk CSVs + per-seed dirs; KEEP the headline PNGs/JSON
+# (out/drone_topdown.png, out/ablation.png, out/summary.json, out/ablation.json are force-added)
+metaurban/out/*.csv
+metaurban/out_s*/
+
 # editor + local logs
 .vscode/
 *.log

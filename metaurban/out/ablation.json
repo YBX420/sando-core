@@ -1,0 +1,40 @@
+{
+  "static": {
+    "class": "static",
+    "label": null,
+    "reached": false,
+    "min_clearance_m": 0.974,
+    "max_lateral_swerve_m": 0.843,
+    "expected_d_safe": "soft"
+  },
+  "pedestrian": {
+    "class": "pedestrian",
+    "label": [
+      0
+    ],
+    "reached": true,
+    "min_clearance_m": 0.918,
+    "max_lateral_swerve_m": 2.346,
+    "expected_d_safe": 0.8
+  },
+  "vehicle": {
+    "class": "vehicle",
+    "label": [
+      1
+    ],
+    "reached": true,
+    "min_clearance_m": 0.714,
+    "max_lateral_swerve_m": 1.923,
+    "expected_d_safe": 0.6
+  },
+  "animal": {
+    "class": "animal",
+    "label": [
+      2
+    ],
+    "reached": true,
+    "min_clearance_m": 0.835,
+    "max_lateral_swerve_m": 2.248,
+    "expected_d_safe": 0.7
+  }
+}

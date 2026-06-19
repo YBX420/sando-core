@@ -1,0 +1,33 @@
+{
+  "seed": 3,
+  "reached": true,
+  "collided": false,
+  "t_end": 15.82,
+  "travelled_m": 56.0,
+  "goal_dist_m": 56.0,
+  "min_clearance_m": 0.607,
+  "per_class_min_clearance_m": {
+    "static": 0.607,
+    "pedestrian": 1.237,
+    "vehicle": 4.928,
+    "animal": 4.202
+  },
+  "replan_failures": 27,
+  "n_native_objs": 309,
+  "gauntlet": {
+    "pedestrian": 1,
+    "vehicle": 1,
+    "animal": 4,
+    "static": 1
+  },
+  "start": [
+    135.0,
+    -15.9,
+    1.5
+  ],
+  "goal": [
+    81.4,
+    0.5,
+    1.5
+  ]
+}
