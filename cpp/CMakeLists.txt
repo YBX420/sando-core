@@ -78,3 +78,8 @@ add_test(NAME obstacle_tracker COMMAND test_obstacle_tracker ${CMAKE_CURRENT_SOU
 # DynTraj conformal label-set primitive (human_in_set truth table) — self-contained, no golden file.
 add_executable(test_dyntraj_labelset test/test_dyntraj_labelset.cpp)
 add_test(NAME dyntraj_labelset COMMAND test_dyntraj_labelset)
+
+# S3 exact continuous-time conformal-Bernstein deficit certificate (bernstein_cert.hpp) —
+# self-contained: cross-checks the certificate vs dense brute-force, asserts no false-certify.
+add_executable(test_bernstein_cert test/test_bernstein_cert.cpp)
+add_test(NAME bernstein_cert COMMAND test_bernstein_cert)
