@@ -219,5 +219,129 @@ inline Verdict certify_traj_vs_sphere(const MinjerkTraj& tr, const Eigen::Vector
   return {certified, -worst_hi};
 }
 
+// ============================================================================
+// PLANNER-AGNOSTIC core (any-degree piecewise Bernstein).  ANY planner feeds its
+// committed trajectory as per-segment position Bernstein control points + timing;
+// the SAME continuous-time conformal deficit certificate applies.  MINCO (quintic)
+// and EGO-Planner (cubic uniform B-spline -> per-segment Bezier) both use this —
+// the literal demonstration of the planner-agnostic certified safety layer.
+// ============================================================================
+struct BSeg {                       // position Bernstein control points (degree = bern.size()-1)
+  std::vector<Eigen::Vector3d> bern;
+  double t0;                        // wall-clock segment start (trajectory's own time frame)
+  double dur;                       // segment duration
+};
+
+inline long g_binom(int n, int k) {
+  if (k < 0 || k > n) return 0;
+  long r = 1; for (int i = 0; i < k; ++i) r = r * (n - i) / (i + 1); return r;
+}
+inline std::vector<Iv> g_elevate(const std::vector<Iv>& b) {            // deg d -> d+1
+  const int d = static_cast<int>(b.size()) - 1;
+  std::vector<Iv> o(d + 2, Iv{0.0, 0.0});
+  for (int k = 0; k <= d + 1; ++k) {
+    Iv t{0.0, 0.0}, r{0.0, 0.0};
+    if (k >= 1) t = iv_mul(iv_rat(k, d + 1), b[k - 1]);
+    if (k <= d) r = iv_mul(iv_rat(d + 1 - k, d + 1), b[k]);
+    o[k] = iv_add(t, r);
+  }
+  return o;
+}
+inline std::vector<Iv> g_square(const std::vector<Iv>& w) {             // deg n -> deg 2n (Chu-Vandermonde)
+  const int n = static_cast<int>(w.size()) - 1;
+  std::vector<Iv> S(2 * n + 1, Iv{0.0, 0.0});
+  for (int k = 0; k <= 2 * n; ++k) {
+    Iv acc{0.0, 0.0};
+    for (int i = std::max(0, k - n); i <= std::min(n, k); ++i) {
+      Iv coeff = iv_rat(g_binom(n, i) * g_binom(n, k - i), g_binom(2 * n, k));
+      acc = iv_add(acc, iv_mul(coeff, iv_mul(w[i], w[k - i])));
+    }
+    S[k] = acc;
+  }
+  return S;
+}
+inline void g_subdiv(const std::vector<Iv>& b, std::vector<Iv>& L, std::vector<Iv>& R) {  // midpoint, deg m
+  const int m = static_cast<int>(b.size()) - 1;
+  std::vector<Iv> cur = b; L.assign(m + 1, Iv{0.0, 0.0}); R.assign(m + 1, Iv{0.0, 0.0});
+  L[0] = cur[0]; R[m] = cur[m];
+  for (int lvl = 1; lvl <= m; ++lvl) {
+    for (int k = 0; k <= m - lvl; ++k) cur[k] = iv_mul(iv_rat(1, 2), iv_add(cur[k], cur[k + 1]));
+    L[lvl] = cur[0]; R[m - lvl] = cur[m - lvl];
+  }
+}
+inline std::vector<Iv> g_left_subcurve(const std::vector<Iv>& b, double u) {              // [0,u], deg m
+  const int m = static_cast<int>(b.size()) - 1;
+  std::vector<Iv> cur = b, L(m + 1, Iv{0.0, 0.0});
+  const Iv U = iv_pt(u), Um = iv_sub(iv_pt(1.0), U);
+  L[0] = cur[0];
+  for (int lvl = 1; lvl <= m; ++lvl) {
+    for (int k = 0; k <= m - lvl; ++k) cur[k] = iv_add(iv_mul(Um, cur[k]), iv_mul(U, cur[k + 1]));
+    L[lvl] = cur[0];
+  }
+  return L;
+}
+inline double g_seg_worst(const std::vector<Iv>& S, const Iv& R2, int depth, int maxdepth) {
+  double hull = -std::numeric_limits<double>::infinity();
+  for (const auto& s : S) { const double h = rup(R2.hi - s.lo); if (h > hull) hull = h; }
+  if (hull <= 0.0 || depth >= maxdepth) return hull;
+  std::vector<Iv> L, R; g_subdiv(S, L, R);
+  return std::max(g_seg_worst(L, R2, depth + 1, maxdepth), g_seg_worst(R, R2, depth + 1, maxdepth));
+}
+
+// Whole committed PIECEWISE-BERNSTEIN trajectory (any degree per segment) vs ONE sphere obstacle whose
+// centre is c(t)=c0+vel*t+0.5*acc*t^2.  R = total inflated radius (incl. r_body+d_safe+q_conformal).
+// CERTIFIED => ||p(t)-c(t)|| >= R for ALL continuous t in [0, t_hi].
+inline Verdict certify_segments_vs_sphere(const std::vector<BSeg>& segs, const Eigen::Vector3d& c0,
+                                          const Eigen::Vector3d& vel, const Eigen::Vector3d& acc,
+                                          double R, double t_hi_in = std::numeric_limits<double>::infinity(),
+                                          int maxdepth = 16) {
+  const Iv R2 = iv_mul(iv_pt(R), iv_pt(R));
+  double t_end = 0.0;
+  for (const auto& sg : segs) t_end = std::max(t_end, sg.t0 + sg.dur);
+  const double t_hi = std::min(t_hi_in, t_end);
+  double worst_hi = -std::numeric_limits<double>::infinity();
+  for (const auto& sg : segs) {
+    const int n = static_cast<int>(sg.bern.size()) - 1;
+    if (n < 2) continue;                                  // need degree >= 2 for the deg-2 obstacle poly
+    const double t0 = sg.t0, dur = sg.dur, seg_hi = t0 + dur;
+    if (t0 >= t_hi || dur <= 0.0) continue;
+    std::vector<Iv> S(2 * n + 1, Iv{0.0, 0.0});
+    for (int coord = 0; coord < 3; ++coord) {
+      const double c0c = c0(coord), vc = vel(coord), ac = acc(coord);
+      Iv g0 = iv_add(iv_add(iv_pt(c0c), iv_mul(iv_pt(vc), iv_pt(t0))),
+                     iv_mul(iv_pt(0.5 * ac), iv_mul(iv_pt(t0), iv_pt(t0))));
+      Iv g1 = iv_mul(iv_pt(dur), iv_add(iv_pt(vc), iv_mul(iv_pt(ac), iv_pt(t0))));
+      Iv g2 = iv_mul(iv_pt(0.5 * ac), iv_mul(iv_pt(dur), iv_pt(dur)));
+      std::vector<Iv> o = {g0, iv_add(g0, iv_mul(iv_rat(1, 2), g1)), iv_add(iv_add(g0, g1), g2)};  // deg 2
+      while (static_cast<int>(o.size()) - 1 < n) o = g_elevate(o);     // elevate obstacle poly to deg n
+      std::vector<Iv> w(n + 1);
+      for (int k = 0; k <= n; ++k) w[k] = iv_sub(iv_pt(sg.bern[k](coord)), o[k]);
+      std::vector<Iv> Sc = g_square(w);                                // deg 2n
+      for (int k = 0; k <= 2 * n; ++k) S[k] = iv_add(S[k], Sc[k]);
+    }
+    std::vector<Iv> Suse = S;
+    if (seg_hi > t_hi) {
+      double s_cut = (t_hi - t0) / dur;
+      if (s_cut > 1.0) s_cut = 1.0; else if (s_cut < 0.0) s_cut = 0.0;
+      Suse = g_left_subcurve(S, s_cut);
+    }
+    const double sw = g_seg_worst(Suse, R2, 0, maxdepth);
+    if (sw > worst_hi) worst_hi = sw;
+  }
+  return {worst_hi <= 0.0, -worst_hi};
+}
+
+// Convenience: build BSeg list from a MinjerkTraj (degree-5) for the planner-agnostic core.
+inline std::vector<BSeg> minco_to_segments(const MinjerkTraj& tr) {
+  auto cps = tr.control_points();          // M blocks of 6x3 (degree-5 Bernstein)
+  std::vector<BSeg> segs(tr.M);
+  for (int i = 0; i < tr.M; ++i) {
+    BSeg s; s.t0 = tr.cum(i); s.dur = tr.T(i); s.bern.resize(6);
+    for (int k = 0; k < 6; ++k) s.bern[k] = cps[i].row(k).transpose();
+    segs[i] = s;
+  }
+  return segs;
+}
+
 }  // namespace bcert
 }  // namespace sando

@@ -74,6 +74,28 @@ int main() {
   run("mover CA safe",     {-2,  7, 1.5}, {2.0, -0.6, 0}, {0.1, -0.15, 0}, true, 0.5);
   run("mover CA unsafe",   {-2,  7, 1.5}, {2.0, -0.6, 0}, {0.1, -0.15, 0}, false, 0.6);
 
+  // ---- planner-AGNOSTIC core cross-validation: the any-degree certify_segments_vs_sphere on the SAME
+  // MINCO trajectory (via minco_to_segments, degree 5) must give the SAME certified verdict as the
+  // dedicated deg-5 certify_traj_vs_sphere. This validates the general core that EGO-Planner also uses.
+  {
+    auto segs = bcert::minco_to_segments(tr);
+    struct XC { Eigen::Vector3d c0, vel, acc; double R; };
+    XC xs[] = {
+      {{15, 9, 1.5}, Z, Z, 5.0}, {{15, 0, 1.5}, Z, Z, 1.05}, {{15, 0, 4.5}, Z, Z, 1.8},
+      {{6, 9, 1.5}, {1, -1, 0}, Z, 3.0}, {{6, 9, 1.5}, {1, -1, 0}, Z, 4.5},
+      {{-2, 7, 1.5}, {2.0, -0.6, 0}, {0.1, -0.15, 0}, 4.5},
+    };
+    for (auto& x : xs) {
+      auto v5 = bcert::certify_traj_vs_sphere(tr, x.c0, x.vel, x.acc, x.R);
+      auto vg = bcert::certify_segments_vs_sphere(segs, x.c0, x.vel, x.acc, x.R);
+      ++ncase;
+      bool match = (v5.certified == vg.certified);
+      if (!match) ++fails;
+      std::printf("xval R=%5.2f  deg5[cert=%d m=%+.2e]  general[cert=%d m=%+.2e]  %s\n",
+                  x.R, (int)v5.certified, v5.margin, (int)vg.certified, vg.margin, match ? "OK" : "FAIL mismatch");
+    }
+  }
+
   std::printf("\n[bernstein_cert] %d cases, %d fail\n", ncase, fails);
   if (fails == 0) std::printf("ALL PASS\n");
   return fails == 0 ? 0 : 1;
