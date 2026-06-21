@@ -1,0 +1,15 @@
+{
+  "summary": {
+    "n": 0,
+    "reached": 0.0,
+    "collided": 0.0,
+    "stuck": 0.0,
+    "timeout": 0.0,
+    "wall_s": 209.8,
+    "collide_by_class": {},
+    "stuck_eps": [],
+    "collided_eps": [],
+    "timeout_eps": []
+  },
+  "results": []
+}

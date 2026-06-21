@@ -56,6 +56,7 @@ SANDO_API void params_set_double(void* ph, const char* name, double v) {
   D(traj_lifetime); D(alpha_k_value_filtering); D(k_value_factor); D(alpha_filter_dyaw); D(w_max);
   D(minco_time_budget_ms); D(minco_w_time); D(minco_w_vel); D(minco_w_accel);
   D(minco_human_slow_vmax); D(minco_human_slow_near); D(minco_human_slow_far);
+  D(seam_bias_alpha);
   D(minco_sfc_radius); D(minco_w_corridor);
   D(replan_dt); D(dynamic_speed_thresh); D(pred_horizon_s);
   D(minco_q_conformal); D(minco_epsilon_track); D(minco_v_max_human); D(minco_a_max_human);
@@ -88,7 +89,8 @@ SANDO_API void params_set_bool(void* ph, const char* name, int v) {
   B(static_heat_exclude_dynamic); B(use_soft_cost_obstacles); B(use_dynamic_factor);
   B(inflate_unknown_boundary); B(using_variable_elimination); B(skip_initial_yawing);
   B(minco_use_topology); B(minco_retime_overshoot); B(recovery_enabled); B(inflate_walls_by_body);
-  B(minco_deficit_cert); B(minco_recovery_smooth_brake); B(minco_yaw_c2_smooth);
+  B(minco_deficit_cert); B(minco_recovery_smooth_brake); B(minco_recovery_progress); B(minco_yaw_c2_smooth);
+  B(seam_c2_from_state);
   B(use_spacetime_corridor); B(use_st_graph); B(minco_pass_behind);
   B(force_goal_z); B(debug_verbose); B(ignore_other_trajs); B(hover_avoidance_enabled);
   B(hover_avoidance_2d);
@@ -220,6 +222,15 @@ SANDO_API int sando_get_next_goal(void* h, double* out9) {
 SANDO_API int sando_get_drone_status(void* h) {
   try { return static_cast<SANDO*>(h)->get_drone_status(); }
   catch (...) { return 0; }
+}
+
+// seam C2-from-exec-state LPF bias (position part) — the honest tracking offset folded into A_exec.
+// 0 when the flag is off or the drone tracks perfectly; ~the steady-state lag otherwise.
+SANDO_API void sando_get_seam_bias(void* h, double* out3) {
+  try {
+    auto b = static_cast<SANDO*>(h)->get_seam_bias();
+    for (int i = 0; i < 3; ++i) out3[i] = b.pos[i];
+  } catch (...) { for (int i = 0; i < 3; ++i) out3[i] = 0.0; }
 }
 
 // fills out[3*N] with the global path points; returns N (clamped to max_pts).

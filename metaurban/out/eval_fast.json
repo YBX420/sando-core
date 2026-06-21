@@ -1,0 +1,276 @@
+{
+  "summary": {
+    "n": 12,
+    "reached": 0.8333333333333334,
+    "collided": 0.4166666666666667,
+    "stuck": 0.16666666666666666,
+    "timeout": 0.0,
+    "wall_s": 310.6,
+    "collide_by_class": {
+      "static": 4,
+      "pedestrian": 1
+    },
+    "stuck_eps": [
+      7,
+      9
+    ],
+    "collided_eps": [
+      {
+        "ep": 2,
+        "hit": "static",
+        "t": 2.4,
+        "min_clr": -0.564
+      },
+      {
+        "ep": 4,
+        "hit": "static",
+        "t": 5.6,
+        "min_clr": -0.62
+      },
+      {
+        "ep": 7,
+        "hit": "pedestrian",
+        "t": 6.1,
+        "min_clr": -0.037
+      },
+      {
+        "ep": 8,
+        "hit": "static",
+        "t": 1.8,
+        "min_clr": -1.279
+      },
+      {
+        "ep": 10,
+        "hit": "static",
+        "t": 8.1,
+        "min_clr": -0.916
+      }
+    ],
+    "timeout_eps": []
+  },
+  "results": [
+    {
+      "ep": 0,
+      "reached": true,
+      "collided": false,
+      "stuck": false,
+      "timeout": false,
+      "t": 11.5,
+      "min_clr": 0.689,
+      "remaining": 0.0,
+      "max_replan_ms": 71.5,
+      "collide_class": null,
+      "collide_t": null,
+      "n_collide": 0,
+      "per": {
+        "static": 0.69,
+        "pedestrian": 1.5
+      }
+    },
+    {
+      "ep": 1,
+      "reached": true,
+      "collided": false,
+      "stuck": false,
+      "timeout": false,
+      "t": 13.8,
+      "min_clr": 0.178,
+      "remaining": 0.3,
+      "max_replan_ms": 162.7,
+      "collide_class": null,
+      "collide_t": null,
+      "n_collide": 0,
+      "per": {
+        "static": 0.41,
+        "pedestrian": 0.18,
+        "vehicle": 13.24
+      }
+    },
+    {
+      "ep": 2,
+      "reached": true,
+      "collided": true,
+      "stuck": false,
+      "timeout": false,
+      "t": 11.2,
+      "min_clr": -0.564,
+      "remaining": 0.0,
+      "max_replan_ms": 203.9,
+      "collide_class": "static",
+      "collide_t": 2.4,
+      "n_collide": 6,
+      "per": {
+        "static": -0.56,
+        "pedestrian": 1.43,
+        "vehicle": 4.22
+      }
+    },
+    {
+      "ep": 3,
+      "reached": true,
+      "collided": false,
+      "stuck": false,
+      "timeout": false,
+      "t": 13.4,
+      "min_clr": 0.209,
+      "remaining": 0.0,
+      "max_replan_ms": 174.8,
+      "collide_class": null,
+      "collide_t": null,
+      "n_collide": 0,
+      "per": {
+        "static": 0.6,
+        "pedestrian": 0.21
+      }
+    },
+    {
+      "ep": 4,
+      "reached": true,
+      "collided": true,
+      "stuck": false,
+      "timeout": false,
+      "t": 12.8,
+      "min_clr": -0.62,
+      "remaining": 0.6,
+      "max_replan_ms": 93.6,
+      "collide_class": "static",
+      "collide_t": 5.6,
+      "n_collide": 4,
+      "per": {
+        "static": -0.62,
+        "pedestrian": 1.47
+      }
+    },
+    {
+      "ep": 5,
+      "reached": true,
+      "collided": false,
+      "stuck": false,
+      "timeout": false,
+      "t": 9.9,
+      "min_clr": 0.855,
+      "remaining": 0.0,
+      "max_replan_ms": 84.2,
+      "collide_class": null,
+      "collide_t": null,
+      "n_collide": 0,
+      "per": {
+        "pedestrian": 0.86,
+        "static": 1.24,
+        "vehicle": 14.68
+      }
+    },
+    {
+      "ep": 6,
+      "reached": true,
+      "collided": false,
+      "stuck": false,
+      "timeout": false,
+      "t": 9.5,
+      "min_clr": 0.518,
+      "remaining": 0.0,
+      "max_replan_ms": 72.6,
+      "collide_class": null,
+      "collide_t": null,
+      "n_collide": 0,
+      "per": {
+        "static": 0.52,
+        "pedestrian": 0.77,
+        "vehicle": 6.34
+      }
+    },
+    {
+      "ep": 7,
+      "reached": false,
+      "collided": true,
+      "stuck": true,
+      "timeout": false,
+      "t": 15.4,
+      "min_clr": -0.037,
+      "remaining": 25.2,
+      "max_replan_ms": 137.5,
+      "collide_class": "pedestrian",
+      "collide_t": 6.1,
+      "n_collide": 5,
+      "per": {
+        "static": 1.4,
+        "pedestrian": -0.04
+      }
+    },
+    {
+      "ep": 8,
+      "reached": true,
+      "collided": true,
+      "stuck": false,
+      "timeout": false,
+      "t": 10.1,
+      "min_clr": -1.279,
+      "remaining": 0.0,
+      "max_replan_ms": 72.1,
+      "collide_class": "static",
+      "collide_t": 1.8,
+      "n_collide": 7,
+      "per": {
+        "static": -1.28,
+        "pedestrian": 0.85,
+        "vehicle": 12.08
+      }
+    },
+    {
+      "ep": 9,
+      "reached": false,
+      "collided": false,
+      "stuck": true,
+      "timeout": false,
+      "t": 5.1,
+      "min_clr": 1.959,
+      "remaining": 75.0,
+      "max_replan_ms": 0.0,
+      "collide_class": null,
+      "collide_t": null,
+      "n_collide": 0,
+      "per": {
+        "static": 5.9,
+        "pedestrian": 1.96
+      }
+    },
+    {
+      "ep": 10,
+      "reached": true,
+      "collided": true,
+      "stuck": false,
+      "timeout": false,
+      "t": 12.0,
+      "min_clr": -0.916,
+      "remaining": 0.0,
+      "max_replan_ms": 81.5,
+      "collide_class": "static",
+      "collide_t": 8.1,
+      "n_collide": 7,
+      "per": {
+        "static": -0.92,
+        "pedestrian": 0.52,
+        "vehicle": 2.95
+      }
+    },
+    {
+      "ep": 11,
+      "reached": true,
+      "collided": false,
+      "stuck": false,
+      "timeout": false,
+      "t": 11.6,
+      "min_clr": 0.413,
+      "remaining": 0.3,
+      "max_replan_ms": 197.7,
+      "collide_class": null,
+      "collide_t": null,
+      "n_collide": 0,
+      "per": {
+        "static": 0.41,
+        "pedestrian": 0.8,
+        "vehicle": 7.11
+      }
+    }
+  ]
+}

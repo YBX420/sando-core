@@ -673,6 +673,7 @@ struct Parameters {
   bool minco_use_topology = false;     // True -> deterministic H-signature passing-side seed
   bool minco_deficit_cert = false;     // True -> exact continuous-time Bernstein deficit mover gate (S3); default OFF = byte-identical
   bool minco_recovery_smooth_brake = false;  // True -> recovery brake = min-jerk decel from committed (v,a) (no instant-zero C1 break); default OFF
+  bool minco_recovery_progress = false;      // True -> on a failed forward solve with NO human danger, nudge toward the goal (best-effort fwd/sidestep/climb) instead of freezing; default OFF = byte-identical
   bool minco_yaw_c2_smooth = false;        // True -> jerk-limited C2 yaw governor (no yaw-rate step / freeze-spin dyaw jumps); default OFF
   double minco_yaw_accel_max = 6.0;        // yaw-accel limit (rad/s^2) for the C2 yaw governor
   double minco_yaw_lowspeed_lo = 0.05;     // below this xy speed, hold heading (no atan2 jitter); governor ramps dyaw->0
@@ -681,6 +682,17 @@ struct Parameters {
   // EXECUTED speed respects v_max (fly the same path a bit slower). Clearance/hard violations still
   // hold. Default OFF -> every golden byte-identical (retime factor stays 1).
   bool minco_retime_overshoot = false;
+  // Seam C2-from-exec-state (A4): re-anchor each new MINCO solve at the drone's PREDICTED-ACTUAL
+  // execution state A_exec = A + LPF(get_state() - plan.front()) instead of the plan-predicted A.
+  // The drone physically lags the committed A by ~0.2m/0.15s (finite a_max steady-state tracking
+  // bias) -> today the S3 certificate is computed on a trajectory the drone never flies (the flown
+  // path sits ~0.2m toward the obstacle = an unquantified OPTIMISTIC clearance). This is the
+  // drone-side DUAL of the obstacle-side honest correction (planner.hpp dt_pred advance). Re-anchoring
+  // to A_exec makes "what is certified == what is flown": strictly MORE conservative, softens no
+  // corridor, touches no eps. Default OFF -> golden byte-identical (and even ON the golden is a perfect
+  // replay where e==0 -> seam_bias_==0 -> A_exec==A, so still byte-identical).
+  bool seam_c2_from_state = false;
+  double seam_bias_alpha = 0.8;        // LPF pole for the slow-varying tracking bias (0=no memory)
   double minco_w_time = 10.0;          // MINCO time-anchor weight: higher -> faster, lower -> smoother
   double minco_w_vel = 100.0;          // velocity-hinge weight: higher -> respects v_max harder (fewer rejects)
   double minco_w_accel = 100.0;        // acceleration-hinge weight: higher -> respects a_max harder

@@ -98,3 +98,10 @@ add_test(NAME recovery_closedloop COMMAND test_recovery_closedloop)
 # ON bounds yaw-accel (|d(dyaw)| <= accel_max*dc) vs OFF's rate-step spike. Cert-orthogonal.
 add_executable(test_yaw_smooth test/test_yaw_smooth.cpp)
 add_test(NAME yaw_smooth COMMAND test_yaw_smooth)
+
+# Seam C2-from-exec-state (A4) — re-anchors the new MINCO solve at the drone's PREDICTED-ACTUAL state
+# A_exec = A + LPF(get_state()-plan.front()) (drone-side dual of the obstacle dt_pred advance). Asserts
+# zero-error ON==OFF (golden-safe), an offset shifts A toward the measurement by (1-alpha)*delta, and
+# the LPF bias converges to the true offset. Strengthens the S3 cert ("flown == certified").
+add_executable(test_seam_exec_state test/test_seam_exec_state.cpp)
+add_test(NAME seam_exec_state COMMAND test_seam_exec_state)

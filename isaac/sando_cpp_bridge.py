@@ -78,6 +78,7 @@ _sando_add_traj = _sig("sando_add_traj", None, C.c_void_p, C.c_void_p, C.c_doubl
 _sando_replan = _sig("sando_replan", C.c_int, C.c_void_p, C.c_double, C.c_double)
 _sando_get_next_goal = _sig("sando_get_next_goal", C.c_int, C.c_void_p, _dbl)
 _sando_get_drone_status = _sig("sando_get_drone_status", C.c_int, C.c_void_p)
+_sando_get_seam_bias = _sig("sando_get_seam_bias", None, C.c_void_p, _dbl)
 _sando_get_global_path = _sig("sando_get_global_path", C.c_int, C.c_void_p, _dbl, C.c_int)
 _sando_get_corridor = _sig("sando_get_corridor", C.c_int, C.c_void_p, _dbl, C.c_int)
 _sando_get_obst_class_codes = _sig("sando_get_obst_class_codes", C.c_int, C.c_void_p, _intp, C.c_int)
@@ -144,10 +145,12 @@ _DEFAULTS = {
     "obst_position_error": 0.0, "max_gurobi_comp_time_sec": 1.0, "jerk_smooth_weight": 10.0,
     "minco_time_budget_ms": 0.0, "minco_use_topology": False, "minco_w_time": 10.0,
     "minco_retime_overshoot": False,
+    "seam_c2_from_state": False, "seam_bias_alpha": 0.8,
     "minco_epsilon_track": 0.0, "minco_pass_behind": False, "minco_wall_margin": 0.0,
     "minco_w_vel": 100.0, "minco_w_accel": 100.0,
     "minco_human_slow_vmax": 0.0, "minco_human_slow_near": 3.0, "minco_human_slow_far": 9.0,
     "minco_sfc_radius": 0.0, "minco_w_corridor": 0.0, "recovery_enabled": True,
+    "minco_recovery_progress": False,
     "inflate_walls_by_body": False, "replan_dt": 0.0, "dynamic_speed_thresh": 0.0,
     "pred_horizon_s": 0.0, "use_spacetime_corridor": False, "stc_d_safe_dyn": 0.5,
     "stc_time_dt": 0.1, "stc_Th": 1.5, "stc_w_time": 0.0,
@@ -322,6 +325,12 @@ class SANDO:
 
     def get_drone_status(self):
         return int(_sando_get_drone_status(self._h))
+
+    def get_seam_bias(self):
+        """seam C2-from-exec-state LPF tracking bias (position, m). Zero if flag off / perfect tracking."""
+        out = (C.c_double * 3)()
+        _sando_get_seam_bias(self._h, C.cast(out, _dbl))
+        return np.array([out[0], out[1], out[2]])
 
     def get_global_path(self):
         n = _sando_get_global_path(self._h, C.cast(self._gp_buf, _dbl), 4096)

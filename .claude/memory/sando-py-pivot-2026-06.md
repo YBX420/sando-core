@@ -11,7 +11,7 @@ metadata:
 
 **三条铁律**(plan §0,赶 deadline 也不准破):① 9/15 前不碰 side paper(两评委独立点名这是 B 唯一失败模式);② 永不砍 FN 三分支 + 端到端 tracker 输出标定 + 学习型预测器;③ 摘要防雷句式见 spec §7,不准把「whole chain / 每时间步」写回去。
 
-**关键 gate**:W1 = **Boyle 签字**(弱化定理一页纸,不同意 → 回退 C = planner 论文为主);W4 末 = 预测器 tracker 输出 3s q95 ≤ 0.6-0.7m(成败手,不达标砍 horizon);W7 中 = 总 go/no-go。
+**关键 gate**:W1 = **Boyle 签字 ✅ 已通过(2026-06-18 前)**;W4 末 = 预测器 tracker 输出 3s q95 ≤ 0.6-0.7m(成败手,不达标砍 horizon);W7 中 = 总 go/no-go。
 
 **Why**:确定性版交集已被占(2505.11376/2404.16826),且「假装预测精确」是最致命洞 → conformal 不确定度证书才够分量;但塞进 MINCO 优化器内部 = planner-绑定、卖点窄,外置成 planner 无关安全层后竞争面更宽、可独立投。
 

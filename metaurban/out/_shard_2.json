@@ -1,0 +1,106 @@
+{
+  "summary": {
+    "n": 4,
+    "reached": 0.25,
+    "collided": 0.25,
+    "stuck": 0.75,
+    "timeout": 0.0,
+    "wall_s": 125.3,
+    "collide_by_class": {
+      "pedestrian": 1
+    },
+    "stuck_eps": [
+      0,
+      1,
+      2
+    ],
+    "collided_eps": [
+      {
+        "ep": 1,
+        "hit": "pedestrian",
+        "t": 6.0,
+        "min_clr": -0.202
+      }
+    ],
+    "timeout_eps": []
+  },
+  "results": [
+    {
+      "ep": 0,
+      "reached": false,
+      "collided": false,
+      "stuck": true,
+      "timeout": false,
+      "t": 6.6,
+      "min_clr": 2.404,
+      "remaining": 81.3,
+      "max_replan_ms": 74.5,
+      "collide_class": null,
+      "collide_t": null,
+      "n_collide": 0,
+      "per": {
+        "static": 2.4,
+        "pedestrian": 2.65,
+        "animal": 21.49
+      }
+    },
+    {
+      "ep": 1,
+      "reached": false,
+      "collided": true,
+      "stuck": true,
+      "timeout": false,
+      "t": 10.0,
+      "min_clr": -0.202,
+      "remaining": 41.7,
+      "max_replan_ms": 181.0,
+      "collide_class": "pedestrian",
+      "collide_t": 6.0,
+      "n_collide": 15,
+      "per": {
+        "static": 0.83,
+        "pedestrian": -0.2,
+        "vehicle": 16.88,
+        "animal": 1.76
+      }
+    },
+    {
+      "ep": 2,
+      "reached": false,
+      "collided": false,
+      "stuck": true,
+      "timeout": false,
+      "t": 19.1,
+      "min_clr": 0.69,
+      "remaining": 33.1,
+      "max_replan_ms": 187.4,
+      "collide_class": null,
+      "collide_t": null,
+      "n_collide": 0,
+      "per": {
+        "static": 0.69,
+        "pedestrian": 1.29,
+        "animal": 1.35
+      }
+    },
+    {
+      "ep": 3,
+      "reached": true,
+      "collided": false,
+      "stuck": false,
+      "timeout": false,
+      "t": 16.3,
+      "min_clr": 0.643,
+      "remaining": 0.0,
+      "max_replan_ms": 79.3,
+      "collide_class": null,
+      "collide_t": null,
+      "n_collide": 0,
+      "per": {
+        "static": 0.64,
+        "pedestrian": 1.93,
+        "animal": 2.95
+      }
+    }
+  ]
+}

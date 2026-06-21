@@ -17,6 +17,8 @@ __pycache__/
 *.py[cod]
 isaac/isaac_flown.csv
 isaac/isaac_flown.png
+# Isaac IRA scene cache (contains large binary assets >100MB, not for git)
+isaac/ira/
 
 # MetaUrban demo run outputs: ignore bulk CSVs + per-seed dirs; KEEP the headline PNGs/JSON
 # (out/drone_topdown.png, out/ablation.png, out/summary.json, out/ablation.json are force-added)

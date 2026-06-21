@@ -1,6 +1,18 @@
 > **⚠️ 2026-06-11 pivot:主论文已转向 planner 无关的认证语义风险安全层(RA-L,~9/15);per-class MINCO 降为 side paper。权威文档 = `docs/safety-layer-spec.md` + `docs/safety-layer-plan.md`(配 dossier.json + UBUNTU22_PORT.md)。下列 sando-py-*(core-idea / conformal-cert / defense-map / sim2real-fakes)与 sando-rgbd-plan 多为 pivot 前记录,framing 已过时(顶部已加横幅);其 conformal 证书数学 / C++ 测试 / 技术结论仍可查。**
 
+- [★ MetaUrban 转主力 (2026-06-18)](metaurban-pivot-2026-06-18.md) — Isaac+Rivermark 对"验证 gap+算法"过重 → 改用 MetaUrban 迭代算法+搭场景+验 gap,不追 RTX 保真度;Isaac IRA warehouse 三档 GT(isaac/ira/)保留作回退;**实质放宽了 spec「Isaac 机载渲染标定」铁律(未改原文)**
 - [★ 2026-06 方案 B pivot](sando-py-pivot-2026-06.md) — 主论文转 planner 无关认证语义风险安全层(RA-L ~9/15);per-class MINCO 降 side paper;权威 = docs/safety-layer-spec.md + plan.md;三铁律 + W1 Boyle 签字 gate
+- [★ 八波新算法裁决 (2026-06-19)](sando-py-newalgo-verdict-2026-06.md) — 8 波攻坚:唯一真·新+sound = 主线证书 S3(非新规划器),修了现役 mover bug;新规划器逃逸算法被先验占满;报告在 .claude/wave_work/FINAL_REPORT.md
+- [先验地图/死路清单](sando-py-prior-art-map.md) — 5 轮实搜画出什么已被占(RTA/T-MPC++/mp-NLP/IRA/Jasour/Lindemann/2511.10586/Pearlmutter/GCS),别再猎;唯一白区=分布无关conformal×连续时间Bernstein
+- [★ 核心创新 S3:Bernstein deficit 证书](sando-py-bernstein-deficit-cert.md) — 连续时间conformal-Bernstein deficit(3 move:几何精确/概率分布无关/合取);**已实现+default-OFF门+任意次通用核**,golden 24/24
+- [★ S3层移植到EGO-Planner](sando-py-ego-port.md) — 2026-06-20 把安全层套到EGO(planner-无关核,B-spline→Bezier同一证书);EgoSafe整合EGO丝滑+我们判官,headless闭环到达+不撞1.28m;ego/ vendored;render/eval整合待做
+- [★ 层是判官非矫正](sando-py-layer-judge-not-corrector.md) — 现层=裁决+拒绝,矫正交现有兜底;最小修正QP设计有没建(用户说先不做);5个default-OFF flag清单+接缝seam_bias诚实降级原因
+- [环境坑 Data2=Data21 同盘改名](dev-env-data2-data21.md) — 同一块盘挂载改名,仓库只在Data21一份;改名断了CMake/.so缓存绝对路径=MetaUrban"突然不行"根因(已修);含sando/ego capi重编命令;bridge在isaac/
+- [mover 门双重 unsound bug](sando-py-mover-gate-bug.md) — 现役移动障碍门:per-CP halfspace 对 mover 塌 + K≥200 采样漏穿 + 只 hold 0.75s;应换精确 deficit 当 GATE
+- [S7-CRET 认证平滑 recovery](sando-py-cret-recovery.md) — 洞见"别造新轨迹只改时钟":对已认证轨迹做 C2 时钟 warp,留走廊+仍认证+平滑;替 jerky 垂直爬升
+- [★ 平滑是真需求](sando-py-smoothness-real.md) — 塔菲确认非cosmetic:接缝/recovery平滑在修证书前提"飞的=认证的"、强化硬认证;10类jerk源+5步落地(全default-OFF保golden)
+- [planner-vs-benchmark doc 北极星错](sando-py-planner-benchmark-doc-fix.md) — 追平EGO=0novelty+违铁律+治不了根因;A2软化走廊必须INVERT;重写成"评测台=认证安全层demonstration harness";单层z occupancy致评测台跳不到主线
+- [对抗式验证工作风格](feedback-adversarial-verification.md) — 发明新算法:重型多波workflow+实搜撞车+对抗破证,诚实报"什么死了为什么";别把真工程需求当cosmetic;token不计直到找到
 - [说人话](feedback-plain-language.md) — 回答要口语清楚、用词简单,别堆术语和复杂书面句
 - [先穷举 formulation bug 再换算法](feedback-rootcause-first.md) — debug 时先穷举设计层 bug,别一上来贴"算法局部最优"标签跳 paper 方案
 - [要的测试风格](feedback-test-style.md) — 压力测试+真实环境+严格判据(对最优/不变量/回归),不要抽查;标准是"对/最好"不是"和 C++ 一样"

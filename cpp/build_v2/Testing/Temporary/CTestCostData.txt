@@ -1,0 +1,21 @@
+minjerk 1 0.0107264
+obstacles 1 0.00243379
+cost 1 0.00202159
+localopt 1 0.00282922
+types 1 0.0033068
+voxel_map 1 0.0128746
+local_opt_terms 1 0.00373831
+voxel_map_helpers 1 0.0428185
+graph_search 1 0.0222315
+local_opt_hardalm 1 0.00596852
+minco_cost_grad 1 0.00558943
+hgp_planner 1 0.0260123
+plan_minco 1 0.174163
+hgp_manager 1 0.0193326
+planner 1 0.0429998
+bspline 1 0.00339678
+utils_math 1 0.00258824
+basis_converter 1 0.00226495
+obstacle_tracker 1 0.00237747
+dyntraj_labelset 1 0.00176872
+---

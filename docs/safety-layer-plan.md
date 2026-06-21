@@ -36,12 +36,14 @@
 
 ## 3. W1 清单（移植完成当天起）
 
-- [ ] **Boyle 一页纸**：headline 改写前后对照 + ε=0.1 预算表 + 三分支图 + 窗口论证（2509.25124 续作风险）——拿到明确同意再写一行代码
-- [ ] 笔记本环境照 `docs/UBUNTU22_PORT.md` 走完（ctest 19/19 + 闭环 PNG 为准）
-- [ ] Isaac Sim 安装 + **版本钉死记录在案** + IRA 三档密度 demo（5/15/40）跑通出 GT json
-- [ ] SDD 下载 + 预处理脚本启动（lost 帧清洗、3 类合并、密度 bin 统计复核——验证 dossier 的格子估计）
-- [ ] 飞行笼审批材料提交（长周期项,先点火）
-- [ ] DynTraj label-set ABI 设计稿（types.hpp 字段 + traj_create 签名 + sando_cpp_bridge 编组）
+- [x] **Boyle 一页纸**：**已签字，Gate 0 通过**
+- [x] 笔记本环境照 `docs/UBUNTU22_PORT.md` 走完（ctest **20/20** + 闭环 PNG）
+- [x] DynTraj label-set ABI（C++ core + capi + bridge + ROS2 端到端，ctest 20/20，ROS2 9/9）
+- [x] Isaac Sim 安装 + **版本钉死记录在案**（2026-06-18）：`4.5.0-rc.36+release.19112.f59b3005.gl`（zip `isaac-sim-standalone-4.5.0-linux-x86_64.zip`），装于 `/media/boxuan/Data21/isaacsim`（软链 `~/isaacsim`），自带 Python 3.10.15；环境 驱动 580.159.03 / Ubuntu 22.04.5 / 内核 6.8.0-124 / RTX 4070 12G。headless `from isaacsim.core.api import World` 自检 PASS + C++ 闭环烟雾 PASS（reached, 0 collision, min_clr 0.49m）。**钉 4.5 别上 5.x**：Python 锁(4.X=3.10/5.X=3.11/6.0=3.12)+ 5.0 已弃用 PyTorch 版 core.api。
+- [x] IRA 三档密度 demo（5/15/40）跑通出 GT json（2026-06-18）—— 资产包 92GB 下到 Data21（解压排除 Infinigen 的 9 个含冒号文件,NTFS 存不了）；`sando-core/isaac/ira/`：`ira_d{05,15,40}.yaml`(各 300 帧/30fps) + `ira_gt_extract.py` + `_check_motion.py`。三档各出 `out/d*/gt_tracks.json`(每行人 world pos + 差分速度 + class)。坑已记 `ira/README.md`:① 行人位置在 ManRoot/bbox 中心,**别读 transform[3]**(顶层 Xform 停在出生点);② `command_file` 须存在绝对路径才生成 GoTo;③ 本地资产根用 `--/persistent/isaac/asset_root/default` carb arg 透传。**遗留**:4 个固定相机对密集档覆盖不足(d40 只捕到 40 人中的 15)→ W4-5 数据生成时加相机/优化机位解决遮挡。
+- [ ] **复杂场景**:Rivermark 室外广场放行人(决定用 Isaac `Outdoor/Rivermark`,**不用 CarlaAir**=第二渲染域违反标定铁律)。`ira/rivermark_ira.usda`(引用 Rivermark + 广场 NavMeshVolume) + `ira_rivermark_d05.yaml`;难点=IRA 不自动建 navmesh + agent 参数须按米传(默认 cm)。USD 已验证,跑通中。
+- [ ] SDD 下载 + 预处理脚本启动（lost 帧清洗、3 类合并、密度 bin 统计复核）
+- [ ] 飞行笼审批材料提交（长周期项，先点火）
 - [ ] arXiv alert：Lindemann / Kantaros / Atanasov / Pappas 四组
 - [ ] （可选）统计 co-author：仅当 Boyle 要求——最终数学是 union bound,不前置阻塞
 

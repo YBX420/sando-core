@@ -239,6 +239,7 @@ class SANDO {
   std::deque<RobotState> plan;
   double previous_yaw = 0.0;
   double previous_dyaw = 0.0;            // last committed yaw-rate (for the C2 yaw governor; default-OFF path never reads it)
+  RobotState seam_bias_{};               // LPF tracking bias (actual-predicted) for seam C2-from-exec-state; default-OFF path never reads it
 
   // shared pwp
   QuinticPieceWisePol pwp_to_share;
@@ -342,6 +343,8 @@ class SANDO {
   void set_A(const RobotState& a) { A = a; }
   double get_A_time() const { return A_time; }
   void set_A_time(double t) { A_time = t; }
+  RobotState get_seam_bias() const { return seam_bias_; }   // seam C2-from-exec-state LPF bias (test introspection)
+  RobotState get_plan_front() const { return plan.empty() ? RobotState() : plan.front(); }  // test introspection
 
   RobotState get_last_plan_state() const {
     if (!plan.empty()) return plan.back();
@@ -835,6 +838,17 @@ class SANDO {
       // so a recovery error can never crash the planner (worst case = the old freeze behaviour).
       try {
         if (par.recovery_enabled && recovery_yield() && append_to_plan()) return {false, true};
+        // LIVENESS: recovery_yield is a no-op when no human is in danger (boxed by static structure). Only
+        // when PERSISTENTLY stuck (fc>8, committed plan exhausted -- not a common transient solve failure,
+        // which must keep flying the still-valid committed plan) take a best-effort progress nudge toward
+        // the global-path look-ahead. Gating on fc>8 is essential: firing on every failure hijacks normal
+        // dense-scene flight into a crawl. Flag-gated (default OFF -> golden/nominal byte-identical).
+        if (par.recovery_enabled && par.minco_recovery_progress && replanning_failure_count > 8
+            && recovery_progress() && append_to_plan())
+          return {false, true};
+        // persistent forward failure (boxed in at cruise height) -> VERTICAL ESCAPE as a last resort.
+        if (par.recovery_enabled && replanning_failure_count > 8 && recovery_climb() && append_to_plan())
+          return {false, true};
       } catch (const std::exception&) {}
       return {false, true};
     }
@@ -860,6 +874,25 @@ class SANDO {
     }
     RobotState local_A = aa.A;
     double A_time_local = aa.A_time;
+
+    // Seam C2-from-exec-state (A4): re-anchor the new plan at the drone's PREDICTED-ACTUAL state.
+    // plan.front() is the committed setpoint for the current tick (deque[0] <-> current_time); the
+    // measured state get_state() is where the drone ACTUALLY is now. Their difference e is the
+    // steady-state tracking bias; LPF it (slow-varying, dominated by finite-a_max lag) and add it to
+    // A so A_exec is the honest position/vel/accel the drone will hold at the SAME future A_time
+    // (latency/A_time at find_A_and_Atime is untouched -- we correct only WHERE, not HOW-FAR-AHEAD).
+    // Drone-side dual of the obstacle-side dt_pred advance. OFF or zero-error -> A_exec==A (byte-eq).
+    if (par.seam_c2_from_state && !plan.empty()) {
+      const RobotState& s_now = get_state();
+      const RobotState& p0 = plan.front();
+      double a = par.seam_bias_alpha;
+      seam_bias_.pos   = a * seam_bias_.pos   + (1.0 - a) * (s_now.pos   - p0.pos);
+      seam_bias_.vel   = a * seam_bias_.vel   + (1.0 - a) * (s_now.vel   - p0.vel);
+      seam_bias_.accel = a * seam_bias_.accel + (1.0 - a) * (s_now.accel - p0.accel);
+      local_A.pos   += seam_bias_.pos;
+      local_A.vel   += seam_bias_.vel;
+      local_A.accel += seam_bias_.accel;
+    }
 
     set_A(local_A);
     set_A_time(A_time_local);
@@ -1072,6 +1105,11 @@ class SANDO {
     Eigen::MatrixXd astar_path(static_cast<int>(seed_path.size()), 3);
     for (int i = 0; i < static_cast<int>(seed_path.size()); ++i)
       astar_path.row(i) = seed_path[i].transpose();
+    // Seam C2-from-exec-state (A4): pin the MINCO start position EXACTLY at A_exec even if the global
+    // guide's z-clamp nudged seed_path[0]. v0/a0 already come from local_A (=A_exec) above, so this
+    // makes mj.eval(0)=A_exec exact -> C2 boundary at the deque seam. OFF -> row(0) already = A.pos.
+    if (par.seam_c2_from_state && astar_path.rows() > 0)
+      astar_path.row(0) = local_A.pos.transpose();
 
     // speed-aware per-class avoidance: ramp v_max DOWN near a human so the planner SWERVES instead
     // of braking to a stop; full speed when clear (mirrors planner.py). At 15 m/s a crossing human
@@ -1370,6 +1408,162 @@ class SANDO {
     return true;
   }
 
+  // recovery_climb — VERTICAL ESCAPE out of a freeze. When forward replanning has failed repeatedly
+  // (boxed in by movers at cruise height), don't hover forever: climb straight up toward a clear
+  // ceiling (obstacles live near cruise z, so up is free). Once above the crowd the global/local plan
+  // can make forward progress again. Modelled on the recovery_yield commit; only fires on persistent
+  // failure, so nominal/golden behaviour (which never accrues failures) is unchanged.
+  bool recovery_climb() {
+    RobotState local_A = get_A();
+    double A_time_local = get_A_time();
+    double z_esc = std::min(par.z_max - 0.5, 4.5);
+    if (local_A.pos(2) >= z_esc - 0.05) return false;          // already high -> climbing won't help
+    Eigen::Vector3d target = local_A.pos;
+    target(2) = std::min(z_esc, local_A.pos(2) + 1.5);         // step up
+    double dc = par.dc;
+    double d = (target - local_A.pos).norm();
+    double cv = std::max(0.5, std::min(par.v_max, 2.5));       // climb at a sane rate
+    double Tseg = std::max(dc * 2.0, d / cv / 2.0);
+    Eigen::MatrixXd wp(3, 3);
+    wp.row(0) = local_A.pos.transpose();
+    wp.row(1) = (0.5 * (local_A.pos + target)).transpose();
+    wp.row(2) = target.transpose();
+    Eigen::VectorXd T(2); T(0) = Tseg; T(1) = Tseg;
+    MinjerkTraj mj(wp, T, local_A.vel, local_A.accel, Eigen::Vector3d::Zero(), Eigen::Vector3d::Zero());
+    std::vector<RobotState> setpoints;
+    int n = std::max(2, static_cast<int>(std::ceil(mj.t_end / dc)));
+    for (int i = 0; i < n; ++i) {
+      double tl = std::min((i + 1) * dc, mj.t_end - 1e-6);
+      RobotState s; s.t = A_time_local + tl;
+      s.pos = mj.eval_deriv(tl, 0); s.vel = mj.eval_deriv(tl, 1);
+      s.accel = mj.eval_deriv(tl, 2); s.jerk = mj.eval_deriv(tl, 3);
+      setpoints.push_back(s);
+    }
+    goal_setpoints = setpoints;
+    pwp_to_share = minjerk_to_pwp(mj, A_time_local);
+    cps = mj.control_points();
+    successful_factor = 1.0; cvx_decomp_time = 0.0;
+    last_minco_traj = std::make_shared<MinjerkTraj>(mj);
+    return true;
+  }
+
+  // recovery_progress — LIVENESS half: when the hard local solve fails but there is NO human in danger
+  // (the drone is merely boxed by static structure, not about to hit a person), don't freeze the deque.
+  // Commit a short best-effort min-jerk nudge toward the goal — trying straight-forward, forward+sidestep
+  // (either way) and a small climb — picking the candidate with the BEST clearance vs ALL obstacles, and
+  // only if that move is both safe (clearance > 0) and STRICTLY better than holding. Keeps the drone moving
+  // (EGO-like liveness) WITHOUT touching the hard human certificate: human danger still routes through
+  // recovery_yield (which runs first). Behind par.minco_recovery_progress (default OFF -> byte-identical).
+  bool recovery_progress() {
+    RobotState local_A = get_A();
+    double A_time_local = get_A_time();
+
+    // Aim at the GLOBAL-PATH look-ahead, not the straight line to the far goal: heat-A* already routes
+    // AROUND the static structure, so a point ~LOOKAHEAD m along that path lies in free space, whereas
+    // "straight at the goal" can point into the very obstacle the drone is boxed against.
+    Eigen::Vector3d look = get_G().pos;
+    if (global_path_.size() >= 2) {
+      int ni = 0; double bd = 1e18;
+      for (int i = 0; i < (int)global_path_.size(); ++i) {
+        double dd = (global_path_[i] - local_A.pos).squaredNorm();
+        if (dd < bd) { bd = dd; ni = i; }
+      }
+      const double LOOKAHEAD = 2.5;
+      double acc = 0.0; look = global_path_[ni];
+      for (int i = ni; i + 1 < (int)global_path_.size(); ++i) {
+        acc += (global_path_[i + 1] - global_path_[i]).norm();
+        look = global_path_[i + 1];
+        if (acc >= LOOKAHEAD) break;
+      }
+    }
+    Eigen::Vector3d to_look = look - local_A.pos;
+    double dl = to_look.norm();
+    if (dl < 1e-3) return false;
+    Eigen::Vector3d dir = to_look / dl;
+    double reach = std::min(std::max(dl, 1.5), 3.0);     // reach far enough to cross the inflated keep-out
+
+    std::vector<Eigen::Vector3d> opos = obst_pos, obbox = obst_bbox, ovel = obst_vel, oaccel = obst_accel;
+    std::vector<std::string> oclass = obst_class;
+    std::vector<std::shared_ptr<Obstacle>> owned;
+    std::vector<const Obstacle*> obstacles;
+    std::map<std::string, AvoidParams> avoid_cfg;
+    obstacles_from_snapshot(opos, obbox, oclass, ovel, oaccel, owned, obstacles, avoid_cfg);
+
+    // NEVER bypass a MOVER's certificate. Best-effort progress is only for being boxed by inanimate STATIC
+    // structure: if any mover (human/vehicle/animal -- class_name != "wall"; oclass still reads "wall") is
+    // near now or within ~1s, hold (the safe answer / recovery_yield already covers human danger). This is
+    // what keeps the "先快" margin-erosion confined to walls and off people.
+    std::vector<const Obstacle*> movers;
+    for (const Obstacle* o : obstacles) if (o->class_name != "wall") movers.push_back(o);
+    if (!movers.empty() && reach_avoid_clearance(local_A.pos, movers, 0.0, 1.0) < 4.0)
+      return false;
+
+    const double horizon = 0.6;
+    double stay_clr = reach_avoid_clearance(local_A.pos, obstacles, 0.0, horizon);
+
+    // candidates (3D drone): the look-ahead point, look-ahead +/- sidestep, and a small climb.
+    Eigen::Vector3d up(0.0, 0.0, 1.0);
+    Eigen::Vector3d side = dir.cross(up);
+    double sn = side.norm();
+    if (sn > 1e-6) side /= sn; else side = Eigen::Vector3d(0.0, 1.0, 0.0);
+    Eigen::Vector3d climb = local_A.pos;
+    climb(2) = std::min(par.z_max - 0.5, local_A.pos(2) + 1.5);
+    std::vector<Eigen::Vector3d> cands = {
+      local_A.pos + dir * reach,
+      local_A.pos + (dir * reach + side * 1.0),
+      local_A.pos + (dir * reach - side * 1.0),
+      climb,
+    };
+
+    // LIVENESS over MARGIN ("先快"): score each escape by the clearance AT ITS DESTINATION, not the swept-
+    // segment minimum. The swept min always includes the boxed start point (clearance ~ stay_clr ~ 0), so it
+    // would make every move look un-improvable -- exactly the freeze we saw (stay=0.02 -> best=0.02). The
+    // destination of a move along the global-path look-ahead lies in free space, so end-clearance is high.
+    // We still reject any route that actually PENETRATES an obstacle en route (swept min below -floor), so
+    // the drone never tunnels through something; it just accepts a tighter margin to keep moving.
+    // With no mover near, the binding obstacles are STATIC -> the 0.6s clearance check is exact (statics
+    // don't move) so we can demand a genuine margin: don't tunnel the inflated static (path_min > 0) and
+    // only commit to a destination that is clearly open (end_clr > floor). Geometrically very safe.
+    const double floor = 0.3;
+    Eigen::Vector3d best = local_A.pos;
+    double best_clr = -1e18;
+    bool found = false;
+    for (const Eigen::Vector3d& c : cands) {
+      double path_min = reach_avoid_move_clearance(local_A.pos, c, obstacles, 0.0, horizon);
+      if (path_min < 0.0) continue;                       // route tunnels the inflated static -> skip
+      double end_clr = reach_avoid_clearance(c, obstacles, 0.0, horizon);
+      if (end_clr > best_clr) { best_clr = end_clr; best = c; found = true; }
+    }
+    if (!found || best_clr <= floor) return false;        // every escape collides/tunnels -> let it escalate/freeze
+
+    // commit a short min-jerk curve A -> best (smooth, honours v0/a0), mirroring recovery_yield's commit.
+    double dc = par.dc;
+    double d = (best - local_A.pos).norm();
+    double yv = std::max(0.5, std::min(par.v_max, 1.5));
+    double Tseg = std::max(dc * 2.0, d / yv / 2.0);
+    Eigen::MatrixXd wp(3, 3);
+    wp.row(0) = local_A.pos.transpose();
+    wp.row(1) = (0.5 * (local_A.pos + best)).transpose();
+    wp.row(2) = best.transpose();
+    Eigen::VectorXd T(2); T(0) = Tseg; T(1) = Tseg;
+    MinjerkTraj mj(wp, T, local_A.vel, local_A.accel, Eigen::Vector3d::Zero(), Eigen::Vector3d::Zero());
+    std::vector<RobotState> setpoints;
+    int n = std::max(2, static_cast<int>(std::ceil(mj.t_end / dc)));
+    for (int i = 0; i < n; ++i) {
+      double tl = std::min((i + 1) * dc, mj.t_end - 1e-6);
+      RobotState s; s.t = A_time_local + tl;
+      s.pos = mj.eval_deriv(tl, 0); s.vel = mj.eval_deriv(tl, 1);
+      s.accel = mj.eval_deriv(tl, 2); s.jerk = mj.eval_deriv(tl, 3);
+      setpoints.push_back(s);
+    }
+    goal_setpoints = setpoints;
+    pwp_to_share = minjerk_to_pwp(mj, A_time_local);
+    cps = mj.control_points();
+    successful_factor = 1.0; cvx_decomp_time = 0.0;
+    last_minco_traj = std::make_shared<MinjerkTraj>(mj);
+    return true;
+  }
+
   // dispatch: local_solver == "minco" -> MINCO path; otherwise out of scope.
   bool plan_local_trajectory(const std::vector<Eigen::Vector3d>& global_path,
                              double last_replanning_computation_time) {
@@ -1389,6 +1583,10 @@ class SANDO {
     } else {
       for (int i = 0; i < k_value; ++i)
         if (!plan.empty()) plan.pop_back();
+      // Seam C2-from-exec-state (A4): the retained splice setpoint (plan.back()) is the OLD predicted
+      // A; overwrite it with A_exec=get_A()=mj.eval(0) so the written seam is deque[splice]=A_exec,
+      // deque[splice+1]=goal_setpoints[0]=mj.eval(dc) -> continuous-time C2. OFF -> writes same value.
+      if (par.seam_c2_from_state && !plan.empty()) plan.back() = get_A();
       for (const auto& s : goal_setpoints) plan.push_back(s);
     }
 
