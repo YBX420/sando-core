@@ -1,5 +1,6 @@
-> **⚠️ 2026-06-11 pivot:主论文已转向 planner 无关的认证语义风险安全层(RA-L,~9/15);per-class MINCO 降为 side paper。权威文档 = `docs/safety-layer-spec.md` + `docs/safety-layer-plan.md`(配 dossier.json + UBUNTU22_PORT.md)。下列 sando-py-*(core-idea / conformal-cert / defense-map / sim2real-fakes)与 sando-rgbd-plan 多为 pivot 前记录,framing 已过时(顶部已加横幅);其 conformal 证书数学 / C++ 测试 / 技术结论仍可查。**
+> **⚠️ 2026-06-22 全量审计 + 重写。重心从论文(RA-L 9/15)转为工程实现。** 最新权威 = [sando-core-status-2026-06](sando-core-status-2026-06.md) + 重写后的 `docs/safety-layer-spec.md`(v2)/`docs/safety-layer-plan.md`(v2)/`CLAUDE.md`。**headline 已改为「精确连续时间几何证书 + planner 无关」;conformal 统计半边没建(q=0),不再是当前 claim。** 旧的 2026-06-11 pivot framing(「语义风险」+ RA-L 时间线 + 双 planner 已砍 + Isaac 标定铁律)**已作废**——EGO 现在是 vendored 的双 planner 证明,ctest=25(非 19/20/24)。下列条目 framing **一律以 status-2026-06 为准**;其数学/C++ 测试/技术结论仍可查。
 
+- [★★ 2026-06-22 统一真相(最新权威)](sando-core-status-2026-06.md) — 全量审计:精确 Bernstein 几何证书 + 双 planner(MINCO/EGO)适配 + EgoSafe 二元 HOLD + 10-seed A/B;conformal 没建(q=0);重心转工程;ctest=25
 - [★ MetaUrban 转主力 (2026-06-18)](metaurban-pivot-2026-06-18.md) — Isaac+Rivermark 对"验证 gap+算法"过重 → 改用 MetaUrban 迭代算法+搭场景+验 gap,不追 RTX 保真度;Isaac IRA warehouse 三档 GT(isaac/ira/)保留作回退;**实质放宽了 spec「Isaac 机载渲染标定」铁律(未改原文)**
 - [★ 2026-06 方案 B pivot](sando-py-pivot-2026-06.md) — 主论文转 planner 无关认证语义风险安全层(RA-L ~9/15);per-class MINCO 降 side paper;权威 = docs/safety-layer-spec.md + plan.md;三铁律 + W1 Boyle 签字 gate
 - [★ 八波新算法裁决 (2026-06-19)](sando-py-newalgo-verdict-2026-06.md) — 8 波攻坚:唯一真·新+sound = 主线证书 S3(非新规划器),修了现役 mover bug;新规划器逃逸算法被先验占满;报告在 .claude/wave_work/FINAL_REPORT.md

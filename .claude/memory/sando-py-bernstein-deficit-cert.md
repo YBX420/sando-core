@@ -5,6 +5,8 @@ metadata:
   type: project
 ---
 
+> **2026-06-22 勘误**(见 [[sando-core-status-2026-06]]):① soundness 是 `std::nextafter` 外向取整,**非 fesetround**;② **`control_points_interval()` 没建**(证书内部用 `C2B_int` 自己重算区间控制点);③ ctest 现 **25/25**(下文 golden 20/20、24/24 已过时);④ 交叉验证只断言**判定(certified)一致**,margin 打印未断言。
+
 **S3 = 唯一存活的真·新+sound 成果(2026-06-19,mostly-proven conf 0.83)。** 单条已提交 quintic 上认证 P(撞或误分 track i)≤ε,连续时间、分布无关。
 
 **三个 move:**

@@ -1,46 +1,53 @@
-# CLAUDE.md — sando-py(给 Claude Code 自动读的项目入口)
+# CLAUDE.md — sando-core(给 Claude Code 自动读的项目入口)
 
-> ⚠️ **2026-06-11 已 pivot(方案 B)。** 主论文 = **planner 无关的认证语义风险安全层**(投 RA-L,~9/15);原 per-class MINCO 规划器降级为 side paper(9/15 之后写,10-11 月)。下面正文已按 pivot 重写;旧的 planner-主线叙事见 `docs/research-direction.md`(已标注过时)。
+> **2026-06-22 全量重写。** 重心从「冲 RA-L 9/15 的论文蓝图」转为 **工程实现优先**;论文降为下游目标(投不投、何时投未定)。
+> 旧的论文-deadline 叙事(W1-W13 时间线、Gate 0 Boyle 签字、三铁律、双 planner 已砍、Isaac 机载标定铁律)**已作废**,被本文件 + 重写后的 `docs/safety-layer-spec.md` + `docs/safety-layer-plan.md` 取代。
 
-Claude:在本仓库工作前,**先读权威蓝图,再读上下文快照**:
-- **权威方向(以这两份为准,先读)**:`docs/safety-layer-spec.md`(修正版 spec)+ `docs/safety-layer-plan.md`(13 周施工计划);原始档 `docs/safety-layer-dossier.json`、环境/移植 `docs/UBUNTU22_PORT.md`。
-- `.claude/CLAUDE.user.md` —— 用户(塔菲大人)个人偏好:**称呼他「塔菲大人」**、默认中文、简洁、少术语、改 bug 别顺手重构、销毁性操作先确认。
-- `.claude/CLAUDE.workspace.md` —— `~/code` colcon 工作区技术细节、构建/跑仿真命令、代码架构(注:`~/code/sando_ws` 只在带 display 的仿真机上存在,这台移植笔记本没有)。
-- `.claude/memory/` —— **多为 pivot 前快照(framing 已过时)**:feedback-*(工作风格,仍有效)、sando-rgbd-*(C++ 测试清单/坑,仍有效)、sando-py-core-idea/conformal-cert/defense-map/sim2real-fakes(pivot 前的 planner-内置证书前身,顶部已加横幅)、MEMORY.md(索引)。conformal 证书数学被 pivot 继承,但「planner 内置 / per-class 为主轴」的定位已过时。
+Claude:在本仓库工作前先读:
+- **权威现状/方向**(先读这两份):`docs/safety-layer-spec.md`(安全层是什么、证书怎么算、诚实边界)+ `docs/safety-layer-plan.md`(工程路线:做完了什么 / 下一步 / 以后再说)。
+- `.claude/CLAUDE.user.md` —— 用户(**塔菲大人**)偏好:称呼「塔菲大人」、默认中文、**说人话**(口语清楚、少术语)、简洁、改 bug 别顺手重构、销毁性操作先确认。
+- `.claude/CLAUDE.workspace.md` —— `~/code` 工作区/仿真机细节(注:带 display 的仿真机 + `~/code/sando_ws` 只在另一台机器上,本机没有)。
+- `.claude/memory/` —— 记忆快照。**`sando-core-status-2026-06.md` 是最新统一真相**;其余多为更早的技术笔记/工作风格(feedback-* 仍有效),framing 可能过时,以前者为准。
 
-## 这个仓库是什么
-`sando_py`:在 **SANDO 基线**(MIT-ACL,ROS 2 Humble,C++)之上开发的、承载**两条论文线**的代码仓库。
-- **主线(博士主论文,投 RA-L ~9/15)= planner 无关的认证语义风险安全层**:无人机在行人附近飞行时,对**每个被检测到的行人轨迹、每个规划回合**,保证 `P(撞该人) ≤ ε_cls + ε_pred`(ε=0.1,拆 0.02+0.08)。三个感知分支:① 检测+分类的 agent → conformal 分类集合(含 human→硬约束)+ per-agent conformal tube;② 未观测/遮挡空间 → 确定性遮挡阴影 `r_occ + v_max·t`;③ 看见但没识别成 agent → depth→occupancy body-clearance 门 + ~0.4m 延迟膨胀。保证在类别×密度 Mondrian 分层(3 类×3 密度=9 格)内成立;计分用整段 sup/max-over-horizon 时间整形分数(避免 per-step union)。证书在 **tracker 输出**上、用 **Isaac 机载渲染**标定(绝不用 SDD 标定证书);**学习型预测器是成败手**(W4 gate:tracker 输出 3s q95 ≤ 0.6-0.7m)。RTA = 监视器独立节点(不站策略推理路径)+ 最小修正 QP + 垂直爬升 backup。
-- **side paper(9/15 之后)= per-class 差异化 MINCO 规划器**:人 = 硬约束(凸包 + ALM + 连续时间证书 + Stage-4 时空避让),墙 = 软场(EGO),由障碍类别决定用哪套机制;骨架 = 全局 heat-A* 向导 → 局部 **MINCO**(min-jerk 五次,banded `M(T)c=b`)+ 解析梯度优化。spec §5 判定 **planner 基本可冻结**,它在主论文里当载体、不前置。**原「双 planner 即插即用」已砍。**
+## 这个仓库是什么(工程视角)
 
-## 进度速览(细节见 `docs/safety-layer-plan.md` §1 时间线)
-- **W1 闸门 = Boyle 签字**(弱化定理一页纸;不同意则回退 C = planner 论文为主),并行:笔记本移植验收(ctest 19/19 + 闭环 PNG)、Isaac 版本钉死、IRA 5/15/40 三档密度跑通、SDD 预处理启动、DynTraj label-set ABI 设计稿、飞行笼审批提交。
-- **关键 gate**:W4 末预测器 q95 达标、W7 中总 go/no-go。三条铁律见 plan §0(9/15 前不碰 side paper / FN 三分支+预测器+tracker 标定永不砍 / 摘要防雷句式)。
-- 规划器侧(side paper 载体)地基已成:M0/M1/M2、Stage 3 per-class、Stage 4 时空 ALM、Stage 5 MINCO 接进 planner、**ctest 19/19 全绿**;基本冻结,只在安全层需要时动(如 DynTraj label 字段、committed-traj getter)。
+`sando-core`:一个 **planner 无关的「认证安全层」** 的工程实现——无人机在行人/动态障碍附近飞行时,给规划器输出的**已承诺轨迹**做一道**精确连续时间碰撞证书**;证不过就 **HOLD**(判官,不矫正)。
+
+证书核**与规划器解耦**:同一套数学(`bernstein_cert.hpp`)既跑自研的 **MINCO**(min-jerk 五次)规划器,也跑 vendored 进来的 **EGO-Planner**(ZJU,cubic B-spline)。后者是「planner 无关」的活体证明,目前算主贡献(未终结)。
+
+仿真/评测在 **MetaUrban**(MetaDrive 系)里跑(2026-06-18 起从 Isaac 切过来)。
+
+**一句话现状**:精确证书 + 双 planner 适配 + EgoSafe 闭环 + 10-seed A/B 已跑通;**统计/conformal 半边还没做**(`q_conformal` 全程是 0.0 占位,所以现在是确定性几何 margin,不是 P(碰)≤ε 概率保证);证书在 MINCO 核里**默认 OFF**。
+
+## 仓库真相(分支/目录)
+
+- **唯一真相 = 分支 `feat/bernstein-gate`(HEAD `46f5ac9`)。**
+- `master`(`6d380fd`)只有 MetaUrban 4 类避障 + 可视化,**没有证书/EGO**。
+- `bcert-wire`(`e8350cc`)是 feat 的**纯祖先**,少 3 个前沿提交;对应的 `sando-core-bcert/` 是它的旧 worktree → **忽略**。
+
+目录:`cpp/`(MINCO C++ 核 + 证书 `bernstein_cert.hpp` + ctest)、`ego/`(vendored 去-ROS 的 EGO + `ego_capi`)、`metaurban/`(评测 harness:`ego_safe.py`/`ego_bridge.py`/`ab_runner.py`/`render_3d_video.py`)、`isaac/`(旧 Isaac 闭环,已退居二线)、`sando_native/`(MIT-ACL 原版 SANDO + GUROBI,当对照基线)、`docs/`、`.claude/`。
 
 ## 跑 demo / 测试
 
-**本机(移植笔记本)算法 + C++ 测试 = conda env `sando`**(权威指南 `docs/UBUNTU22_PORT.md`):
+**算法 + C++ 测试 = Ubuntu + conda env `sando`**(权威 `docs/UBUNTU22_PORT.md`):
 ```bash
 source ~/miniconda3/etc/profile.d/conda.sh && conda activate sando
-cd cpp && cmake --build build -j && (cd build && ctest)        # C++ golden:19/19 全过
-# ★ capi 共享库不在 CMake 构建图里,改 C++ 后要手动重编(否则 python 桥 / Isaac 闭环全断):
+cd cpp && cmake --build build -j && (cd build && ctest)   # ctest = 25 例(上次 Linux 跑 25/25 全过, LastTest.log 2026-06-20)
+# ★ capi 不在 CMake 构建图里,改 C++ 后必须手动重编(否则 python 桥/闭环全断):
 g++ -O2 -shared -fPIC -std=c++17 -o capi/sando_capi.so capi/sando_capi.cpp -Iinclude -Ithird_party/eigen -Ithird_party
-PYTHONPATH=python python python/test/<name>.py                 # python 测试是独立脚本,直接跑
+# ★ EGO 的 capi 也是手编、独立、不在 CMake(注意 -Wno-narrowing):
+cd ego && g++ -O2 -shared -fPIC -std=c++17 -Wno-narrowing -w -o capi/ego_capi.so capi/ego_capi.cpp src/*.cpp -I include -I ../cpp/include -I ../cpp/third_party/eigen -I ../cpp/third_party
 ```
-
-**ROS demo(需带 display 的仿真机 + `~/code/sando_ws`,本机没有)**:
+MetaUrban 评测(需 metaurban conda env;`.so` 是 Linux ELF,Windows 跑不了):
 ```bash
-cd ~/code/sando_ws && source /opt/ros/humble/setup.bash && source install/setup.bash
-ros2 launch sando_py perclass_demo.launch.py          # RViz 实时演示
-colcon build --packages-select sando_py && source install/setup.bash   # 改 Python 后必须重建
-python3 src/sando_py/test/stage3_minco_perclass.py    # 测试是独立脚本,直接 python3 跑
+python metaurban/ego_safe.py                              # EgoSafe 无头自检(3 横穿人, 断言执行净空≥0)
+python metaurban/ab_runner.py                             # EGO raw vs EGO+层 10-seed A/B -> out/ab_runs/
+python metaurban/render_3d_video.py --ego --ego_safe ...  # 带渲染的完整闭环(需 display/GPU)
 ```
-进程清理(跑仿真前后):`pkill -9 -f 'sando_py/lib/sando_py'; pkill -9 -f 'ros2 launch sando_py'`
 
-> 注:`.claude/CLAUDE.user.md` / `CLAUDE.workspace.md` / `memory/` 是从 `~/.claude` 和 `~/code/CLAUDE.md` 拷来的快照(方便跨电脑)。要让 Claude 的「自动记忆」也生效,见 `.claude/README.md` 的还原说明。
+> 坑:`.so` 加载优先级 `cpp/capi/` > `cpp/build/` > `python/`;Windows 上 `python/sando_capi.dll` 会静默盖住重编。`ego_capi.so` 现在 untracked,可能比源码旧——改 EGO 后记得重编。
 
 ## Git 提交署名(强制)
-- 禁止在 commit message 中添加 `Co-Authored-By:` 行 —— 不要把 Claude(或任何 AI)添加为 co-author。
-- 禁止在 commit / PR 描述中添加 "Generated with Claude Code"、"🤖 ..." 等 AI 署名。
-- 不要把 Claude 列入 contributor。
+- **禁止** `Co-Authored-By:` 行,**禁止**把 Claude/任何 AI 列为 co-author。
+- **禁止** "Generated with Claude Code"、"🤖" 等 AI 署名。
+- 提交/推送**只在用户明确要求时**做。

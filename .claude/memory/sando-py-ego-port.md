@@ -11,8 +11,8 @@ metadata:
 
 **关键技术(为何几乎免费)**:EGO 输出**均匀 cubic B-spline = 分段多项式**;每段转 Bezier(M₃·控制点列,EGO 控制点是 **3×Ncols**、`evaluateDeBoorT(t)` t∈[0,dur])→ 我们的连续时间 conformal-deficit 证书原样跑(cubic→deg6,像 quintic MINCO→deg10)。执行 EGO 轨迹=白拿丝滑,套层不替换。
 
-**planner-无关核**(在 `bernstein_cert.hpp`):`certify_segments_vs_sphere`(任意次分段 Bernstein 控制点)+ g_elevate/g_square/g_subdiv/g_left_subcurve/g_seg_worst + `minco_to_segments`。MINCO(deg5) 与 EGO(cubic) 喂同一个核。交叉验证:同一 MINCO 轨迹,deg-5 专用路径 vs 通用核**判定+margin 完全一致**。见 [[sando-py-bernstein-deficit-cert]]。
+**planner-无关核**(在 `bernstein_cert.hpp`):`certify_segments_vs_sphere`(任意次分段 Bernstein 控制点)+ g_elevate/g_square/g_subdiv/g_left_subcurve/g_seg_worst + `minco_to_segments`。MINCO(deg5) 与 EGO(cubic) 喂同一个核。交叉验证:同一 MINCO 轨迹,deg-5 专用路径 vs 通用核**判定(certified)一致**(margin 打印未断言)。见 [[sando-py-bernstein-deficit-cert]]。
 
 **整合产物**:`ego_capi.ego_certify`(B-spline→Bezier→核)+ `ego_bridge.certify()` + `metaurban/ego_safety_smoketest.py`(5/5 sound,拒静态/head-on 碰撞、认证安全、连续时间正确处理 mover 时序)+ **`metaurban/ego_safe.py` 的 `EgoSafe`**(EGO 规划 + 我们的层当 RTA 判官:每次 replan 认证 B-spline vs 各动障 conformal 管,不过就 hold)。headless 闭环 demo:3 横穿人,replans=25/certified=22/held=3,**到达 + 执行最小净空 1.28m 全程不撞 + 丝滑**。提交在 feat/bernstein-gate(a5e80d1 等)。
 
-**还没做**:接进 `render_3d_video.py --ego`(可视化,需显示器,现 EGO 裸跑没挂层)+ 接进 `eval_batch.py`(headless benchmark 出 EGO+层 vs SANDO 成功率/碰撞/卡死数字)。EGO 喂动障点云就会避障(self-test 直穿是退化场景)。层=判官非矫正见 [[sando-py-layer-judge-not-corrector]]。
+**进度(2026-06-22 更新,见 [[sando-core-status-2026-06]])**:已接进 `render_3d_video.py`(`--ego`/`--ego_safe`)+ `ab_runner.py`(10-seed raw EGO vs EGO+层 A/B,真四旋翼动力学,出 `out/ab_runs/`)。**仍没做**:接进 `eval_batch.py`(那个还是 SANDO 核、无 layer ON/OFF 轴)。注:`ab_runner.py` 提交版解析器只抓 cert+hold,但 `summary.csv` 有 cert/brake/hold 三列 → csv 是更新脚本生成的,要对齐。层=判官非矫正见 [[sando-py-layer-judge-not-corrector]]。

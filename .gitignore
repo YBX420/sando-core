@@ -1,11 +1,16 @@
 # C++ build artifacts
 cpp/build/
+cpp/build_v2/
 build/
 
 # compiled capi shared lib (rebuilt by hand: g++ -O2 -shared -fPIC ... -o capi/sando_capi.so)
 cpp/capi/sando_capi.so
 cpp/build/sando_capi.so
 cpp/capi/sando_capi.dll
+
+# EGO-Planner capi (rebuilt by hand: g++ -O2 -shared -fPIC -Wno-narrowing ... -o capi/ego_capi.so)
+ego/capi/ego_capi.so
+ego/capi/ego_capi.dll
 
 # ROS 2 / colcon (under cpp/ros2 — source is tracked, build output is not)
 cpp/ros2/build/

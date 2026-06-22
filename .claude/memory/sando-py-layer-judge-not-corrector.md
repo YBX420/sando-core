@@ -11,7 +11,9 @@ metadata:
 - **不通过谁修正**:由**现有 planner 兜底**接手——gatekeeper 保持上一条已认证承诺轨迹 / recovery(yield/刹车/爬升) / 下一拍重规划 / (EgoSafe 里)hold。粗粒度,不是层算的。
 - **最小修正 QP(真正的"线路修正")= 设计里有、还没建。** 对照 CLAUDE.md `RTA = 监视器独立节点 + 最小修正 QP + 垂直爬升 backup`:我们有**监视器/判官**那半,**最小修正 QP 那半没做**。**用户 2026-06-20 明确:先不做线路修正,先整合 EGO+套件。** 平滑刹车/CRET 是 recovery 级修正(失败兜底),不是证书的一部分、也不是最小修正 QP。
 
-**这套代码当前形态(feat/bernstein-gate 分支,golden 24/24,全 default-OFF):**
+> **2026-06-22 更新**(见 [[sando-core-status-2026-06]]):ctest 现 **25/25**(非 24);**接缝 seam_bias 已做**(`seam_c2_from_state` 默认 OFF + `seam_bias_alpha` + `test_seam_exec_state.cpp` + A_exec LPF 重锚),下文「接缝没做」那条已过时。最小修正 QP 仍没建(用户暂缓),判官非矫正的定位不变。
+
+**这套代码当前形态(feat/bernstein-gate 分支,ctest 25/25,全 default-OFF):**
 - `minco_deficit_cert`:S3 连续时间 deficit 当 mover GATE(替双重 unsound 密采样门,见 [[sando-py-mover-gate-bug]])。
 - `minco_recovery_smooth_brake`:recovery 平滑刹车(诚实发现:头对头急停 jerk 物理固有,平滑会前冲撞威胁→正确回退;只在前方安全时平滑。闭环测试 head-on 回退/侧面 2.5→0.008)。
 - `minco_yaw_c2_smooth`(+`minco_yaw_accel_max`/`minco_yaw_lowspeed_lo`):jerk-限制 C2 yaw governor(OFF 1.0→ON 0.06)。
