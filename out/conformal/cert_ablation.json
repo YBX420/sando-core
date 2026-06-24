@@ -1,0 +1,37 @@
+{
+  "n_cases": 500,
+  "n_collide": 367,
+  "stats": {
+    "continuous": {
+      "safe": 133,
+      "false_safe": 0,
+      "false_unsafe": 0
+    },
+    "discrete_2": {
+      "safe": 335,
+      "false_safe": 202,
+      "false_unsafe": 0
+    },
+    "discrete_3": {
+      "safe": 240,
+      "false_safe": 107,
+      "false_unsafe": 0
+    },
+    "discrete_5": {
+      "safe": 158,
+      "false_safe": 25,
+      "false_unsafe": 0
+    },
+    "discrete_9": {
+      "safe": 138,
+      "false_safe": 5,
+      "false_unsafe": 0
+    }
+  },
+  "samples": [
+    2,
+    3,
+    5,
+    9
+  ]
+}

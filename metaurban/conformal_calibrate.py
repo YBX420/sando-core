@@ -40,6 +40,9 @@ DELTA = DT_CTRL          # perception->commit latency already accrued at tau=0
 DELTAS = np.array([0.30, 0.45, 0.60, 0.75, 0.90, 1.05])
 EPS_LEVELS = [0.20, 0.10, 0.05, 0.01]
 CAL_FRAC = 0.6           # fraction of tracks used for calibration (rest = test)
+# deployed motion model for the predicted centre (predictor_compare.py: CV roughly HALVES the pedestrian
+# keep-out vs CA at the same coverage, because CA's noisy accel extrapolation overshoots jerky pedestrians).
+PRED_MODEL = os.environ.get("PRED_MODEL", "cv")
 
 
 def _interp_xy(t_track, xy_track, t_query):
@@ -71,7 +74,7 @@ def residuals_for_track(mover, rng):
             true_future = _interp_xy(t_tr, xy_tr, tk + d)
             if true_future is None:
                 continue
-            pred = trk.predict([d])[0, :2]
+            pred = trk.predict([d], model=PRED_MODEL)[0, :2]
             out.append((float(d), float(np.linalg.norm(true_future - pred))))
     return out
 
@@ -168,7 +171,7 @@ def main():
     for m in tracks:
         cls_tracks[str(m["cls"])] = cls_tracks.get(str(m["cls"]), 0) + 1
 
-    report = dict(n_tracks=n_tr, n_cal_tracks=n_cal, n_test_tracks=n_tr - n_cal,
+    report = dict(n_tracks=n_tr, n_cal_tracks=n_cal, n_test_tracks=n_tr - n_cal, pred_model=PRED_MODEL,
                   dt_ctrl=DT_CTRL, meas_noise=MEAS, tau=TAU, delta=DELTA, deltas=DELTAS.tolist(),
                   class_track_counts=cls_tracks, groups={})
 

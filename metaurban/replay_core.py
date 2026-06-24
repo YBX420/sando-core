@@ -30,6 +30,7 @@ MEAS = 0.07
 PHI = math.radians(25.0)
 HORIZON = 7.5
 MAXTICKS = 240
+PRED_MODEL = os.environ.get("PRED_MODEL", "cv")   # deployed predictor (CV: tighter conformal keep-out, see calib)
 FOV_R = 14.0          # perception/cert range: only movers within FOV_R are fed to EGO + certified (a TAU=0.75s,
 #                       3 m/s mover >14 m away can't reach the drone within the trust window). Matches a real
 #                       onboard depth sensor's useful range and keeps the per-tick cert/cloud cost bounded.
@@ -183,6 +184,7 @@ def run_replay(movers, ep, mode="ours", calib=None, predict=True, max_vel=3.0, m
     min_clr = 1e18; max_z = start[2]; reached = False
     counts = {k: 0 for k in ("straight", "around_l", "around_r", "over", "climb", "evade", "native")}
     hist = []
+    best_d = 1e18; stall = 0                            # early-stop degenerate episodes (EGO can't plan -> evade spins)
 
     def present_idx(t):
         return [i for i in range(len(movers.m)) if movers.present(i, t)]
@@ -220,7 +222,7 @@ def run_replay(movers, ep, mode="ours", calib=None, predict=True, max_vel=3.0, m
             cloud = []
             for i in near:
                 trk = trackers[i]
-                xy = trk.predict(np.linspace(0, DT, 2))[:, :2] if trk.ready else dets[i][None, :2]
+                xy = trk.predict(np.linspace(0, DT, 2), model=PRED_MODEL)[:, :2] if trk.ready else dets[i][None, :2]
                 cloud += _cyl_cloud(xy, movers.m[i]["r"], 0.3, movers.m[i]["h"])
             ego.update_cloud(np.asarray(cloud, float) if cloud else np.zeros((0, 3)), p_d)
 
@@ -230,6 +232,8 @@ def run_replay(movers, ep, mode="ours", calib=None, predict=True, max_vel=3.0, m
             for i in near:
                 cls = movers.m[i]["cls"]; q, veff = calib.get(cls, calib["_all"])
                 c0, vv, aa = trackers[i].state()
+                if PRED_MODEL == "cv":
+                    aa = np.zeros(3)                     # CV deployment: cert polynomial matches the CV-calibrated tube
                 if not predict:
                     vv, aa = np.zeros(3), np.zeros(3)
                 R = movers.m[i]["r"] + R_DRONE + D_SAFE_H + q
@@ -303,8 +307,15 @@ def run_replay(movers, ep, mode="ours", calib=None, predict=True, max_vel=3.0, m
             hist.append(dict(tick=tick, t=round(t, 2), clr=round(tick_clr, 3) if tick_clr < 1e17 else None,
                              kind=kind, z=round(float(p_d[2]), 2),
                              p=[round(float(p_d[0]), 2), round(float(p_d[1]), 2)]))
-        if np.linalg.norm(p_d[:2] - goal[:2]) < 0.8:
+        dgoal = float(np.linalg.norm(p_d[:2] - goal[:2]))
+        if dgoal < 0.8:
             reached = True; break
+        if dgoal < best_d - 0.1:
+            best_d = dgoal; stall = 0
+        else:
+            stall += 1
+        if stall > 40:                                 # ~12 s without net progress -> give up (not reached)
+            break
 
     return dict(mode=mode, reached=reached, ticks=tick + 1, time_s=(tick + 1) * DT,
                 min_clr=float(min_clr) if min_clr < 1e17 else None,

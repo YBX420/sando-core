@@ -93,7 +93,7 @@ def run_episode(mode="ours", max_vel=None, scene_name=None, seed=2026, record=Fa
     # Without it the cert only guarantees clearance to the PREDICTED centre, so when the human moves unlike the
     # prediction the true clearance can dip < 0 (collide). DUAL certify (predicted AND current position) on top
     # covers "human did NOT move as predicted". Together -> never collide, while staying tight enough to beat EGO.
-    Q_CONF = float(os.environ.get("EGO_QCONF", 0.15))
+    Q_CONF = float(os.environ.get("EGO_QCONF", 0.125))   # CONFORMAL-CALIBRATED intercept (pedestrian, CV, eps=0.05)
     # CRITICAL: inflate ours' EGO grid to ~d_safe so EGO's own 2-D route already clears the certificate margin.
     # With the old thin 0.3 inflation EGO routed at 0.3-0.5 m and the d_safe cert REJECTED every ground route ->
     # the drone climbed OVER everything (slow, jittery). At d_safe+slack the straight/around 2-D routes certify,

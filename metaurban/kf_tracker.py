@@ -68,9 +68,15 @@ class MoverTracker:
         a = np.array([self._clamp_a(self.fx.x[2]), self._clamp_a(self.fy.x[2]), 0.0])
         return c0, v, a
 
-    def predict(self, ts):
-        """Predicted centres at time offsets ts (1D array) -> (len(ts), 3). Same polynomial the cert uses."""
+    def predict(self, ts, model="ca"):
+        """Predicted centres at time offsets ts (1D array) -> (len(ts), 3).
+          model="ca": full constant-acceleration polynomial c0 + v*t + 1/2 a*t^2 (the cert's polynomial).
+          model="cv": constant-velocity c0 + v*t (drops the noisy filtered accel; for jerky pedestrians the CA
+                      accel term overshoots, so CV often has a SMALLER conformal residual -> tighter keep-out).
+        Conformal calibration (predictor_compare.py) picks the model that minimises the certified keep-out."""
         c0, v, a = self.state()
+        if model == "cv":
+            a = np.zeros(3)
         ts = np.asarray(ts, float).reshape(-1, 1)
         return c0[None, :] + ts * v[None, :] + 0.5 * ts**2 * a[None, :]
 

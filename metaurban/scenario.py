@@ -24,7 +24,10 @@ def knobs():
         D_SAFE_V=_f("EGO_DSAFEV", 0.5),  # VERTICAL standoff above the head (the OVER half)
         REACH_PAD=_f("EGO_REACHPAD", 0.3),  # posture/arm/jump reach added to head-top for z_clear
         TAU=_f("EGO_TAU", 0.75),         # certificate trust window [0,TAU]
-        V_EFF=_f("EGO_VEFF", 0.2),       # horizontal tube growth rho(t)=r+V_EFF*(t+delta) (covers KF xy drift)
+        # CONFORMAL-CALIBRATED (was a hand-set 0.2 placeholder). v_eff is the (1-eps) conformal quantile slope of
+        # the KF prediction residual on REAL MetaUrban pedestrians, CV predictor, eps=0.05 -> 0.61 m/s (validated
+        # to 0.952 marginal coverage on held-out tracks). See conformal_calibrate.py + docs/conformal-results-2026-06.md.
+        V_EFF=_f("EGO_VEFF", 0.61),      # horizontal tube growth rho(t)=q_conformal+V_EFF*(t+delta), gives P(collision)<=eps
         V_EFF_Z=_f("EGO_VEFFZ", 0.0),    # vertical floor growth (0: KF pins vz=az=0, height-bounded body)
         DT=_f("EGO_DT", 0.30),           # control period = perception->commit latency delta
         MAX_VEL=_f("EGO_MAXVEL", 3.0),
