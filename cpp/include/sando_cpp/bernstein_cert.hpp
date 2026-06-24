@@ -287,15 +287,45 @@ inline double g_seg_worst(const std::vector<Iv>& S, const Iv& R2, int depth, int
   std::vector<Iv> L, R; g_subdiv(S, L, R);
   return std::max(g_seg_worst(L, R2, depth + 1, maxdepth), g_seg_worst(R, R2, depth + 1, maxdepth));
 }
+// Worst deficit upper bound when the deficit b = rho^2 - S is ALREADY assembled (deg-2n Bernstein).
+// Needed once the tube radius rho(t) grows with time (deg-2 rho^2) so R^2 is no longer a constant:
+// the deficit must be formed BEFORE de Casteljau subdivision (subdividing a fixed R^2 against S is only
+// valid for a constant tube).  hull = max_k b_hi_k; subdivide b (sound convex combos) and recurse.
+inline double g_seg_worst_deficit(const std::vector<Iv>& b, int depth, int maxdepth) {
+  double hull = -std::numeric_limits<double>::infinity();
+  for (const auto& s : b) { if (s.hi > hull) hull = s.hi; }
+  if (hull <= 0.0 || depth >= maxdepth) return hull;
+  std::vector<Iv> L, R; g_subdiv(b, L, R);
+  return std::max(g_seg_worst_deficit(L, depth + 1, maxdepth), g_seg_worst_deficit(R, depth + 1, maxdepth));
+}
 
 // Whole committed PIECEWISE-BERNSTEIN trajectory (any degree per segment) vs ONE sphere obstacle whose
 // centre is c(t)=c0+vel*t+0.5*acc*t^2.  R = total inflated radius (incl. r_body+d_safe+q_conformal).
 // CERTIFIED => ||p(t)-c(t)|| >= R for ALL continuous t in [0, t_hi].
+// v_eff/delta upgrade the constant radius R into a TIME-GROWING tube rho(t) = R + v_eff*(t + delta):
+//   - v_eff = the reachability/conformal growth rate (max-speed hard floor, or the conformal residual
+//     quantile). delta = perception->commit latency (the tube must already be inflated by v_eff*delta at
+//     trajectory t=0, since the obstacle was observed delta seconds before this committed trajectory starts).
+//   - v_eff=0 (default) => rho=R constant => byte-identical to the old constant-R certificate.
+// The deficit b = rho^2 - S is now a genuine deg-2n Bernstein polynomial (rho^2 is deg-2 in t, elevated to
+// 2n) assembled BEFORE de Casteljau subdivision — subdividing a fixed R^2 against S would be unsound here.
+// n_axes selects the obstacle GEOMETRY: 3 (default) sums x,y,z -> a SPHERE ||p-c||>=rho (byte-identical to
+// the old cert); 2 sums only x,y -> a VERTICAL-CYLINDER horizontal-separation proof sqrt(dx^2+dy^2)>=rho
+// (the AROUND half of the cylinder disjunction; z is ignored, so it is SOUND for a full-height cylinder and
+// must NOT be replaced by the 3-D sphere, which would falsely clear a drone hovering low and horizontally
+// inside the cylinder by counting the z gap to the centre).
 inline Verdict certify_segments_vs_sphere(const std::vector<BSeg>& segs, const Eigen::Vector3d& c0,
                                           const Eigen::Vector3d& vel, const Eigen::Vector3d& acc,
                                           double R, double t_hi_in = std::numeric_limits<double>::infinity(),
-                                          int maxdepth = 16) {
-  const Iv R2 = iv_mul(iv_pt(R), iv_pt(R));
+                                          int maxdepth = 16, double v_eff = 0.0, double delta = 0.0,
+                                          int n_axes = 3) {
+  // rho^2(t) = A t^2 + Bp t + Cp, all carried as outward-rounded intervals for soundness.
+  const Iv r0_iv = iv_pt(R), v_iv = iv_pt(v_eff), d_iv = iv_pt(delta), two = iv_pt(2.0);
+  const Iv A_iv  = iv_mul(v_iv, v_iv);                                   // v_eff^2
+  const Iv B_iv  = iv_mul(two, iv_mul(r0_iv, v_iv));                     // 2 R v_eff
+  const Iv Bp_iv = iv_add(B_iv, iv_mul(two, iv_mul(A_iv, d_iv)));        // 2 R v_eff + 2 v_eff^2 delta
+  const Iv Cp_iv = iv_add(iv_add(iv_mul(r0_iv, r0_iv), iv_mul(B_iv, d_iv)),
+                          iv_mul(A_iv, iv_mul(d_iv, d_iv)));             // (R + v_eff*delta)^2
   double t_end = 0.0;
   for (const auto& sg : segs) t_end = std::max(t_end, sg.t0 + sg.dur);
   const double t_hi = std::min(t_hi_in, t_end);
@@ -306,7 +336,7 @@ inline Verdict certify_segments_vs_sphere(const std::vector<BSeg>& segs, const E
     const double t0 = sg.t0, dur = sg.dur, seg_hi = t0 + dur;
     if (t0 >= t_hi || dur <= 0.0) continue;
     std::vector<Iv> S(2 * n + 1, Iv{0.0, 0.0});
-    for (int coord = 0; coord < 3; ++coord) {
+    for (int coord = 0; coord < n_axes; ++coord) {
       const double c0c = c0(coord), vc = vel(coord), ac = acc(coord);
       Iv g0 = iv_add(iv_add(iv_pt(c0c), iv_mul(iv_pt(vc), iv_pt(t0))),
                      iv_mul(iv_pt(0.5 * ac), iv_mul(iv_pt(t0), iv_pt(t0))));
@@ -319,13 +349,70 @@ inline Verdict certify_segments_vs_sphere(const std::vector<BSeg>& segs, const E
       std::vector<Iv> Sc = g_square(w);                                // deg 2n
       for (int k = 0; k <= 2 * n; ++k) S[k] = iv_add(S[k], Sc[k]);
     }
-    std::vector<Iv> Suse = S;
+    // tube rho^2 as a deg-2 Bernstein poly on this segment (t = t0 + s*dur), elevated to deg 2n
+    const Iv t0_iv = iv_pt(t0), dur_iv = iv_pt(dur);
+    const Iv q0 = iv_add(iv_add(iv_mul(A_iv, iv_mul(t0_iv, t0_iv)), iv_mul(Bp_iv, t0_iv)), Cp_iv); // rho^2(t0)
+    const Iv q1 = iv_mul(iv_add(iv_mul(two, iv_mul(A_iv, t0_iv)), Bp_iv), dur_iv);                 // (2A t0 + Bp) dur
+    const Iv q2 = iv_mul(A_iv, iv_mul(dur_iv, dur_iv));                                            // A dur^2
+    std::vector<Iv> Q = {q0, iv_add(q0, iv_mul(iv_rat(1, 2), q1)), iv_add(iv_add(q0, q1), q2)};    // deg 2
+    while (static_cast<int>(Q.size()) - 1 < 2 * n) Q = g_elevate(Q);  // elevate tube poly to deg 2n
+    // deficit b = rho^2 - S (deg 2n), ASSEMBLED before subdivision; clip to trusted horizon, hull
+    std::vector<Iv> b(2 * n + 1);
+    for (int k = 0; k <= 2 * n; ++k) b[k] = iv_sub(Q[k], S[k]);
     if (seg_hi > t_hi) {
       double s_cut = (t_hi - t0) / dur;
       if (s_cut > 1.0) s_cut = 1.0; else if (s_cut < 0.0) s_cut = 0.0;
-      Suse = g_left_subcurve(S, s_cut);
+      b = g_left_subcurve(b, s_cut);
     }
-    const double sw = g_seg_worst(Suse, R2, 0, maxdepth);
+    const double sw = g_seg_worst_deficit(b, 0, maxdepth);
+    if (sw > worst_hi) worst_hi = sw;
+  }
+  return {worst_hi <= 0.0, -worst_hi};
+}
+
+// FLY-OVER half of the cylinder disjunction: proves p_z(t) >= z_clear(t) for ALL continuous t in [0, t_hi].
+// SOUND because vertical separation alone lower-bounds the distance to a vertical cylinder: once the drone is
+// above z_clear = head_top + reach_pad + r_body + d_safe_v it clears the cylinder regardless of (x,y).
+// Combine per-obstacle with certify_segments_vs_sphere(n_axes=2) as a WHOLE-WINDOW disjunction (horizontal OR
+// vertical) and AND across obstacles. NEVER a guessed near-window [t_a,t_b] — the proof must hold over the
+// ENTIRE trusted horizon [0,t_hi] (clipped by g_left_subcurve exactly as the sphere cert clips S).
+//   v_eff_z grows a vertical floor z_clear(t) = z_clear + v_eff_z*(t+delta); v_eff_z=0 (default) = constant
+//     plane, valid because the KF pins the obstacle to vz=az=0 (height-bounded rigid body + reach_pad).
+//   bez_pad = outward bound on the EGO B-spline->Bezier (Mb/6) rounding of each p_z control point, so the
+//     convex-hull lower bound is rigorous at ULP scale (0 = trust the control points exactly).
+// Deficit b_k = z_clear(t) - p_z,k (deg n); certified iff worst deficit <= 0 (p_z >= floor everywhere). The
+// deficit is assembled BEFORE g_seg_worst_deficit subdivides, so a time-growing floor stays sound.
+inline Verdict certify_segments_above_plane(const std::vector<BSeg>& segs, double z_clear,
+                                            double t_hi_in = std::numeric_limits<double>::infinity(),
+                                            int maxdepth = 16, double v_eff_z = 0.0,
+                                            double delta = 0.0, double bez_pad = 0.0) {
+  double t_end = 0.0;
+  for (const auto& sg : segs) t_end = std::max(t_end, sg.t0 + sg.dur);
+  const double t_hi = std::min(t_hi_in, t_end);
+  const Iv ze = iv_pt(z_clear), ve = iv_pt(v_eff_z), de = iv_pt(delta);
+  double worst_hi = -std::numeric_limits<double>::infinity();
+  for (const auto& sg : segs) {
+    const int n = static_cast<int>(sg.bern.size()) - 1;
+    if (n < 1) continue;                                  // need degree >= 1 (EGO/MINCO are cubic/quintic)
+    const double t0 = sg.t0, dur = sg.dur, seg_hi = t0 + dur;
+    if (t0 >= t_hi || dur <= 0.0) continue;
+    // p_z control points as outward-rounded intervals (absorb the B-spline->Bezier Mb/6 rounding via bez_pad)
+    std::vector<Iv> pz(n + 1);
+    for (int k = 0; k <= n; ++k) { const double bz = sg.bern[k](2); pz[k] = Iv{rdown(bz - bez_pad), rup(bz + bez_pad)}; }
+    // vertical floor z_clear(t) = z_clear + v_eff_z*(t+delta): deg-1 Bernstein on [t0, t0+dur], elevate to deg n
+    const Iv f0 = iv_add(ze, iv_mul(ve, iv_add(iv_pt(t0), de)));
+    const Iv f1 = iv_add(ze, iv_mul(ve, iv_add(iv_pt(seg_hi), de)));
+    std::vector<Iv> F = {f0, f1};
+    while (static_cast<int>(F.size()) - 1 < n) F = g_elevate(F);
+    // deficit b = floor - p_z (deg n), assembled before subdivision; clip straddling segment to t_hi
+    std::vector<Iv> b(n + 1);
+    for (int k = 0; k <= n; ++k) b[k] = iv_sub(F[k], pz[k]);
+    if (seg_hi > t_hi) {
+      double s_cut = (t_hi - t0) / dur;
+      if (s_cut > 1.0) s_cut = 1.0; else if (s_cut < 0.0) s_cut = 0.0;
+      b = g_left_subcurve(b, s_cut);
+    }
+    const double sw = g_seg_worst_deficit(b, 0, maxdepth);
     if (sw > worst_hi) worst_hi = sw;
   }
   return {worst_hi <= 0.0, -worst_hi};

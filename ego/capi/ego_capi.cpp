@@ -9,6 +9,28 @@
 
 using ego_planner::EGOPlannerManager;   // namespace if present; fallback below
 
+// Convert EGO's committed uniform-cubic B-spline into per-segment Bezier (Bernstein) control points for the
+// continuous-time deficit certificate. READS m->local_data_, which every reboundReplan OVERWRITES, so the
+// caller MUST snapshot each verdict before issuing the next replan. Returns empty if no committed trajectory.
+static std::vector<sando::bcert::BSeg> build_segs(EGOPlannerManager* m) {
+  std::vector<sando::bcert::BSeg> segs;
+  if (m->local_data_.duration_ <= 1e-6) return segs;
+  Eigen::MatrixXd cp = m->local_data_.position_traj_.get_control_points();   // 3 x Ncols (each col a ctrl pt)
+  const double dt = m->local_data_.position_traj_.getInterval();
+  const int N = (int)cp.cols(), p = 3;                                       // EGO position B-spline = cubic
+  static const double Mb[4][4] = {{1,4,1,0},{0,4,2,0},{0,2,4,0},{0,1,4,1}};  // uniform-cubic B-spline -> Bezier (/6)
+  for (int j = 0; j + p < N; ++j) {                                          // segments j = 0 .. N-4
+    sando::bcert::BSeg s; s.t0 = j * dt; s.dur = dt; s.bern.resize(4);
+    for (int k = 0; k < 4; ++k) {
+      Eigen::Vector3d b(0, 0, 0);
+      for (int l = 0; l < 4; ++l) b += (Mb[k][l] / 6.0) * cp.col(j + l);
+      s.bern[k] = b;
+    }
+    segs.push_back(s);
+  }
+  return segs;
+}
+
 extern "C" {
 
 void* ego_create() {
@@ -79,27 +101,48 @@ int ego_check_occ(void* h, double x, double y, double z) {
 // Converts each uniform-cubic B-spline segment to its Bezier (Bernstein) control points and runs the
 // SAME continuous-time conformal deficit certificate used for MINCO -> P(collision)<=eps, no sampling.
 // Returns 1 if CERTIFIED (||p(t)-c(t)||>=R for all t in [0,t_hi]); writes the deficit margin to *margin_out.
-int ego_certify(void* h, double* c0, double* vel, double* acc, double R, double t_hi, double* margin_out) {
+// v_eff = tube growth rate (risk dial): 0 = trust the prediction over [0,t_hi] exactly (tightest/fastest);
+//   >0 = inflate the tube by v_eff*(t+delta) to cover reachable / conformal prediction drift (safer/slower).
+// delta = perception->commit latency (tube already inflated by v_eff*delta at t=0). t_hi = trust window.
+int ego_certify(void* h, double* c0, double* vel, double* acc, double R, double t_hi,
+                double v_eff, double delta, double* margin_out) {
   auto* m = (EGOPlannerManager*)h;
-  if (m->local_data_.duration_ <= 1e-6) { if (margin_out) *margin_out = -1.0; return 0; }
-  Eigen::MatrixXd cp = m->local_data_.position_traj_.get_control_points();   // 3 x Ncols (each col a ctrl pt)
-  const double dt = m->local_data_.position_traj_.getInterval();
-  const int N = (int)cp.cols(), p = 3;                                       // EGO position B-spline = cubic
-  static const double Mb[4][4] = {{1,4,1,0},{0,4,2,0},{0,2,4,0},{0,1,4,1}};  // uniform-cubic B-spline -> Bezier (/6)
-  std::vector<sando::bcert::BSeg> segs;
-  for (int j = 0; j + p < N; ++j) {                                          // segments j = 0 .. N-4
-    sando::bcert::BSeg s; s.t0 = j * dt; s.dur = dt; s.bern.resize(4);
-    for (int k = 0; k < 4; ++k) {
-      Eigen::Vector3d b(0, 0, 0);
-      for (int l = 0; l < 4; ++l) b += (Mb[k][l] / 6.0) * cp.col(j + l);
-      s.bern[k] = b;
-    }
-    segs.push_back(s);
-  }
+  auto segs = build_segs(m);
+  if (segs.empty()) { if (margin_out) *margin_out = -1.0; return 0; }
   const double th = (t_hi > 0.0) ? t_hi : std::numeric_limits<double>::infinity();
   auto v = sando::bcert::certify_segments_vs_sphere(
       segs, Eigen::Vector3d(c0[0], c0[1], c0[2]), Eigen::Vector3d(vel[0], vel[1], vel[2]),
-      Eigen::Vector3d(acc[0], acc[1], acc[2]), R, th);
+      Eigen::Vector3d(acc[0], acc[1], acc[2]), R, th, /*maxdepth*/16, v_eff, delta);
+  if (margin_out) *margin_out = v.margin;
+  return v.certified ? 1 : 0;
+}
+
+// AROUND half of the cylinder disjunction: 2-D HORIZONTAL separation sqrt(dx^2+dy^2) >= R against the moving
+// cylinder axis c(t)=c0+vel*t+0.5*acc*t^2 (z ignored). SOUND for a full-height cylinder where the 3-D sphere
+// is NOT (the sphere would falsely clear a low hover sitting horizontally inside the footprint). Same tube knobs.
+int ego_certify_horizontal(void* h, double* c0, double* vel, double* acc, double R, double t_hi,
+                           double v_eff, double delta, double* margin_out) {
+  auto* m = (EGOPlannerManager*)h;
+  auto segs = build_segs(m);
+  if (segs.empty()) { if (margin_out) *margin_out = -1.0; return 0; }
+  const double th = (t_hi > 0.0) ? t_hi : std::numeric_limits<double>::infinity();
+  auto v = sando::bcert::certify_segments_vs_sphere(
+      segs, Eigen::Vector3d(c0[0], c0[1], c0[2]), Eigen::Vector3d(vel[0], vel[1], vel[2]),
+      Eigen::Vector3d(acc[0], acc[1], acc[2]), R, th, /*maxdepth*/16, v_eff, delta, /*n_axes*/2);
+  if (margin_out) *margin_out = v.margin;
+  return v.certified ? 1 : 0;
+}
+
+// OVER half of the cylinder disjunction: VERTICAL clearance p_z(t) >= z_clear for all t in [0,t_hi]. Once
+// above z_clear (= head_top+reach_pad+r_body+d_safe_v) the drone clears the cylinder regardless of (x,y).
+// Per obstacle the loop ORs horizontal-vs-vertical (each a whole-window proof) and ANDs across obstacles.
+int ego_certify_above(void* h, double z_clear, double t_hi, double v_eff_z, double delta,
+                      double bez_pad, double* margin_out) {
+  auto* m = (EGOPlannerManager*)h;
+  auto segs = build_segs(m);
+  if (segs.empty()) { if (margin_out) *margin_out = -1.0; return 0; }
+  const double th = (t_hi > 0.0) ? t_hi : std::numeric_limits<double>::infinity();
+  auto v = sando::bcert::certify_segments_above_plane(segs, z_clear, th, /*maxdepth*/16, v_eff_z, delta, bez_pad);
   if (margin_out) *margin_out = v.margin;
   return v.certified ? 1 : 0;
 }

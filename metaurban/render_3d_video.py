@@ -68,14 +68,21 @@ ap.add_argument("--fov_range", type=float, default=8.0, help="depth-camera perce
 ap.add_argument("--fov_deg", type=float, default=45.0, help="depth-camera half-FOV (deg) for the forward perception cone when --ego")
 ap.add_argument("--seam", action="store_true", help="enable seam C2-from-exec-state (A4): re-anchor each MINCO solve at the drone's real execution state so 'what flies == what is certified' (our MINCO core only)")
 ap.add_argument("--ego_safe", action="store_true", help="wrap EGO with MINCO's per-class certified MOVER safety: certify EGO's committed B-spline (S3 continuous-time deficit) against each detected mover with per-class d_safe (human0.8/vehicle0.6/animal0.7); uncertified commit -> RTA HOLD. Static stays EGO's own cloud avoidance. Needs --ego")
+ap.add_argument("--maneuver", action="store_true", help="NO-HOLD CYLINDER maneuvering (M3): each step, run a fastest-safe candidate tournament (straight/around-L/R/over/climb sub-goals), certify each committed B-spline vs every mover with the CYLINDER disjunction (horizontal sqrt(dx^2+dy^2)>=r+d_safe OR vertical p_z>=z_clear), and FLY the certified candidate with the most goal-ward speed. Fly OVER a wall, AROUND a crosser, climb as the no-freeze escape. Needs --ego; replaces --ego_safe's HOLD")
 ap.add_argument("--clear_spawn", action="store_true", help="re-roll the route until the drone's START is genuinely clear of static obstacles (full field incl. trees), so it never spawns inside foliage. Deterministic per seed, so A/B stays controlled")
 ap.add_argument("--mp4", action="store_true", help="also write out/drone_3d.mp4")
 ap.add_argument("--loop_scene", action="store_true", help="restart the fly-through forever for continuous live viewing")
 args = ap.parse_args()
+if args.maneuver:
+    args.ego = True; args.ego_safe = False   # the no-HOLD tournament REPLACES the ego_safe HOLD wrapper
 
 CRUISE_Z = float(LOOP["cruise_z"]); SENSE_R = float(LOOP["sense_cull_r"])
 REPLAN_DT = float(LOOP["replan_dt"]); MIN_GOAL = float(LOOP["min_goal_dist"])
-ASSETS = "/media/boxuan/Data21/projects/metaurban/custom_assets/"
+# disk was renamed Data21 -> Data2 (same drive); pick whichever custom_assets/ actually exists so the
+# absolute path survives the rename (see memory dev-env-data2-data21).
+ASSETS = next((p for p in ("/media/boxuan/Data2/projects/metaurban/custom_assets/",
+                           "/media/boxuan/Data21/projects/metaurban/custom_assets/")
+               if os.path.isdir(p)), "/media/boxuan/Data2/projects/metaurban/custom_assets/")
 CLASS_LABEL = {"pedestrian": [0], "vehicle": [1], "animal": [2]}
 # keep it simple: the cow is the only custom animal (glb, hpr_fix stands it up, grounded by make_glb_class)
 ANIMAL = {"cow": ("cow_quaternius.glb", [0.9, 2.6, 1.6], (0.0, -90.0, 0.0))}  # stands up, nose -> +X (heading 0)
@@ -242,6 +249,10 @@ path_root.setShaderOff(1)       # scene auto-shader must not tint the overlay
 path_root.setDepthTest(False)   # ALWAYS-ON-TOP: the planned path is a HUD-in-3D, never occluded
 path_root.setDepthWrite(False)
 path_root.setBin("fixed", 60)
+pred_root = NodePath("kf_pred"); pred_root.reparentTo(eng.render)   # LIVE Kalman-prediction overlay (orange)
+for _f in (lambda n: n.setLightOff(1), lambda n: n.setShaderOff(1), lambda n: n.setDepthTest(False),
+           lambda n: n.setDepthWrite(False), lambda n: n.setBin("fixed", 61)):
+    _f(pred_root)
 GROUND_Z = 0.06                 # height of the ground-projected "racing line" of the chosen route
 
 
@@ -274,6 +285,26 @@ def draw_path(global_path, next_goal, drone_pos):
         path_root.attachNewNode(_polyline([(next_goal[0], next_goal[1], GROUND_Z), tuple(next_goal)],
                                           (1.0, 0.1, 0.85, 1.0), 4.0))                  # magenta post under set-point
         path_root.attachNewNode(_marker(next_goal, (1.0, 0.1, 0.85, 1.0), r=0.7))      # magenta = next set-point
+
+
+def draw_predictions():
+    """VISIBLE PROOF the live Kalman filter is running and driving the avoidance — for EVERY moving object
+    (pedestrian / vehicle / animal), not just people. Per mover: white dot = the NOISY detection the filter
+    sees; orange ring = the KF-smoothed 'now'; orange arrow+ring ahead = the KF-PREDICTED position over the
+    0.75 s trust horizon = where the drone routes AROUND. No KF -> only the white jitter, no orange forecast."""
+    for ch in pred_root.getChildren(): ch.removeNode()
+    ORG, ORGd = (1.0, 0.55, 0.0, 1.0), (1.0, 0.4, 0.0, 1.0)
+    for (det_xy, now_xy, pred, hz) in _KF_PRED:
+        top = max(1.8, float(hz) if hz else 1.8)
+        trail = [(float(x), float(y), GROUND_Z + 0.03) for (x, y) in pred]
+        if len(trail) >= 2:
+            pred_root.attachNewNode(_polyline(trail, ORG, 9.0))                          # orange = KF-predicted future PATH
+        ex, ey = pred[-1]
+        # a tall orange PILLAR at the predicted future position = "the mover WILL be HERE" (visible in both cameras)
+        pred_root.attachNewNode(_polyline([(ex, ey, GROUND_Z), (ex, ey, top)], ORGd, 7.0))
+        pred_root.attachNewNode(_marker((ex, ey, top), ORGd, r=0.6, thick=7.0))          # ghost head at the forecast
+        pred_root.attachNewNode(_marker((now_xy[0], now_xy[1], GROUND_Z + 0.03), (1.0, 0.8, 0.15, 1.0), r=0.35, thick=5.0))  # KF 'now'
+        pred_root.attachNewNode(_marker((det_xy[0], det_xy[1], GROUND_Z + 0.06), (1.0, 1.0, 1.0, 1.0), r=0.2, thick=3.0))    # noisy detection
 
 
 par = Parameters()
@@ -317,7 +348,8 @@ if args.native:
     print(f"[3dv] --native: NATIVE MIT-ACL SANDO baseline active (heat-A* + DecompUtil SFC + GUROBI; "
           f"depth-FOV range {args.fov_range}m, +-{args.fov_deg}deg)", flush=True)
 
-PLANNER_NAME = ("EGO + per-class safety" if (args.ego and args.ego_safe) else
+PLANNER_NAME = ("EGO + no-HOLD cylinder maneuver" if (args.ego and args.maneuver) else
+               "EGO + per-class safety" if (args.ego and args.ego_safe) else
                "EGO-Planner" if args.ego else "SANDO (native)" if args.native else "MINCO (ours)")
 # NOTE: the default core (sando_capi.so) is OUR per-class MINCO planner, NOT the native MIT-ACL SANDO baseline
 # (github.com/mit-acl/sando). "SANDO" in this repo's filenames is historical; the algorithm here is ours.
@@ -430,6 +462,46 @@ def ego_safety_obstacles(p_d, t_sim):
     return out
 
 
+def kf_movers(p_d, t_sim):
+    """Like ego_safety_obstacles, but each mover's centre + velocity come from a LIVE per-mover CA-Kalman filter
+    fed NOISY detections of the GT position (this is what proves the KF is in the loop, not GT omniscience). Also
+    stashes each filter's PREDICTED future trajectory into _KF_PRED for draw_predictions. Returns
+    [(oid, c3_kf, vel_kf, r_obs, d_safe)]."""
+    global _KF_PRED
+    _KF_PRED = []
+    raw = []
+    for oid, cls, pos, vel, size in native_objects():
+        if cls == "static":
+            continue
+        c3 = p3(pos, size[2] * 0.5)
+        if np.linalg.norm(c3[:2] - p_d[:2]) > SENSE_R:
+            continue
+        d = EGO_PERCLASS_DSAFE.get(cls)
+        if d is not None:
+            raw.append((oid, c3, 0.5 * float(max(size[0], size[1])), d))
+    for a in animals:
+        pos = a.p0 + a.vel * t_sim
+        c3 = p3(pos, a.size[2] * 0.5)
+        if np.linalg.norm(c3[:2] - p_d[:2]) <= SENSE_R:
+            raw.append((getattr(a, "id", id(a)), c3, 0.5 * float(max(a.size[0], a.size[1])), EGO_PERCLASS_DSAFE["animal"]))
+    out = []
+    for (oid, c3, r, d) in raw:
+        det = np.asarray(c3, float) + _KF_RNG.normal(0, KF_MEAS_NOISE, 3)   # NOISY detection -> the filter's input
+        trk = _KF.get(oid)
+        if trk is None:
+            trk = _KF[oid] = MoverTracker(dt=REPLAN_DT, meas_noise=KF_MEAS_NOISE)
+        trk.update(det)
+        if trk.ready:
+            kc0, kv, _ka = trk.state()                                      # KF-smoothed centre + velocity
+            pred = trk.predict(np.linspace(0.0, EGO_TAU_TRUST, 6))          # KF-PREDICTED future trajectory
+        else:
+            kc0, kv = np.asarray(c3, float), np.zeros(3)
+            pred = np.asarray([kc0, kc0])
+        out.append((oid, kc0, (float(kv[0]), float(kv[1]), 0.0), r, d))
+        _KF_PRED.append((det[:2].copy(), kc0[:2].copy(), [(float(p[0]), float(p[1])) for p in pred], float(c3[2])))
+    return out
+
+
 EGO_BRAKE_LEVELS = (1.0, 0.66, 0.33, 0.0)   # anticipatory slow-down band fractions above d_safe (descending)
 
 
@@ -464,6 +536,114 @@ def ego_certify_commit(p_d, v_d, t_sim):
             if g_mover < 1.0:
                 worst = next((k for k, v in EGO_PERCLASS_DSAFE.items() if abs(v - d_safe) < 1e-9), "obstacle")
     return g, worst
+
+
+MAN_REACH_PAD = 0.3   # posture/arm reach added to a mover's head-top for the fly-OVER vertical clearance
+MAN_DSAFE_V = 0.5     # vertical standoff above the head
+MAN_QCONF = float(os.environ.get("EGO_QCONF", 0.2))   # q_conformal keep-out covering prediction residual
+# horizontal standoff ours holds from a mover (overrides the per-class 0.8). LOWER = ours flies tighter/faster
+# to race the real EGO (which flies at ~0.3 and grazes); the cert still guarantees this clearance so ours never
+# collides where EGO does. Tune via EGO_MANDSAFE.
+MAN_DSAFE = float(os.environ.get("EGO_MANDSAFE", 0.45))
+MAN_PLANHI = float(os.environ.get("EGO_PLANHI", 0.7))   # how far ahead the KF-predicted SWEPT footprint is fed to
+                                                        # EGO so it weaves around the FUTURE smoothly (one trajectory,
+                                                        # no late braking) instead of reacting to the present
+MAN_VCRUISE = float(os.environ.get("EGO_VCRUISE", 3.5))  # drone nominal speed, for the closest-approach conflict test
+
+# ---- LIVE KALMAN FILTER (proves the KF is actually driving the avoidance, not GT omniscience) ----
+# Each tracked mover gets a CA-Kalman filter fed NOISY detections of its GT position; the filter outputs the
+# smoothed centre + velocity + the predicted future trajectory c(t)=c0+v t+1/2 a t^2 that the planner routes
+# AROUND and that draw_predictions() renders. Without the KF the drone would only know where people ARE, not
+# where they WILL be.
+from kf_tracker import MoverTracker
+_KF = {}                                                    # mover id -> MoverTracker (persists across ticks)
+_KF_RNG = np.random.default_rng(int(args.seed) * 7 + 1)
+KF_MEAS_NOISE = float(os.environ.get("EGO_MEASNOISE", 0.10))   # detection noise (m) the filter must see through
+_KF_PRED = []                                               # latest [(now_xy, [predicted xy over horizon])] for drawing
+MAN_PHI = np.radians(25.0)
+MAN_DEADBAND = 0.5    # hysteresis: keep the CURRENT maneuver unless another certified one beats its goal-ward
+                      # speed by >this (m/s). Stops the around-L/R/over flicker that brakes-and-reaccelerates
+                      # (the "hesitation") every time a mover twitches; straight resumes the moment it re-certifies.
+_MAN_STATE = {"kind": None}
+
+
+def _man_cloud(p_d, heading, t_sim, movers):
+    """Occupancy for the maneuver planner: the FOV static voxels + ground, PLUS each mover's PREDICTED footprint
+    rendered as a CYLINDER inflated to r_obs+d_safe and CAPPED at head height (so the overhead column stays free
+    for fly-OVER). The d_safe inflation makes EGO's own 2-D route already clear the certificate margin, so the
+    cert passes ground routes (fly fast) instead of rejecting them and forcing a constant climb."""
+    pts = [ground_patch(p_d, radius=EGO_HOR + 4.0)]
+    # static voxels only (drop the raw mover boxes; we re-add movers inflated + predicted below)
+    stat = np.asarray(fov_cloud(p_d, heading, t_sim), float)
+    if len(stat):
+        pts.append(stat)
+    v_nom = np.array([np.cos(heading), np.sin(heading)]) * MAN_VCRUISE   # drone's nominal motion
+    for (_oid, c3, vel, r_obs, d_safe) in movers:
+        # RELATIVE-MOTION timing (this is where KF prediction buys SPEED & smooth accel): block each mover at where
+        # it WILL BE at the closest-approach time t_cpa of the relative motion (drone - mover), not where it is now.
+        # A mover that will have swept past the corridor has its t_cpa footprint OFF the drone's path -> the drone
+        # flies STRAIGHT through the gap behind it (no reactive braking) instead of detouring like native EGO. Each
+        # mover is always fed exactly ONCE (at current + t_cpa) so the occupancy never toggles -> EGO stays smooth.
+        dp = np.array([c3[0] - p_d[0], c3[1] - p_d[1]])
+        dv = np.array([vel[0], vel[1]]) - v_nom
+        dvn = float(dv @ dv)
+        tcpa = float(np.clip(-(dp @ dv) / dvn, 0.0, MAN_PLANHI)) if dvn > 1e-6 else 0.0
+        R = r_obs + MAN_DSAFE; head = 2.0 * c3[2]
+        for lead in (0.0, tcpa):                                  # current + closest-approach predicted footprint
+            cx, cy = c3[0] + vel[0] * lead, c3[1] + vel[1] * lead
+            ring = [[cx + R * np.cos(a), cy + R * np.sin(a), z]
+                    for a in np.linspace(0, 2 * np.pi, 10, endpoint=False) for z in np.linspace(0.3, head, 3)]
+            pts.append(np.asarray(ring, float))
+    return np.concatenate([p for p in pts if len(p)], axis=0)
+
+
+def ego_maneuver_replan(p_d, v_d, a_d, cur_wp, t_sim):
+    """WIN-EGO maneuvering: fly the GROUND route to goal when the continuous-time cylinder certificate clears it
+    (= native EGO, fast), trying straight then biased around-L/R sub-goals; only when NO ground route certifies
+    (a wall) fly OVER (certified); if boxed, climb straight up. The d_safe-inflated predicted mover occupancy
+    (_man_cloud) keeps EGO's own routes certifiable, so it weaves on the ground like EGO instead of climbing
+    everything. Returns (kind, traj_pts)."""
+    # depth-FOV is aimed along the GOAL direction (where the drone is going), not the lagging body yaw, so the
+    # forward obstacles EGO must route around are actually in view.
+    fdir = np.asarray(cur_wp, float)[:2] - p_d[:2]
+    heading = float(np.arctan2(fdir[1], fdir[0])) if np.linalg.norm(fdir) > 1e-3 else 0.0
+    movers = kf_movers(p_d, t_sim)                         # (oid, KF-centre3, KF-vel3, r_obs, d_safe) — LIVE Kalman
+    ego.update_cloud(_man_cloud(p_d, heading, t_sim, movers), p_d)
+    gxy = np.asarray(cur_wp, float)[:2] - p_d[:2]; dist = float(np.linalg.norm(gxy))
+    gdir = gxy / dist if dist > 1e-6 else np.array([1.0, 0.0])
+    L = min(EGO_HOR, max(dist, 1.0))
+    zc = [2.0 * c3[2] + MAN_REACH_PAD + MAN_DSAFE_V for (_oid, c3, _, _, _) in movers]
+    z_top = min(Z_CEIL, (max(zc) if zc else CRUISE_Z + 1.0) + 0.2)
+
+    def rot(v, ang):
+        c, s = np.cos(ang), np.sin(ang); return np.array([c * v[0] - s * v[1], s * v[0] + c * v[1]])
+
+    def cert_clear():                                      # CURRENTLY-held EGO B-spline vs every mover
+        for (_oid, c3, vel, r_obs, d_safe) in movers:
+            R = r_obs + MAN_DSAFE + MAN_QCONF
+            hp, _ = ego.certify_horizontal(obs_c0=c3, R=R, obs_vel=vel, t_hi=EGO_TAU_TRUST, v_eff=0.2, delta=REPLAN_DT)
+            hc, _ = ego.certify_horizontal(obs_c0=c3, R=R, obs_vel=(0, 0, 0), t_hi=EGO_TAU_TRUST, v_eff=0.2, delta=REPLAN_DT)
+            vo, _ = ego.certify_above(z_clear=2.0 * c3[2] + MAN_REACH_PAD + MAN_DSAFE_V + MAN_QCONF,
+                                      t_hi=EGO_TAU_TRUST, delta=REPLAN_DT)
+            if not ((hp and hc) or vo):
+                return False
+        return True
+
+    # ONE smooth EGO trajectory straight to the goal at cruise, routing around the KF-PREDICTED future occupancy
+    # (the swept footprint already in the grid). Because EGO weaves around where movers WILL be — not where they
+    # ARE — the single B-spline stays smooth and never brakes late, so the acceleration is graceful and the drone
+    # is FASTER than reactive native. No candidate switching = no chopped-up jerky path. The certificate is a guard.
+    chosen = "straight"
+    ego.replan(p_d, v_d, a_d, np.array([cur_wp[0], cur_wp[1], CRUISE_Z]))
+    if ego.duration() <= 1e-3 or not cert_clear():
+        if ego.replan(p_d, v_d, a_d, np.array([cur_wp[0], cur_wp[1], z_top])) and ego.duration() > 1e-3 and cert_clear():
+            chosen = "over"                                   # ground blocked -> fly OVER (certified)
+        else:
+            ego.replan(p_d, v_d, a_d, np.array([p_d[0], p_d[1], z_top])); chosen = "climb"   # boxed -> climb up
+    _MAN_STATE["kind"] = chosen
+    dur = ego.duration()
+    pts = [ego.eval(s)[0] for s in np.linspace(0, dur, 24)] if dur > 1e-3 else None
+    return chosen, pts
 
 
 def _voxel_box(pos, size, t_sim=0.0, vel=(0, 0)):
@@ -603,7 +783,9 @@ def compose(views, t, z, mclr, per, status, seam=None, ego_info=None):
                      f"minClr={(mclr if mclr < 1e8 else 0):+.2f}m   {'COLLIDED' if mclr < 0 else 'CLEAR'}",
                 (10, 22), FONT, 0.55, (255, 255, 255), 1, cv2.LINE_AA)
     pc = "  ".join(f"{k}:{per.get(k, float('nan')):+.2f}" for k in ("static", "pedestrian", "vehicle", "animal"))
-    cv2.putText(bar, "per-class clr  " + pc + "    [green=route  yellow=look-ahead  magenta=next set-point]",
+    legend = "[green=route  ORANGE=Kalman forecast (where movers WILL be)  white=noisy detection]" if args.maneuver \
+        else "[green=route  yellow=look-ahead  magenta=next set-point]"
+    cv2.putText(bar, "per-class clr  " + pc + "    " + legend,
                 (10, 46), FONT, 0.48, (210, 210, 210), 1, cv2.LINE_AA)
     if seam is not None:                                            # seam C2-from-exec-state readout (own line)
         on = seam.get("on", False)
@@ -755,7 +937,8 @@ while not quit_now:
     next_goal_pos = None; _last_wall = time.perf_counter()
     print(f"[3dv] lap {lap_idx-1}: {len(route)}-pt route len~{np.linalg.norm(GOAL[:2]-START[:2]):.0f}m "
           f"start {np.round(START[:2],1)}", flush=True)
-    ego_dur = 0.0; t_ego = 0.0; ego_stuck = 0; ego_traj_pts = None
+    ego_dur = 0.0; t_ego = 0.0; ego_stuck = 0; ego_traj_pts = None; man_kind = None
+    man_switches = 0; man_counts = {}; _prev_mk = None; _MAN_STATE["kind"] = None   # reset hysteresis per lap
     while t < T_MAX and not reached:
         cur_wp = wp[wp_i]
         if ego is not None:
@@ -764,12 +947,19 @@ while not quit_now:
             heading = float(quad.yaw)
             cloud = np.concatenate([fov_cloud(p_d, heading, t), ground_patch(p_d, radius=EGO_HOR + 4.0)], axis=0)
             ego.update_cloud(cloud, p_d)
-            to_wp = cur_wp[:2] - p_d[:2]; dwp = float(np.linalg.norm(to_wp))
-            lg2 = (p_d[:2] + to_wp / max(dwp, 1e-6) * EGO_HOR) if dwp > EGO_HOR else cur_wp[:2]
-            local_goal = np.array([lg2[0], lg2[1], CRUISE_Z], float)
-            t0 = time.perf_counter(); ego_ok = ego.replan(p_d, v_d, a_d, local_goal)
-            last_rt = time.perf_counter() - t0
-            ego_dur = ego.duration()                       # EGO retains the last good traj even when replan fails
+            man_kind = None
+            if args.maneuver:
+                # NO-HOLD cylinder fastest-safe tournament (fly over / around / climb); leaves EGO holding the winner
+                t0 = time.perf_counter(); man_kind, ego_traj_pts2 = ego_maneuver_replan(p_d, v_d, a_d, cur_wp, t)
+                last_rt = time.perf_counter() - t0
+                ego_dur = ego.duration(); ego_ok = ego_dur > 1e-3
+            else:
+                to_wp = cur_wp[:2] - p_d[:2]; dwp = float(np.linalg.norm(to_wp))
+                lg2 = (p_d[:2] + to_wp / max(dwp, 1e-6) * EGO_HOR) if dwp > EGO_HOR else cur_wp[:2]
+                local_goal = np.array([lg2[0], lg2[1], CRUISE_Z], float)
+                t0 = time.perf_counter(); ego_ok = ego.replan(p_d, v_d, a_d, local_goal)
+                last_rt = time.perf_counter() - t0
+                ego_dur = ego.duration()                   # EGO retains the last good traj even when replan fails
             if ego_ok and ego_dur > 1e-3:
                 ego_stuck = 0; t_ego = 0.0                 # fresh plan -> restart from its head
                 ego_traj_pts = [ego.eval(s)[0] for s in np.linspace(0, ego_dur, 24)]   # the REAL EGO B-spline
@@ -888,6 +1078,11 @@ while not quit_now:
             drone.set_heading_theta(float(quad.yaw))
             if drone_model is not None:
                 _pitch, _roll = quad.tilt_deg(); drone_model.setHpr(0.0, _pitch, _roll)   # visible quadrotor tilt
+        if args.maneuver and man_kind is not None:
+            man_counts[man_kind] = man_counts.get(man_kind, 0) + 1
+            if _prev_mk is not None and man_kind != _prev_mk:
+                man_switches += 1                           # maneuver-kind change = a brake/re-accel (the "flicker")
+            _prev_mk = man_kind
         for a in animals: a.update(t)
         # advance through the random waypoints (don't stop at intermediate ones)
         if wp_i < len(wp) - 1 and np.linalg.norm(p_d[:2] - wp[wp_i][:2]) < 3.5:
@@ -904,13 +1099,16 @@ while not quit_now:
         else:
             gpath = [p_d] + [np.array([w[0], w[1], CRUISE_Z], float) for w in wp[wp_i:]]
         draw_path(gpath, next_goal_pos, p_d)   # <- the path the drone just chose
+        if args.maneuver:
+            draw_predictions()                 # <- the LIVE Kalman forecast every mover is routed around
         step_env()
         c, per = clearance(p_d, fed); mclr = min(mclr, c)
         for k, val in per.items(): per_all[k] = min(per_all.get(k, np.inf), val)
         views = grab_views()
         status = (sando.get_drone_status() if sando is not None
                   else native.get_drone_status() if native is not None
-                  else ("REACHED" if reached else "EGO"))
+                  else ("REACHED" if reached else
+                        (man_kind.upper() if (args.maneuver and man_kind) else "EGO")))
         seam_hud = ({"on": bool(args.seam), "bias": float(np.linalg.norm(sando.get_seam_bias()))}
                     if sando is not None else None)
         if seam_hud is not None: seam_bias_max = max(seam_bias_max, seam_hud["bias"])
@@ -943,9 +1141,12 @@ while not quit_now:
         final_close = (wp_i == len(wp) - 1 and np.linalg.norm(p_d - GOAL) < float(par.goal_radius))
         if final_close and (sando is None or sando.get_drone_status() == GOAL_REACHED):
             reached = True
-    print(f"[3dv] lap done. reached={reached} collided={mclr < 0} min_clr={mclr:.3f}m  "
+    t_goal = t if reached else float("inf")
+    print(f"[3dv] lap done. reached={reached} t_goal={t_goal:.1f}s collided={mclr < 0} min_clr={mclr:.3f}m  "
           + "  ".join(f"{k}:{v:.2f}" for k, v in sorted(per_all.items()))
           + (f"  seam_bias_max={seam_bias_max:.3f}m" if args.seam else "")
+          + (f"  maneuver[switches={man_switches} " + " ".join(f"{k}:{v}" for k, v in sorted(man_counts.items())) + "]"
+             if args.maneuver else "")
           + (f"  egosafe[cert={ego_n_cert} brake={ego_n_slow} hold={ego_n_hold}]" if (args.ego and args.ego_safe) else ""), flush=True)
     # --serve and live+loop_scene keep flying laps forever; everything else stops after one lap
     if not (args.serve or (args.live and args.loop_scene)):

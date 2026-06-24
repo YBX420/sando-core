@@ -5,6 +5,8 @@ metadata:
   type: project
 ---
 
+**⚠️ 2026-06-23 再聚焦(覆盖本条 headline):产品 = 认证「最快+最安全绕行」(certified go-around),不是判官只 HOLD;只做 EGO(MINCO 暂搁置);KF(CA)预测→喂预测占据给 EGO 绕开未来→证书检预测移动球→过则飞。M1 已跑通(`metaurban/ego_goaround.py`,EGO 真绕行 y≈4.2),诚实点:q_conformal=0 让预测误差吃 d_safe(净空 0.677<0.8)。详见 [[sando-core-goaround-m1-2026-06]] + [[sando-core-direction-2026-06]] 6/23 块。下面 6-22 的"二元 HOLD 正典/双 planner"framing 降为对照基线/支撑。**
+
 **2026-06-22 全量审计统一稿(8 子系统读真代码后)。** 权威文档 = `docs/safety-layer-spec.md`(v2)+ `docs/safety-layer-plan.md`(v2)+ `CLAUDE.md`,均已按本条重写。**重心从论文(RA-L 9/15)转为工程实现**(用户决定);论文降下游、未终结。
 
 **仓库真相**:唯一真相 = 分支 `feat/bernstein-gate`(HEAD `46f5ac9`)。`master`(6d380fd)只有 MetaUrban 4 类避障+可视化无证书/EGO;`bcert-wire`(e8350cc)是纯祖先,对应的 `sando-core-bcert/` 旧 worktree **忽略**。

@@ -24,16 +24,23 @@
 - **ctest 涨到 25**,上次 Linux 跑 **25/25 全过**(`LastTest.log` 2026-06-20)。
 - **对照基线** sando_native(MIT-ACL SANDO + GUROBI)vendored。
 
-## 2. 现在做什么(下一波工程,按优先级)
+## 2. 现在做什么(EGO-first 认证绕行,2026-06-23 重排)
 
-> 都不依赖 conformal/论文,纯把现有东西做扎实、做完整。
+> **2026-06-23 用户拍板:只做 EGO(MINCO 暂搁置),产品 = 认证绕行(go-around)而非判官只 HOLD,用 KF 预测驱动。** M1 已跑通(`metaurban/ego_goaround.py` + `kf_tracker.py`):EGO 为避开预测人群真绕行(y≈4.2),22 go-around / 7 HOLD / 到达;但暴露两问题 → 下面 A/B。都不依赖论文。
 
-1. **统一「层」的形态**:正典 = 二元 certify-or-HOLD(`ego_safe.py`);分级减速刹车(`render --ego_safe`)是抛光层。把两者关系理清,别再有两份打架的实现 + 两个对不上的 A/B 脚本(`ab_runner.py` 解析器要对齐 `summary.csv` 的 cert/brake/hold)。
-2. **EGO 接进 `eval_batch.py`**:出 EGO raw vs EGO+层 的成功率/碰撞/卡死/净空定量表(现在只有 per-seed mp4)。
-3. **静态碰撞**:A/B 碰撞主来源是静态穿透(seed31 −0.793m,层没动作)。决定静态要不要也上证书门 / 或修 SFC 覆盖。
-4. **MINCO 核稳定性回归**:最新调参退化到到达 12.5–54%、卡死 46–88%;查 recovery/regrasp 根因(与证书正交,但拖累 demo)。
+**A(先做,便宜,治"安全"+"快")**:
+1. **q_conformal 占位裕度**:给 R 加一个覆盖 KF 预测残差的裕度(先拍 ~0.15m 或取残差分位)→ 把执行净空从 0.677 拉回 ≥d_safe 0.8。(M1 发现:预测误差吃了裕度。)
+2. **减冻走廊砍 HOLD**:把"喂整条预测扫掠"改成"只喂近期预测位置"——M1 的 7 次 HOLD 几乎都是三人预测足迹叠在正前方、EGO 找不到路(`first_optimize_step_success=0`)。
+
+**B(后做,治本)**:**证书 deg-2 拨盘**(`R²→ρ(t)²=(r0+v_eff·t)²`、修两个 sound bug[τ 锚 t_obs+δ / 亏量先组再细分]、球改竖直圆柱恢复飞越),`v_eff` 接 conformal 分位 = 真正的 C2。详见 `docs/direction-2026-06.md §3`。
+
+**其余(EGO 相关收尾,不阻塞 A/B)**:
+3. **EGO 接进 `eval_batch.py`**:出 raw EGO vs EGO+绕行层 的成功率/碰撞/卡死/净空定量表(现在只有 per-seed mp4 + headless 自检)。
+4. **静态碰撞**:A/B 碰撞主来源是静态穿透(seed31 −0.793m,层没动作)。决定静态要不要也上证书门 / 或修 SFC 覆盖。
 5. **构建卫生**:`ego_capi.so` 变成 tracked/CMake 目标或明确 .gitignore(现手编 untracked、可能比源码旧);清掉误提交的 `cpp/build_v2/` 构建产物。
 6. **committed-traj 的 capi getter**(`get_pwp` 暴露到 ABI),监视器要整条已承诺曲线时能拿到。
+
+> 搁置(MINCO 相关,等回到 MINCO 再说):统一 `ego_safe.py` 二元 HOLD 与 `render --ego_safe` 分级刹车两份实现 + `ab_runner.py` 解析器对齐 `summary.csv`;MINCO 核稳定性回归(到达 12.5–54%、卡死 46–88%)。
 
 ## 3. 以后再说(future work,需要时才动)
 

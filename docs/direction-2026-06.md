@@ -3,6 +3,9 @@
 > 配套 `safety-layer-spec.md`(v2,工程现状)/`safety-layer-plan.md`(v2,工程路线)。本文记录 2026-06-22 三个深度工作流(planner 选型+baseline / 博弈论-可达性新颖度 / C1-C4 形式化推导)+ 联网核实 SANDO 先验后的**研究定位、go-around 方案、baseline 清单、下一步**。
 
 ## 0. 一句话裁决
+
+> **⚠️ 2026-06-23 再聚焦(用户拍板,覆盖本节"planner 无关判官"的 framing):产品 = 认证的「最快+最安全绕行」(certified go-around),不是判官只 HOLD(HOLD 降兜底);只做 EGO(MINCO 暂搁置);用 KF(CA 模型)预测障碍未来轨迹→喂预测占据给 EGO 绕开未来→证书检预测移动球→过则飞;planner 无关降为支撑性质/通用臂,不是 headline。** M1 已跑通(`metaurban/ego_goaround.py`,见 §4-§5-§7 与 `.claude/memory/sando-core-goaround-m1-2026-06.md`):EGO 真绕行(y≈4.2),但 q_conformal=0 让预测误差吃 d_safe(净空 0.677<0.8)、喂整条扫掠短暂冻走廊(7 HOLD)→ §7 的 ROI 1-3 正是修这两点。
+
 博弈论 / max-speed 可达集 / extend-planner **当卖点 = 被抢**。活下来的、三个工作流独立指向同一个的 headline = **解耦的、planner 无关、免 license 的精确连续时间 Bernstein 判官** + 把【max-speed 硬可达 ↔ conformal 概率】合成进一个 `R(t)` 的「保证拨盘」。**RA-L 量级的 composition/packaging 创新,不是 flagship first。**
 
 ## 1. ⚠️ SANDO 先验(命门,已核实)

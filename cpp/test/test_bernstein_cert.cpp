@@ -96,6 +96,97 @@ int main() {
     }
   }
 
+  // ---- regression: TIME-GROWING tube  rho(t) = R + v_eff*(t + delta)  (the reachability/conformal dial) ----
+  {
+    const double INF = std::numeric_limits<double>::infinity();
+    auto segs = bcert::minco_to_segments(tr);
+    const Eigen::Vector3d cstat(15, 9, 1.5);          // far static obstacle: constant-R certifies w/ healthy margin
+    const double R0 = 2.0;
+    auto base = bcert::certify_segments_vs_sphere(segs, cstat, Z, Z, R0);                     // v_eff=0 (default)
+    auto v0   = bcert::certify_segments_vs_sphere(segs, cstat, Z, Z, R0, INF, 16, 0.0, 0.0);  // explicit v_eff=0
+    ++ncase;
+    bool eq = (base.certified == v0.certified) && std::abs(base.margin - v0.margin) < 1e-12;
+    if (!eq) ++fails;
+    std::printf("tube v_eff=0 == constant-R : base[%d %+.3e] explicit[%d %+.3e]  %s\n",
+                (int)base.certified, base.margin, (int)v0.certified, v0.margin, eq ? "OK" : "FAIL");
+
+    // growing the tube can only TIGHTEN (margin non-increasing); enough growth flips certified -> false
+    auto vg1 = bcert::certify_segments_vs_sphere(segs, cstat, Z, Z, R0, INF, 16, 1.0, 0.0);
+    auto vg2 = bcert::certify_segments_vs_sphere(segs, cstat, Z, Z, R0, INF, 16, 3.0, 0.0);
+    ++ncase;
+    bool mono = (v0.margin >= vg1.margin - 1e-12) && (vg1.margin >= vg2.margin - 1e-12);
+    bool flips = base.certified && !vg2.certified;
+    if (!(mono && flips)) ++fails;
+    std::printf("tube grows -> tightens : m(0)=%+.3e >= m(1)=%+.3e >= m(3)=%+.3e ; cert %d->%d  %s\n",
+                v0.margin, vg1.margin, vg2.margin, (int)base.certified, (int)vg2.certified,
+                (mono && flips) ? "OK" : "FAIL");
+
+    // RISKY-BUT-FAST = short trust window: enforce separation only over the next slice we actually fly before
+    // re-planning, so a SHORT t_hi certifies (margin no worse) where the FULL-horizon grown tube fails.
+    auto vshort = bcert::certify_segments_vs_sphere(segs, cstat, Z, Z, R0, 0.3, 16, 3.0, 0.0);
+    ++ncase;
+    bool risk = (vshort.margin >= vg2.margin - 1e-12) && vshort.certified;
+    if (!risk) ++fails;
+    std::printf("risky-fast short t_hi : m_short(0.3s)=%+.3e cert=%d  >=  m_full=%+.3e cert=%d  %s\n",
+                vshort.margin, (int)vshort.certified, vg2.margin, (int)vg2.certified, risk ? "OK" : "FAIL");
+  }
+
+  // ---- CYLINDER disjunction: 2-D horizontal AROUND (n_axes=2)  +  vertical fly-OVER  ----
+  {
+    const double INF = std::numeric_limits<double>::infinity();
+    auto segs = bcert::minco_to_segments(tr);            // tr is flat at z=1.5, passes through wp (10,2,1.5)
+    // (a) THE SOUNDNESS GAP the cylinder fixes: obstacle directly UNDER the path (horizontally on it, z far
+    //     below). The 3-D sphere CLEARS it (big z gap); the 2-D horizontal cert REJECTS it (drone passes
+    //     through the cylinder footprint). For a tall cylinder the sphere verdict would be UNSOUND.
+    const Eigen::Vector3d c_under(10, 2, -2.0);          // under wp (10,2,1.5): horiz~0, 3-D dist~3.5
+    auto sph  = bcert::certify_segments_vs_sphere(segs, c_under, Z, Z, 1.0);                       // n_axes=3
+    auto horz = bcert::certify_segments_vs_sphere(segs, c_under, Z, Z, 1.0, INF, 16, 0.0, 0.0, 2); // n_axes=2
+    ++ncase;
+    bool gap = sph.certified && !horz.certified;
+    if (!gap) ++fails;
+    std::printf("cylinder AROUND : sphere clears(%d) but 2-D horizontal rejects(%d) obstacle-under-path  %s\n",
+                (int)sph.certified, (int)horz.certified, gap ? "OK" : "FAIL");
+
+    // (b) horizontal cert certifies a genuinely far obstacle (z is ignored entirely)
+    const Eigen::Vector3d c_side(15, 9, 99.0);
+    auto horz_far = bcert::certify_segments_vs_sphere(segs, c_side, Z, Z, 2.0, INF, 16, 0.0, 0.0, 2);
+    ++ncase;
+    if (!horz_far.certified) ++fails;
+    std::printf("cylinder AROUND : 2-D horizontal ignores z, certifies far obstacle cert=%d margin=%+.3e  %s\n",
+                (int)horz_far.certified, horz_far.margin, horz_far.certified ? "OK" : "FAIL");
+
+    // (c) fly-OVER vertical cert: flat z=1.5 path is ABOVE a low plane, BELOW a high plane; raising tightens
+    auto above_lo = bcert::certify_segments_above_plane(segs, 1.0);   // 1.5 >= 1.0 -> certified
+    auto above_hi = bcert::certify_segments_above_plane(segs, 2.6);   // 1.5 <  2.6 -> rejected
+    ++ncase;
+    bool ab = above_lo.certified && !above_hi.certified && (above_lo.margin > above_hi.margin);
+    if (!ab) ++fails;
+    std::printf("fly-OVER vert   : above z=1.0 cert=%d(m=%+.3e)  above z=2.6 cert=%d(m=%+.3e)  %s\n",
+                (int)above_lo.certified, above_lo.margin, (int)above_hi.certified, above_hi.margin,
+                ab ? "OK" : "FAIL");
+
+    // (d) SOUNDNESS (load-bearing): a CERTIFIED vertical verdict must never contradict a dense z-min sample
+    double zmin = std::numeric_limits<double>::max();
+    for (int i = 0; i <= N; ++i) {
+      const double t = tr.t_start + (tr.t_end - tr.t_start) * (double(i) / N);
+      const double pz = tr.eval(t)(2);
+      if (pz < zmin) zmin = pz;
+    }
+    ++ncase;
+    bool snd = !above_lo.certified || (zmin >= 1.0 - 1e-6);
+    if (!snd) ++fails;
+    std::printf("fly-OVER sound  : certified-above(z=1.0) -> dense min p_z=%.4f >= 1.0  %s\n",
+                zmin, snd ? "OK" : "FAIL");
+
+    // (e) bez_pad widens p_z outward -> margin can only SHRINK (more conservative), never grow
+    auto above_pad = bcert::certify_segments_above_plane(segs, 1.0, INF, 16, 0.0, 0.0, 1e-6);
+    ++ncase;
+    bool pad = above_pad.margin <= above_lo.margin + 1e-12;
+    if (!pad) ++fails;
+    std::printf("fly-OVER bezpad : padded margin %+.3e <= unpadded %+.3e  %s\n",
+                above_pad.margin, above_lo.margin, pad ? "OK" : "FAIL");
+  }
+
   std::printf("\n[bernstein_cert] %d cases, %d fail\n", ncase, fails);
   if (fails == 0) std::printf("ALL PASS\n");
   return fails == 0 ? 0 : 1;

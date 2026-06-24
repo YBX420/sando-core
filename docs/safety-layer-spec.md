@@ -1,5 +1,13 @@
 # 安全层 · 工程 Spec(v2,2026-06-22 全量重写)
 
+> **⚠️ 2026-06-23 方向再聚焦(用户拍板,覆盖本文 §0/§3 的"判官只 HOLD"+"双 planner"framing):**
+> ① **产品 = 认证的「最快+最安全绕行」(certified go-around)**,不是判官只 HOLD;HOLD 降为兜底。
+> ② **只做 EGO**(实测效果好);MINCO 暂搁置(留作对照/支撑)。
+> ③ 机制:**KF(CA 模型)预测障碍未来轨迹** → 把预测的扫掠占据喂 EGO(solver 不动=良性,仍 agnostic)→ EGO 绕开未来 → 证书检预测移动球 `c(t)=c0+v·t+½a·t²` → 过则飞绕行。落地 `metaurban/ego_goaround.py` + `kf_tracker.py`(`ego_safe.py` 二元 HOLD 留作对照基线)。
+> ④ **planner 无关 = 支撑性质/通用臂,不是 headline。**
+> ⑤ 诚实红线照旧 + M1 新增:`q_conformal=0` 期间是几何证书;且**预测误差会吃 d_safe**(M1 实测净空 0.677<0.8,仍>0 没撞)→ conformal 层(C2)是拉回裕度的关键。
+> 详见 `docs/direction-2026-06.md` + `.claude/memory/sando-core-goaround-m1-2026-06.md`。
+
 > v1(2026-06-11)是「冲 RA-L 9/15」的论文蓝图,**已作废**:它把核心押在 conformal 标量化 tube + Isaac 机载标定 + 三感知分支上,而实际 6/19–6/21 做出来的东西**更强也更窄**——一个精确连续时间几何证书 + 双 planner 适配,统计半边还没建。本文按**代码现实**重写,重心是工程,论文是下游。
 >
 > 旧 v1 的对手地图(原 §7)技术上仍有参考价值,挪到本文 §6;旧 §1-§5 的论文叙事不再权威。
@@ -8,9 +16,9 @@
 
 ## 0. 一句话定位
 
-**planner 无关的认证安全层**:对规划器输出的**已承诺轨迹**,逐动态障碍做一道**精确连续时间碰撞证书**;证过才执行,证不过就 HOLD。证书核与规划器解耦——同一套数学跑 MINCO(五次)和 EGO(三次)两个规划器。
+**认证安全层(EGO-first)**:用 KF 预测障碍未来轨迹→喂预测占据给 EGO 让它绕开未来→对 EGO 输出的**已承诺轨迹**逐动态障碍做一道**精确连续时间碰撞证书**;证过则飞绕行,证不过才 HOLD(兜底)。证书核与规划器解耦——同一套数学能跑 MINCO(五次)和 EGO(三次),这条 planner 无关是**支撑性质/通用臂**(MINCO 现暂搁置)。
 
-**当前 headline = 精确连续时间几何证书 + planner 无关**(确定性、可证 sound)。
+**当前 headline = 认证的最快+最安全绕行(KF 预测 + 精确连续时间几何证书,确定性、可证 sound);planner 无关是支撑性质,不是 headline**。
 **不是** P(碰)≤ε 的概率/语义风险保证——那需要 conformal 统计半边,现在 `q_conformal=0` 占位,**列为 future work**(§5)。
 
 ---
@@ -50,9 +58,11 @@
 
 ---
 
-## 3. 层的形态:判官(二元 HOLD,正典) + 分级刹车(以后)
+## 3. 层的形态:认证绕行(产品,2026-06-23 起) + HOLD(兜底) + 分级刹车(以后)
 
-- **正典 = 二元 certify-or-HOLD**:`metaurban/ego_safe.py` 的 `EgoSafe`。每次 replan,EGO 规划 → 逐 mover 算 `R` 调 `ego.certify`(`t_hi=tau_trust=0.75s`)→ 证过执行该 B-spline 一个 DT,**证不过 HOLD**(v=a=0,不改轨迹)。是纯判官。
+> **2026-06-23 起产品形态 = 认证绕行(certified go-around)**,见 `metaurban/ego_goaround.py`:KF 预测每 mover → 把预测占据喂 EGO 让它绕开未来 → 证书检预测移动球 → **过则飞绕行**,证不过才 HOLD(兜底)。下面"二元 certify-or-HOLD"(`ego_safe.py`)降为**对照基线**(喂当前位置、无预测),不再是正典。
+
+- **对照基线 = 二元 certify-or-HOLD**:`metaurban/ego_safe.py` 的 `EgoSafe`。每次 replan,EGO 规划 → 逐 mover 算 `R` 调 `ego.certify`(`t_hi=tau_trust=0.75s`)→ 证过执行该 B-spline 一个 DT,**证不过 HOLD**(v=a=0,不改轨迹)。喂的是障碍**当前位置**(无 KF 预测),所以 EGO 看不到未来→只会等,是纯判官,留作 go-around 的对比。
 - **下游(EGO 之后再续)= 分级减速刹车**:`render_3d_video.py --ego_safe` 里 `ego_certify_commit` 在分级膨胀半径上算一个速度缩放 `g∈[0,1]`,沿同一条 B-spline 做时间 warp 减速(`EGO_BRAKE_LEVELS`、方向门 `EGO_APPROACH_EPS`、释放限速)。比二元 HOLD 顺滑,但削弱「纯判官」的形式叙事。**两者并存,二元是当前正典,分级是工程抛光层**——以后统一。
 - **RTA 三件套只建了判官那半**:最小修正 QP **没建**(用户暂缓);现在是**进程内**的门,不是独立 ROS 节点。兜底是 HOLD/yield + 平滑刹车(OFF)+ `recovery_climb`(>8 次失败后的垂直逃逸,jerky)。
 

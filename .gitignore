@@ -33,3 +33,4 @@ metaurban/out_s*/
 # editor + local logs
 .vscode/
 *.log
+metaurban/out/

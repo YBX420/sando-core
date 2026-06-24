@@ -5,6 +5,12 @@ metadata:
   type: project
 ---
 
+**⚠️ 2026-06-23 用户拍板(覆盖下面 §4 的"planner 无关当 headline"):**
+1. **先摒弃 MINCO**,只做 **EGO**(EGO 实测效果好)。planner 无关降为支撑性质/通用臂,不是当前交付物。
+2. **交付物 = 认证的"最快+最安全绕行"(certified go-around),不是判官只 HOLD。** HOLD 降为兜底。
+3. **球 = 用卡尔曼滤波(CA 模型,见 `conformal/kf_predictor_experiment.py`)预测障碍未来轨迹,然后做绕过去的最快决策。**
+4. **根因(为何现在只 HOLD)**:`ego_safe.py` 用障碍**当前位置**点云喂 EGO,EGO 栅格**无时间轴**(`grid_map.cpp` 每次 `update_point_cloud` 整张清零重填),所以它绕"人现在在哪",证书检"人将来在哪"→ 证不过 → HOLD。**修法:KF 预测未来→把预测的扫掠足迹渲染成点云喂 EGO(solver 不动=良性 agnostic)→ EGO 绕开未来→证书检移动球→过则飞。** 落地中:`metaurban/kf_tracker.py` + `metaurban/ego_goaround.py`(`ego_safe.py` 二元 HOLD 保留当对照基线)。
+
 **2026-06-22:三个深度工作流(planner选型+baseline / 博弈论-可达新颖度 / C1-C4形式化)+ 联网核实 SANDO 先验后的研究定位。** 权威细节 = `docs/direction-2026-06.md`。承接 go-around(绕而非HOLD)讨论,见 [[sando-core-status-2026-06]] [[sando-py-bernstein-deficit-cert]] [[sando-py-ego-port]]。
 
 **命门 — SANDO `arXiv:2604.07599`(Kondo/Tordesillas/How,MIT-ACL,2026-04,带硬件)= 本repo `sando_native/` vendored 的那个 planner。** 已做 max-speed 可达膨胀 + 时空走廊 + 连续时间无碰撞保证 → **「max-speed可达+连续时间+动态避障」被它占了**。但它 solver-内嵌(MIQP/Gurobi、通用AABB、无conformal)。**你的 delta(已读全文确认)= 解耦外部判官,认证未修改/黑盒/学习型 planner 的已承诺轨迹 + 免license + Bernstein区间sound + conformal层 + planner无关(一核跑MINCO+EGO)。SANDO=头号baseline。投稿前精读它坐实解耦delta。**

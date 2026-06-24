@@ -25,7 +25,12 @@ _update_cloud = _sig("ego_update_cloud", None, C.c_void_p, _d, C.c_int, _d)
 _replan = _sig("ego_replan", C.c_int, C.c_void_p, _d, _d, _d, _d, _d, C.c_int, C.c_int)
 _duration = _sig("ego_traj_duration", C.c_double, C.c_void_p)
 _eval = _sig("ego_traj_eval", C.c_int, C.c_void_p, C.c_double, _d)
-_certify = _sig("ego_certify", C.c_int, C.c_void_p, _d, _d, _d, C.c_double, C.c_double, _d)
+_certify = _sig("ego_certify", C.c_int, C.c_void_p, _d, _d, _d, C.c_double, C.c_double,
+                C.c_double, C.c_double, _d)
+_certify_horiz = _sig("ego_certify_horizontal", C.c_int, C.c_void_p, _d, _d, _d, C.c_double, C.c_double,
+                      C.c_double, C.c_double, _d)
+_certify_above = _sig("ego_certify_above", C.c_int, C.c_void_p, C.c_double, C.c_double, C.c_double,
+                      C.c_double, C.c_double, _d)
 _destroy = _sig("ego_destroy", None, C.c_void_p)
 
 
@@ -64,14 +69,34 @@ class EGOPlanner:
         if not _eval(self._h, float(t), C.cast(out, _d)): return None
         a = np.array(out, float); return a[0:3], a[3:6], a[6:9]
 
-    def certify(self, obs_c0, R, obs_vel=(0, 0, 0), obs_acc=(0, 0, 0), t_hi=-1.0):
-        """OUR S3 safety envelope ON EGO (planner-agnostic certified safety layer): certify EGO's
-        committed B-spline clears a sphere obstacle (centre obs_c0 + obs_vel*t + 0.5*obs_acc*t^2, total
-        inflated radius R = r_obs+r_body+d_safe+q_conformal) for ALL continuous t up to t_hi (<=0 =>
-        whole trajectory). Returns (certified: bool, margin: float)  [margin = continuous-time deficit slack]."""
+    def certify(self, obs_c0, R, obs_vel=(0, 0, 0), obs_acc=(0, 0, 0), t_hi=-1.0, v_eff=0.0, delta=0.0):
+        """OUR S3 safety envelope ON EGO (certified safety layer): certify EGO's committed B-spline clears
+        a sphere obstacle (centre obs_c0 + obs_vel*t + 0.5*obs_acc*t^2) for ALL continuous t up to t_hi
+        (<=0 => whole trajectory). The tube radius GROWS as rho(t) = R + v_eff*(t + delta):
+          v_eff=0  -> trust the prediction over [0,t_hi] exactly (tightest / fastest / riskiest);
+          v_eff>0  -> inflate to cover reachable / conformal prediction drift (safer / slower).
+        delta = perception->commit latency. Returns (certified: bool, margin: float)."""
         _a, c0 = _p(obs_c0); _b, vv = _p(obs_vel); _c, aa = _p(obs_acc)
         margin = C.c_double(0.0)
-        ok = _certify(self._h, c0, vv, aa, float(R), float(t_hi), C.byref(margin))
+        ok = _certify(self._h, c0, vv, aa, float(R), float(t_hi), float(v_eff), float(delta), C.byref(margin))
+        return bool(ok), float(margin.value)
+
+    def certify_horizontal(self, obs_c0, R, obs_vel=(0, 0, 0), obs_acc=(0, 0, 0), t_hi=-1.0, v_eff=0.0, delta=0.0):
+        """AROUND half of the CYLINDER disjunction: certify EGO's committed B-spline keeps 2-D HORIZONTAL
+        separation sqrt(dx^2+dy^2) >= rho(t)=R+v_eff*(t+delta) from the moving cylinder axis (obs_c0+vel*t+
+        0.5*acc*t^2), z ignored. SOUND for a full-height cylinder where the 3-D sphere cert is not. (bool, margin)."""
+        _a, c0 = _p(obs_c0); _b, vv = _p(obs_vel); _c, aa = _p(obs_acc)
+        margin = C.c_double(0.0)
+        ok = _certify_horiz(self._h, c0, vv, aa, float(R), float(t_hi), float(v_eff), float(delta), C.byref(margin))
+        return bool(ok), float(margin.value)
+
+    def certify_above(self, z_clear, t_hi=-1.0, v_eff_z=0.0, delta=0.0, bez_pad=1e-9):
+        """OVER half of the CYLINDER disjunction: certify EGO's committed B-spline stays vertically above the
+        cylinder, p_z(t) >= z_clear for ALL t up to t_hi. z_clear = head_top + reach_pad + r_body + d_safe_v.
+        v_eff_z grows the floor; bez_pad outward-bounds the B-spline->Bezier rounding. Returns (bool, margin)."""
+        margin = C.c_double(0.0)
+        ok = _certify_above(self._h, float(z_clear), float(t_hi), float(v_eff_z), float(delta),
+                            float(bez_pad), C.byref(margin))
         return bool(ok), float(margin.value)
 
     def __del__(self):
