@@ -659,7 +659,11 @@ def ego_slip_feasible(p_d, v_d, t_sim, s):
 
 MAN_REACH_PAD = 0.3   # posture/arm reach added to a mover's head-top for the fly-OVER vertical clearance
 MAN_DSAFE_V = 0.5     # vertical standoff above the head
-MAN_QCONF = float(os.environ.get("EGO_QCONF", 0.2))   # q_conformal keep-out covering prediction residual
+MAN_QCONF = float(os.environ.get("EGO_QCONF", 0.125))  # CONFORMAL-CALIBRATED q_conformal (pedestrian, CV, eps=0.05)
+MAN_VEFF = float(os.environ.get("EGO_VEFF", 0.61))     # CONFORMAL-CALIBRATED tube growth (pedestrian, CV, eps=0.05)
+MAN_TRACK = float(os.environ.get("EGO_TRACK", 0.0))    # extra keep-out for plan->flown TRACKING error (render only;
+#   headless is a perfect-tracking point mass, the renderer flies real quadrotor dynamics that LAG the certified plan
+#   -> set >0 so the cert covers what FLIES, not just what was planned. Calibrate like q_conformal, see results doc.
 # horizontal standoff ours holds from a mover (overrides the per-class 0.8). LOWER = ours flies tighter/faster
 # to race the real EGO (which flies at ~0.3 and grazes); the cert still guarantees this clearance so ours never
 # collides where EGO does. Tune via EGO_MANDSAFE.
@@ -739,9 +743,9 @@ def ego_maneuver_replan(p_d, v_d, a_d, cur_wp, t_sim):
 
     def cert_clear():                                      # CURRENTLY-held EGO B-spline vs every mover
         for (_oid, c3, vel, r_obs, d_safe) in movers:
-            R = r_obs + MAN_DSAFE + MAN_QCONF
-            hp, _ = ego.certify_horizontal(obs_c0=c3, R=R, obs_vel=vel, t_hi=EGO_TAU_TRUST, v_eff=0.2, delta=REPLAN_DT)
-            hc, _ = ego.certify_horizontal(obs_c0=c3, R=R, obs_vel=(0, 0, 0), t_hi=EGO_TAU_TRUST, v_eff=0.2, delta=REPLAN_DT)
+            R = r_obs + MAN_DSAFE + MAN_QCONF + MAN_TRACK   # +tracking margin so the cert covers the FLOWN path
+            hp, _ = ego.certify_horizontal(obs_c0=c3, R=R, obs_vel=vel, t_hi=EGO_TAU_TRUST, v_eff=MAN_VEFF, delta=REPLAN_DT)
+            hc, _ = ego.certify_horizontal(obs_c0=c3, R=R, obs_vel=(0, 0, 0), t_hi=EGO_TAU_TRUST, v_eff=MAN_VEFF, delta=REPLAN_DT)
             vo, _ = ego.certify_above(z_clear=2.0 * c3[2] + MAN_REACH_PAD + MAN_DSAFE_V + MAN_QCONF,
                                       t_hi=EGO_TAU_TRUST, delta=REPLAN_DT)
             if not ((hp and hc) or vo):
