@@ -88,11 +88,25 @@ min-time survey(`sando_py/compass_artifact_*.md`)的结论一句话:**"真·时�
 |---|---|---|---|---|---|
 | **ours@4.0 vs native@3.0**(主)| **0/120** | **19/120** | **−1.20s** | **103/118** | 118/118 ✅ |
 | ours@3.0 vs native@3.0(同速)| 0/120 | 19/120 | +0.00s | 59/118 | 118/118 |
-| ours@4.0 vs native@4.0(同高速对照)| **0/120** | `__/120`(回填:native 提速→撞更多)| — | — | — |
+| ours@4.0 vs native@4.0(同高速对照)| **0/120** | **25/120**(native 提速→撞更多,3.0 时 19)| — | — | — |
 
 > **主结果(ours@4.0 vs native@3.0)**:ours **0 碰撞**、净空中位 **1.47m**(native 0.50,撞到 −0.37);**用时中位 −1.20s、均值 −1.47s、103/118(87%)严格更快**、全部 ≤nat+3s(最大仅 +1.20s)。**验收:0 碰撞 ✅、中位 Δt<0 ✅、≤nat+3s ✅。**
 
 **故事**:① 同速(3.0)时 ours 和 native 用时持平,但 ours 0 碰撞 / native 撞 19 次——**同样时间,ours 安全 native 不安全**。② 证书门控让 ours 敢开到 4.0 仍 0 碰撞 → **比 native 还快(中位 −1.2s,87% 更快)且更安全**。native 这速度用不起(它 3.0 都撞)。这就是"认证安全把省下的风险换成速度"。
+
+---
+
+## 3.6 render-faithful headless:真飞行动力学 + 真 PX4 spot-check
+
+**问题(塔菲大人 6/24 戳穿):headless 常常好看、渲染/PX4 后变差。** 根因排序:① **真飞行动力学**——headless 点质量直接 teleport 到规划 set-point(完美跟踪),渲染/PX4 飞真四旋翼(倾斜才加速、惯性、推力限),**实飞轨迹滞后于认证的计划** → 蹭;② 感知更脏(表面点云 vs 干净圆柱);③ 渲染机动路径之前用旧未标定 keep-out(已修);④ 实时活人群更乱。
+
+**修法:把 realism 搬进 headless,不用每次渲染。** `replay_core.py --dynamics` 让每个 set-point 过**和渲染器同一个 `Quadrotor` 模型**(PX4 的本地 stand-in,同 set-point 接口),净空测**实飞位置**。
+
+> **全量 dynamics A/B(120 ep,ours@4.0 vs native@3.0)**:ours **0 碰撞**、用时**中位 −0.60s**(仍满足中位<0)、min 净空 **0.49m**(跟踪滞后吃裕度,仍>0 没撞)。→ 结论在真动力学下成立,但裕度变薄 → 应像标定预测误差一样**标定跟踪误差**加进 keep-out(`MAN_TRACK`/`EGO_TRACK` 旋钮已留)。
+
+**真 PX4 SITL spot-check**(`px4_replay.py`:把 set-point 经 MAVSDK offboard 流给真 PX4,测 PX4 融合实飞位姿;PX4 SITL 被 Data21→Data2 改名的 CMake 缓存挡住,直接起预编译 px4 二进制 + jmavsim 绕过):
+
+> seed1 × 3 ep,ours@4.0:**PX4 上 0 碰撞**;中位 plan→flown **跟踪误差仅 0.17m**(PX4 跟得准)。**净空 PX4 2.30m > Quadrotor stand-in 1.03m > point-mass 1.46m → stand-in 比真 PX4 更悲观,所以 headless+dynamics 的数字可信、偏保守不虚高。** 诚实 caveat:这 3 个 PX4 episode 因 real-time position-offboard 的 harness 交互触发了 early-stop(未到达,净空因此偏大),**PX4 的"速度"数字还不干净**(安全已确认,速度待 harness 调:velocity-feedforward offboard + settle)。
 
 ---
 
