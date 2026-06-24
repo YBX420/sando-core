@@ -1,0 +1,161 @@
+{
+  "families": [
+    {
+      "family": "EGO-Planner family + gradient-based piecewise-polynomial / B-spline local trajectory planners (mostly ZJU-FAST-Lab and HKUST-Aerial-Robotics). Two output lineages, both Bernstein-cert-friendly: (A) uniform B-spline planners (EGO-Planner / EGO-Swarm / Fast-Planner / RAPTOR / FUEL, bspline_opt kernel) and (B) MINCO / piecewise-polynomial planners (GCOPTER/MINCO, EGO-Planner-v2, am_traj, plus descendants like uneven_planner and Swarm-Formation). EVERY candidate emits a committed trajectory as a piecewise polynomial (B-spline, MINCO min-jerk/min-snap quintic/septic, or piecewise Bezier), so all are directly wrappable by our continuous-time Bernstein collision certificate via the same trajectory->Bezier control-point conversion we already use for EGO's cubic B-spline and our own MINCO quintic. TGK-Planner is a special case: it already emits Bernstein-basis Bezier pieces, so it needs zero conversion. Main portability axis is not the math (all polynomial) but the de-ROS effort and copyleft licensing: the standalone header-only trajectory backends (GCOPTER's minco.hpp / am_traj.hpp, Eigen-only) are trivially vendorable, whereas the full planners are coupled to ROS + an occupancy/ESDF map front-end and are mostly GPLv3.",
+      "n": 10
+    },
+    {
+      "family": "Minimum-snap / minimum-jerk piecewise-polynomial trajectory generators (Mellinger-Kumar / Richter-Bry lineage). All emit a committed trajectory as a piecewise polynomial (monomial-basis coefficients) or directly as piecewise Bezier (Bernstein) control points \u2014 both are directly ingestible by our continuous-time Bernstein collision certificate: monomial segments need only a per-segment basis-change to Bernstein control points (exactly what we already do for our MINCO min-jerk quintic and EGO's cubic B-spline), and the Bezier-native ones (Btraj / pointcloudTraj) feed the cert with zero conversion since their control points ARE the decision variables.",
+      "n": 9
+    },
+    {
+      "family": "Search-based kinodynamic & safe-interval planners (motion-primitive / lattice / SIPP / hybrid-A*), assessed for compatibility with our continuous-time Bernstein collision certificate (which needs the committed trajectory as piecewise polynomial -> Bezier control points, the same wrap we already apply to EGO's cubic B-spline and our MINCO min-jerk quintic).",
+      "n": 9
+    },
+    {
+      "family": "MPC / MPCC / time-optimal quadrotor planners (model-predictive contouring control, nonlinear MPC, time-optimal waypoint/racing, dynamic-obstacle MPC)",
+      "n": 9
+    },
+    {
+      "family": "Safe-flight-corridor / convex-decomposition trajectory planners (plus adjacent piecewise-polynomial optimizers). Cert intake reminder: our bernstein_cert consumes BSeg = per-segment position Bernstein/Bezier control points + (t0, dur). Native-Bezier planners need ZERO conversion; B-spline / MINCO / min-snap (power-basis) convert exactly by the same algebra we already use for EGO (uniform B-spline -> per-segment Bezier) and our own MINCO quintic (power -> Bernstein, see minco_to_segments). Grid/setpoint/retimed outputs need a least-squares polynomial REFIT, whose fit residual must be folded into the cert's tube radius (q_conformal / eps_track).",
+      "n": 9
+    },
+    {
+      "family": "Sampling-/search-based planners with polynomial/spline steering (kinodynamic RRT*, FMT*/BIT* + smoothing, OMPL-with-dynamics, dispersion-based, motion-primitive) assessed for ingest into our continuous-time Bernstein collision certificate (certify_segments_vs_sphere, which eats a per-segment Bernstein/Bezier BSeg list of degree >= 2 + timing)",
+      "n": 10
+    },
+    {
+      "family": "Recent (2023-2026) learning-based / diffusion / neural-MPC / conformal-prediction trajectory planners for drones & dynamic obstacles \u2014 assessed for compatibility with our continuous-time Bernstein collision certificate (which needs the COMMITTED trajectory as piecewise polynomial / Bezier control points, as we already do for EGO cubic B-spline and our MINCO min-jerk quintic). Headline: only the MIT-ACL B-spline/MINVO lineage (DYNUS, PRIMER, CGD, Deep-PANTHER) emits polynomial/spline control points the cert can eat directly; the diffusion / neural-MPC / conformal planners emit setpoints or grid paths and need a poly fit. Notably the conformal-prediction-for-planning works are method-level COMPLEMENTS to our (still-TODO) q_conformal layer (C2), not drop-in planners we'd wrap.",
+      "n": 10
+    }
+  ],
+  "n_candidates": 66,
+  "synthesis": {
+    "summary": "Deduped 66 \u2192 ~40 unique planners (heavy repeats: Fast-Planner \u00d73, MPL \u00d73, GCOPTER \u00d72, Btraj \u00d73, mav_traj_gen \u00d72, Kinodynamic-RRT* \u00d72, OMPL-control \u00d72). Ranking for wrap-first optimizes: (1) polynomial/spline output \u2192 direct Bezier control points, (2) standalone/header-only C++ easy to de-ROS like EGO, (3) recognized reviewer-known baseline. Decisive verdict: lead with the header-only, permissively-licensed polynomial backends that need ZERO new cert math (GCOPTER/MINCO, am_traj, large_scale_traj_optimizer, RapidQuadrocopterTrajectories) plus the two recognized DIFFERENT-representation baselines that broaden the agnostic claim beyond our EGO(B-spline)+MINCO(quintic) pair: ETH-ASL mav_trajectory_generation (Apache-2.0 monomial min-snap, the canonical baseline) and Sikang MPL (Apache-2.0 search-based motion primitives, a different planning paradigm). FASTER/MADER/DYNUS/TGK/Btraj/GCS are the most ON-MISSION and most native-Bezier, but all are Gurobi/Mosek/Drake/ROS-heavy (portability 2) so they are second-wave 'output-only' certifications (vendor nothing but their emitted control points). Everything MPC/diffusion/conformal emits horizon setpoints or grid paths \u2192 needs_poly_fit or skip; the conformal works are method-complements to our still-TODO q_conformal (C2), not planners to wrap. Licensing note: EGO is GPLv3; prefer the Apache/MIT picks (GCOPTER MIT, mav_traj Apache-2.0, MPL Apache-2.0, P4/traj_gen MIT) to keep a license-clean second arm.",
+    "top_picks": [
+      {
+        "rank": 1,
+        "name": "GCOPTER / MINCO (ZJU-FAST-Lab, Zhepei Wang)",
+        "family": "MINCO / piecewise-polynomial (SFC optimizer)",
+        "repo_url": "https://github.com/ZJU-FAST-Lab/GCOPTER",
+        "trajectory_representation": "MINCO sparse piecewise polynomial; s=3 min-jerk quintic, s=4 min-snap septic; per-piece monomial coefficient matrix exposed (Trajectory<D>/minco.hpp)",
+        "why": "Highest portability on the whole list (MIT license, header-only: trajectory.hpp+minco.hpp+gcopter.hpp, Eigen-only, ROS only in the demo node) AND zero new cert math \u2014 its min-jerk quintic is byte-for-byte the representation our existing minco_to_segments() already converts. Canonical ~2k-star MINCO reference every reviewer knows. It is a genuinely third-party planner (not ours), so wrapping it is a clean planner-agnostic proof while reusing our exact converter.",
+        "effort": "low",
+        "integration_sketch": "Vendor gcopter/include (header-only, Eigen). After optimize() you hold a Trajectory<5>; iterate getPieces(): each Piece gives getCoeffMat() (3x6 monomial coeffs, columns = powers) and getDuration(). Left-multiply the per-axis monomial coeff vector by the fixed degree-5 monomial->Bernstein basis-change matrix M5 (the SAME C2B matrix our MINCO path uses) to get 6 Bezier control points per axis; stack x,y,z -> BSeg{ctrl_pts, t0=cumulative time, dur=getDuration()}. Feed the BSeg list straight into certify_segments_vs_sphere. For s=4 (septic) use our any-degree g_elevate/g_square path. No fit, no knot insertion."
+      },
+      {
+        "rank": 2,
+        "name": "mav_trajectory_generation (ETH-ASL, Richter min-snap)",
+        "family": "Min-snap monomial piecewise polynomial (Mellinger/Richter lineage)",
+        "repo_url": "https://github.com/ethz-asl/mav_trajectory_generation",
+        "trajectory_representation": "Per-axis piecewise polynomial in monomial basis, configurable order (deg 9 min-snap / deg 7 min-jerk), linear/nonlinear QP time allocation; Segment/Polynomial API exposes coefficients directly",
+        "why": "The most recognized min-snap baseline reviewers expect to see, and crucially a DIFFERENT representation (high-degree monomial min-snap) than our EGO cubic-B-spline + MINCO quintic \u2014 so it genuinely broadens the planner-agnostic claim instead of re-demonstrating the same family. Apache-2.0 (license-clean vs EGO's GPL). De-ROS is proven (whoenig/uav_trajectories runs the core without ROS).",
+        "effort": "medium",
+        "integration_sketch": "Build only the mav_trajectory_generation lib (drop the _ros package); deps Eigen+NLopt+glog+yaml-cpp. From the resulting Trajectory, walk segments(): each Segment exposes per-axis Polynomial::getCoefficients() (monomial, length N=order+1) and segment time. Apply the degree-N monomial->Bernstein matrix per axis to get N Bezier control points -> BSeg. Caveat: deg-9 gives a looser Bernstein convex hull than our quintic, so subdivide each segment (split the curve at midpoints via de Casteljau, or refit two half-segments) to keep the hull tight before certify_segments_vs_sphere. The CSV path from whoenig/uav_trajectories is a convenient offline harness to validate the converter."
+      },
+      {
+        "rank": 3,
+        "name": "am_traj (ZJU-FAST-Lab, Zhepei Wang)",
+        "family": "Alternating-minimization piecewise polynomial (MINCO predecessor)",
+        "repo_url": "https://github.com/ZJU-FAST-Lab/am_traj",
+        "trajectory_representation": "Spatial-temporal optimized min-snap-style piecewise polynomial; emits explicit per-piece monomial coefficients + durations",
+        "why": "Truly header-only (am_traj.hpp + root_finder.hpp), STL+Eigen, ZERO ROS \u2014 the single most drop-in vendorable generator on the list alongside GCOPTER. Tied for highest portability. Same monomial->Bernstein path we already have, so near-zero integration risk; a fast easy win to bank a second standalone arm.",
+        "effort": "low",
+        "integration_sketch": "#include am_traj.hpp + root_finder.hpp, link nothing but Eigen. Call AmTraj::genOptimalTrajDTC(...) -> Trajectory; getPieces() gives per-piece getCoeffMat() (monomial) + getDuration(). Identical C2B step as GCOPTER (monomial->Bernstein per piece, assemble x,y,z control points, t0=cumulative) -> BSeg -> certify_segments_vs_sphere. Reuse the exact converter written for pick #1."
+      },
+      {
+        "rank": 4,
+        "name": "Motion Primitive Library / mpl_ros (Sikang Liu, UPenn KumarRobotics)",
+        "family": "Search-based kinodynamic motion-primitive planner",
+        "repo_url": "https://github.com/sikang/motion_primitive_library",
+        "trajectory_representation": "Graph-search lattice of LQ-min-time motion primitives; each primitive is a closed-form low-degree polynomial (deg<=5) in the flat outputs; committed path = concatenated primitives = piecewise polynomial. Primitive/Trajectory classes expose per-segment monomial coeffs + durations",
+        "why": "Adds a DIFFERENT planning PARADIGM (search-based, not gradient/QP optimization) to the agnostic story \u2014 strongest 'works across planner classes' evidence for reviewers. Apache-2.0, core lib is ROS-FREE standalone C++ (Eigen + yaml-cpp; OpenCV optional for viz), mpl_ros is a thin wrapper to ignore. Well-cited (~600 stars, UPenn). Degree<=5 keeps the Bernstein hull tight; we also already vendor its sibling DecompUtil (sando_native/third_party/DecompROS2).",
+        "effort": "low",
+        "integration_sketch": "find_package the core motion_primitive_library (skip mpl_ros). After search you get a Trajectory; call getPrimitives(): each Primitive exposes per-axis polynomial coefficients (pr.coeff / Primitive1D) and a duration. Convert each primitive's power-basis coeffs to Bernstein (deg<=5, same C2B as MINCO) -> per-segment Bezier control points -> BSeg{t0=cumulative, dur}. Feed certify_segments_vs_sphere unchanged. No knot insertion, no fit."
+      },
+      {
+        "rank": 5,
+        "name": "RapidQuadrocopterTrajectories (Mueller, Hehn & D'Andrea)",
+        "family": "Closed-form quintic min-jerk motion primitive / sampling steerer",
+        "repo_url": "https://github.com/markwmuller/RapidQuadrocopterTrajectories",
+        "trajectory_representation": "Per-axis quintic (deg-5) closed-form min-jerk primitive (triple integrator, jerk input); coefficients exposed per axis (alpha/beta/gamma). Used as the state-to-state steering edge inside sampling planners; concatenated edges = committed piecewise quintic",
+        "why": "Dependency-free standalone C++ (no ROS, no Eigen \u2014 a couple of .cpp/.h), permissive, ubiquitous T-RO 2015 building block. Mathematically IDENTICAL to our MINCO quintic, so the converter is literally the one we already have. Trivial vendor effort and it doubles as a polynomial steering function to turn ANY sampling planner (OMPL/RRT*) into a cert-eatable one \u2014 high leverage for later picks.",
+        "effort": "low",
+        "integration_sketch": "Drop in RapidTrajectoryGenerator + SingleAxisTrajectory. After generate(Tf), read per-axis params: position is p(t)=(alpha/120)t^5+(beta/24)t^4+(gamma/6)t^3+a0/2 t^2+v0 t+p0. Assemble the deg-5 monomial coeff vector per axis, apply M5 monomial->Bernstein -> 6 control points per axis -> BSeg{t0, dur=Tf}. For a sampling-planner demo, register this as the RRT*/OMPL steering function so each tree edge emits a BSeg directly; the root->goal path is then a piecewise quintic straight into certify_segments_vs_sphere."
+      },
+      {
+        "rank": 6,
+        "name": "MADER (MIT-ACL, Tordesillas & How)",
+        "family": "SFC / MINVO piecewise-Bezier dynamic-obstacle planner",
+        "repo_url": "https://github.com/mit-acl/mader",
+        "trajectory_representation": "Piecewise cubic in MINVO basis (minimum-volume simplex), plans against MOVING obstacles as moving convex hulls; per-interval control points are the decision variables",
+        "why": "The most ON-MISSION baseline of the set \u2014 it plans against moving obstacles, exactly our certified go-around regime \u2014 and its native MINVO control points convert to Bernstein by a single fixed change-of-basis matrix (near-zero conversion). Highly recognized dynamic-env reference (~500 stars). Wrapping it lets us show our exact continuous-time cert strictly upgrades MADER's own discretized moving-hull check. Ranked below the header-only picks only because of portability: ROS+Gurobi+CGAL (portability 2). Strategy: do NOT vendor its solver \u2014 certify its emitted control points output-only.",
+        "effort": "high",
+        "integration_sketch": "Don't de-ROS the Gurobi optimizer. Instead tap MADER's published committed trajectory (the per-interval MINVO control points + interval times it already broadcasts/logs). Multiply each interval's 4 MINVO control points by the fixed MINVO->Bernstein matrix (cubic) to get 4 Bezier control points -> BSeg{t0, dur}. Feed certify_segments_vs_sphere with the obstacle's KF (c0,vel,acc) as the moving sphere. This is an 'output-only' certification: zero solver vendoring, and it directly contrasts our exact cert against MADER's approximate dynamic check. (FASTER and DYNUS are the same play if a static-env or ROS2 variant is wanted.)"
+      }
+    ],
+    "directly_wrappable": [
+      "GCOPTER / MINCO (ZJU)",
+      "am_traj (ZJU, header-only)",
+      "large_scale_traj_optimizer (ZJU, two-header MINCO precursor)",
+      "mav_trajectory_generation (ETH-ASL min-snap, Apache-2.0)",
+      "Motion Primitive Library / mpl_ros (Sikang Liu, Apache-2.0)",
+      "RapidQuadrocopterTrajectories (Mueller, dependency-free quintic)",
+      "icsl-Jeon/traj_gen (MIT, qpOASES)",
+      "TuckerHaydon/P4 (MIT, OSQP)",
+      "whoenig/uav_trajectories (de-ROS'd ETH min-snap, CSV)",
+      "TGK-Planner (native Bernstein, zero conversion)",
+      "Btraj (native piecewise-Bezier, output-only)",
+      "pointcloudTraj (native Bezier, output-only)",
+      "RSFC swarm_simulator / piecewise-Bernstein QP (native Bernstein)",
+      "GCS Trajectory Optimization (native Bezier, Drake)",
+      "FASTER (MIT-ACL, MINVO->Bernstein, output-only)",
+      "MADER (MIT-ACL, moving-obstacle MINVO, output-only)",
+      "DYNUS (MIT-ACL ROS2, cubic min-jerk, output-only)",
+      "DecompUtil + SFC QP (Sikang, already in-tree)",
+      "Fast-Planner (cubic B-spline, EGO playbook)",
+      "Fast-Planner kinodynamic A* (cubic B-spline)",
+      "EGO-Planner-v2 (MINCO quintic, Science Robotics)",
+      "EGO-Swarm (cubic B-spline, per-agent)",
+      "RAPTOR (cubic B-spline, Fast-Planner repo)",
+      "bspline_opt kernel / KIT-MRT uniform_bspline (BSD basis)",
+      "Bang-Bang Boosting of RRTs (deg-2 parabolic arcs)",
+      "Dispersion-Minimizing Motion Primitives (integrator variant)",
+      "Kinodynamic RRT* (Webb-van den Berg, integrator-chain subclass)",
+      "CGD (B-spline+MINVO control points, output-only)",
+      "Deep-PANTHER (B-spline/MINVO control points, output-only)",
+      "PRIMER (PANTHER/MADER B-spline lineage, output-only)",
+      "Hs293Go/minsnap_trajectories (Python, reimpl needed)",
+      "The-SS/quadrotor_trajectory (Python, reimpl needed)",
+      "AkinoPDF (flat-output closed-form, code unreleased)"
+    ],
+    "needs_poly_fit": [
+      "CMPCC (certify the B-spline reference; MPCC horizon is setpoints)",
+      "MPCC (UZH-RPG, fit horizon RK-interval polys)",
+      "MPCC++ (fit horizon; track-tunnel constraint)",
+      "rpg_time_optimal / CPC (single offline committed trajectory, clean one-time fit of dense states \u2014 good 'commit-then-certify' fit)",
+      "NMPC agilicious (fit horizon or certify reference)",
+      "PAMPC / rpg_mpc (fit horizon)",
+      "Time-Optimal Online Replanning (fit horizon per replan)",
+      "Real-time Neural-MPC (fit horizon, horizon-local only)",
+      "Dynoplan / iDb-A* (fit DDP setpoint grid)",
+      "OMPL control-based SST/KPIECE (fit, or register polynomial steerer)",
+      "OMPL geometric BIT*/FMT* + smoothBSpline (smooth->time-param->Bezier)",
+      "SIPP / SIPP-IP (smooth front-end path then fit)",
+      "TOPPRA (retimer; refit composed q(t), residual into tube radius)",
+      "Diffusion Planner (setpoint waypoints, fit; car/nuPlan)"
+    ],
+    "skip": [
+      "Hybrid A* car \u2014 arcs/off-domain",
+      "Dynamic Obstacle Avoidance Event Cameras \u2014 hardware-coupled/no-trajectory",
+      "Adaptive Conformal Prediction (Dixit/Lindemann) \u2014 method-not-planner/feeds-C2",
+      "CP-SIPP \u2014 conformal-method/grid-output",
+      "Conformalized Reachable Sets \u2014 conformal-method/feeds-C2",
+      "SafeDiffuser \u2014 neural/setpoints",
+      "high_mpc \u2014 RL-coupled/redundant",
+      "Dispertio \u2014 sampling-strategy-not-trajectory",
+      "Safe Interval Motion Planning 2024 \u2014 no-code-released",
+      "FUEL \u2014 exploration-stack/take-bspline_opt-instead/redundant"
+    ]
+  }
+}
