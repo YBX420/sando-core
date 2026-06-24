@@ -21,6 +21,19 @@ min-time survey(`sando_py/compass_artifact_*.md`)的结论一句话:**"真·时�
 
 ---
 
+## 0.5 相关工作与精确差异(为什么这是新的)
+
+| 路线 | 代表 | 它做什么 | **我们的差异** |
+|---|---|---|---|
+| Conformal 安全区间规划 | **CP-SIPP**(Liang 2025);Safe-Interval Quadrotor(Huang 2024,4D 时空走廊 B-spline) | 把预测不确定性 conformal 化后**离散成 safe-interval / 时空走廊**做图/网格搜索 | 我们的安全检验是**连续时间 sound 证书**(Bernstein 亏量,§4 实测 0 漏撞),**不离散时空、不会 tunnelling**;且**planner-agnostic**(包住现成 EGO,不是专用规划器) |
+| Conformal 预测不确定集 | Optimal-Selection CP(Pang & Margellos 2025);RAP(Nishimura 2022) | 给轨迹预测套分布无关不确定集,大多停在**预测层** | 我们把 conformal 分位直接标成**一个真规划器已承诺轨迹上 sound 碰撞证书的 keep-out**,并**端到端验证覆盖**(§2)+ 用它**反选预测器**收紧 keep-out(§5) |
+| 意图/预测驱动 MPC 避障 | Intent-MPC UAV(Xu 2024);事件相机避障(Falanga) | 预测障碍 + MPC 反应式避让 | 我们对预测误差给**分布无关 P(碰)≤ε**,不是软约束/调权 |
+| 时间最优 / min-snap / MPCC | Sequence-Model Time-Optimal(2025);Active-Inactive(2024) | 压时间到执行器极限,但**默认障碍已知/静态、无连续时间碰撞证明** | 我们在动态障碍上**时间有竞争力的同时**给认证安全(§3:中位用时持平、均值更快、0 碰撞) |
+
+**一句话差异**:别人要么"conformal 预测 + 离散时空安全"、要么"连续时间安全但不 conformal、且专用规划器"。**我们是"连续时间 sound 证书 + 分布无关 conformal keep-out + planner-agnostic 最快绕行"的三合一**,且每一环都有实测(覆盖率 §2、A/B §3、soundness §4、预测器 §5)。这正是 min-time survey 点名的空白。
+
+---
+
 ## 1. 方法:split-conformal 标定证书 keep-out
 
 **要证的不等式**(横向圆柱半边):证书强制无人机已承诺 B-spline 满足
@@ -129,3 +142,18 @@ python metaurban/cert_ablation.py --trials 500
 python metaurban/predictor_compare.py
 ```
 产物都在 `out/conformal/`。
+
+---
+
+## 8. 参考(定位用)
+
+- CP-SIPP: conformal-prediction safe-interval path planning, Liang et al., 2025.
+- Safe Interval Motion Planning for Quadrotors in Dynamic Environments, Huang et al., 2024 — arXiv:2409.10647(4D 时空走廊 B-spline,>95% 成功,<300ms)。
+- Efficient Quantification of Time-Series Prediction Error: Optimal-Selection Conformal Prediction, Pang & Margellos, 2025 — arXiv:2511.02103。
+- Intent Prediction-Driven MPC for UAV in Dynamic Environments, Xu et al., 2024 — arXiv:2409.15633。
+- RAP: Risk-Aware Prediction for Robust Planning, Nishimura et al., 2022 — arXiv:2210.01368。
+- Trajectron++, Salzmann et al., 2021 — arXiv:2001.03093(多智能体预测基线)。
+- Sequence Modeling for Time-Optimal Quadrotor Trajectory Optimization, 2025 — arXiv:2506.13915(确认主流重平滑、非最短时间)。
+- Iterative Active-Inactive Obstacle Classification for Time-Optimal Collision Avoidance, 2024 — arXiv:2403.13474。
+- Dynamic obstacle avoidance for quadrotors with event cameras, Falanga et al.(感知极限驱动避障)。
+- 本仓库 min-time survey:`sando_py/compass_artifact_*.md`(金句:时间最优 + conformal/认证安全在动态障碍上是空白)。
