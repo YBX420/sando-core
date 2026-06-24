@@ -77,25 +77,40 @@ class PX4Bridge:
         # after arming. SIM_BAT_DRAIN=0 disables the battery simulator entirely. (Also set at boot via stdin.)
         for n, v in (("SIM_BAT_DRAIN", 0.0), ("BAT_LOW_THR", 0.0), ("BAT_CRIT_THR", 0.0), ("BAT_EMERGEN_THR", 0.0)):
             await _setf(n, v)
-        print("[px4] params done; waiting for EKF/home ...", flush=True)
-        # wait until armable / local position ok (bounded: don't hang forever if the EKF is being slow)
+        print("[px4] params done; waiting for FULL EKF/GPS health ...", flush=True)
+        # Wait for FULL health (local + global + home) before arming. Arming before the EKF/GPS converges gives
+        # 'Arming denied: Resolve system health failures first'. Generous 120 s budget; SITL usually converges <60 s.
         import time as _t
         _t0 = _t.monotonic()
         async for h in self._drone.telemetry.health():
-            if (h.is_local_position_ok and h.is_home_position_ok) or (_t.monotonic() - _t0 > 40):
+            if (h.is_local_position_ok and h.is_home_position_ok and h.is_global_position_ok
+                    and h.is_gyrometer_calibration_ok and h.is_accelerometer_calibration_ok):
                 break
+            if _t.monotonic() - _t0 > 120:
+                print("[px4] WARN: health not fully green after 120s, proceeding anyway", flush=True); break
         asyncio.ensure_future(self._telemetry_task())
+        # ARM with retries: even with health green, the first arm can be denied while the EKF settles. Retry.
         armed = False
         async for a in self._drone.telemetry.armed(): armed = a; break
-        print(f"[px4] health ok; armed={armed}; arming + offboard ...", flush=True)
-        if not armed:
-            try: await self._drone.action.arm()
-            except Exception as e: print("[px4] arm:", e, "(continuing)", flush=True)
+        for attempt in range(12):
+            if armed:
+                break
+            try:
+                await asyncio.wait_for(self._drone.action.arm(), timeout=5)
+                armed = True
+            except Exception as e:
+                print(f"[px4] arm attempt {attempt}: {e}", flush=True)
+                await asyncio.sleep(2.0)
+                async for a in self._drone.telemetry.armed(): armed = a; break
+        print(f"[px4] armed={armed}; engaging offboard ...", flush=True)
         await self._drone.offboard.set_position_ned(PositionNedYaw(0.0, 0.0, -self._takeoff_alt, 0.0))
-        try:
-            await self._drone.offboard.start()
-        except OffboardError as e:
-            print("[px4] offboard start:", e, "(may already be in offboard, continuing)", flush=True)
+        for attempt in range(6):
+            try:
+                await self._drone.offboard.start(); break
+            except OffboardError as e:
+                print(f"[px4] offboard start attempt {attempt}: {e}", flush=True)
+                await self._drone.offboard.set_position_ned(PositionNedYaw(0.0, 0.0, -self._takeoff_alt, 0.0))
+                await asyncio.sleep(1.0)
         print("[px4] OFFBOARD ready", flush=True)
         self._ready.set()
         # stream the latest set-point at >20 Hz (offboard requires continuous set-points)
