@@ -50,15 +50,44 @@ class PX4Bridge:
         from mavsdk import System
         from mavsdk.offboard import PositionNedYaw, OffboardError
         self._drone = System()
+        print("[px4] connecting ...", flush=True)
         await self._drone.connect(system_address=self._addr)
         async for st in self._drone.core.connection_state():
             if st.is_connected: break
-        # wait until armable / local position ok
+        print("[px4] connected; setting params ...", flush=True)
+        # DISABLE SITL failsafes that otherwise land/disarm us mid-flight (the real "loss on PX4" cause):
+        # the simulated battery drains -> 'battery warning (fast)' -> 'Disarmed by landing'; plus datalink/RC-loss
+        # and the power-supply preflight check. Offboard position control must survive all of these.
+        # Disable SITL failsafes that land/disarm us mid-flight. EVERY call is timeout-wrapped: a missing param
+        # makes MAVSDK's set_param hang forever otherwise, which would stall the whole bridge init (-> 'not ready').
+        async def _seti(n, v):
+            try:
+                await asyncio.wait_for(self._drone.param.set_param_int(n, v), timeout=4)
+            except Exception as e:
+                print(f"[px4] param {n}: {e} (continuing)", flush=True)
+        async def _setf(n, v):
+            try:
+                await asyncio.wait_for(self._drone.param.set_param_float(n, v), timeout=4)
+            except Exception as e:
+                print(f"[px4] param {n}: {e} (continuing)", flush=True)
+        for n, v in (("COM_LOW_BAT_ACT", 0), ("NAV_DLL_ACT", 0), ("NAV_RCL_ACT", 0),
+                     ("COM_RCL_EXCEPT", 7), ("CBRK_SUPPLY_CHK", 894281), ("COM_ARM_WO_GPS", 1)):
+            await _seti(n, v)
+        # the SITL battery drains 100%->0% in SIM_BAT_DRAIN s (default 60) -> emergency-battery FORCE-LANDS ~12 s
+        # after arming. SIM_BAT_DRAIN=0 disables the battery simulator entirely. (Also set at boot via stdin.)
+        for n, v in (("SIM_BAT_DRAIN", 0.0), ("BAT_LOW_THR", 0.0), ("BAT_CRIT_THR", 0.0), ("BAT_EMERGEN_THR", 0.0)):
+            await _setf(n, v)
+        print("[px4] params done; waiting for EKF/home ...", flush=True)
+        # wait until armable / local position ok (bounded: don't hang forever if the EKF is being slow)
+        import time as _t
+        _t0 = _t.monotonic()
         async for h in self._drone.telemetry.health():
-            if h.is_local_position_ok and h.is_home_position_ok: break
+            if (h.is_local_position_ok and h.is_home_position_ok) or (_t.monotonic() - _t0 > 40):
+                break
         asyncio.ensure_future(self._telemetry_task())
         armed = False
         async for a in self._drone.telemetry.armed(): armed = a; break
+        print(f"[px4] health ok; armed={armed}; arming + offboard ...", flush=True)
         if not armed:
             try: await self._drone.action.arm()
             except Exception as e: print("[px4] arm:", e, "(continuing)", flush=True)
@@ -67,6 +96,7 @@ class PX4Bridge:
             await self._drone.offboard.start()
         except OffboardError as e:
             print("[px4] offboard start:", e, "(may already be in offboard, continuing)", flush=True)
+        print("[px4] OFFBOARD ready", flush=True)
         self._ready.set()
         # stream the latest set-point at >20 Hz (offboard requires continuous set-points)
         while True:
@@ -97,20 +127,24 @@ class PX4Bridge:
         self._origin_world = np.asarray(world_xyz, float).copy()
 
     def set_setpoint(self, world_xyz, yaw):
-        if self._origin_world is None: self._origin_world = np.asarray(world_xyz, float).copy()
-        d = np.asarray(world_xyz, float) - self._origin_world
-        n, e, dn = self._world_to_ned(d)
+        # HORIZONTAL is origin-relative (PX4 NED home = origin_world's x,y); VERTICAL is ABSOLUTE altitude:
+        # PX4 home is on the ground, so NED down = -(world z = altitude). The earlier -(z - origin_z) form
+        # commanded down=0 (ground) for any cruise-altitude set-point -> the drone descended/landed and never
+        # flew the corridor (this was a real cause of 'losing on PX4').
+        p = np.asarray(world_xyz, float)
         with self._lock:
-            self._sp["n"] = n; self._sp["e"] = e; self._sp["d"] = dn
-            self._sp["yaw"] = float(math.degrees(yaw))     # PX4 PositionNedYaw yaw is in DEGREES
+            self._sp["n"] = float(p[1] - self._origin_world[1])   # north = world +y
+            self._sp["e"] = float(p[0] - self._origin_world[0])   # east  = world +x
+            self._sp["d"] = float(-p[2])                          # down  = -altitude (absolute)
+            self._sp["yaw"] = float(math.degrees(yaw))            # PositionNedYaw yaw is in DEGREES
 
     def get_pose_world(self):
         """Return (world_xyz, yaw, world_vel) from PX4's fused estimate, mapped back to the world frame."""
         with self._lock:
             ned = self._pose["ned"].copy(); vel = self._pose["vel"].copy(); yaw = self._pose["yaw"]; ok = self._pose["ok"]
-        w = self._ned_to_world(*ned)
-        if self._origin_world is not None: w = w + self._origin_world
-        wv = self._ned_to_world(*vel)
+        o = self._origin_world if self._origin_world is not None else np.zeros(3)
+        w = np.array([ned[1] + o[0], ned[0] + o[1], -ned[2]])     # x=E+ox, y=N+oy, z=-down (absolute alt)
+        wv = np.array([vel[1], vel[0], -vel[2]])                  # vx=vE, vy=vN, vz=-vD
         return w, yaw, wv, ok
 
 
