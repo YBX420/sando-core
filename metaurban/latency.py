@@ -93,6 +93,35 @@ def main():
         print(f"  control period DT = {R.DT*1e3:.0f} ms  ->  real-time margin {R.DT*1e3/tm.mean():.0f}x "
               f"(tick is {tm.mean()/(R.DT*1e3)*100:.1f}% of the budget)")
 
+    # figure: per-layer latency bars (log scale) + the full-tick vs control-budget
+    try:
+        import matplotlib; matplotlib.use("Agg"); import matplotlib.pyplot as plt
+        layers = [("KF predict/mover", "kf_predict"), ("occupancy feed", "cloud_feed"),
+                  ("cert vertical", "cert_above"), ("cert horizontal", "cert_horiz"),
+                  ("EGO replan", "ego_replan")]
+        names, meds, p95s = [], [], []
+        for label, key in layers:
+            s = stats(key)
+            if s:
+                names.append(label); meds.append(s["median"]); p95s.append(s["p95"])
+        tm = np.array(tick_ms) if tick_ms else np.array([0.0])
+        fig, ax = plt.subplots(1, 2, figsize=(13, 4.4))
+        y = np.arange(len(names))
+        ax[0].barh(y, meds, color="tab:blue", label="median")
+        ax[0].barh(y, p95s, left=0, height=0.4, color="tab:orange", alpha=0.6, label="p95")
+        ax[0].set_yticks(y); ax[0].set_yticklabels(names); ax[0].set_xscale("log")
+        ax[0].set_xlabel("per-call latency (ms, log)"); ax[0].set_title("safety-stack per-layer compute")
+        ax[0].legend(fontsize=8); ax[0].grid(alpha=0.3, axis="x")
+        ax[1].bar(["ours tick"], [tm.mean()], color="tab:green", label=f"tick {tm.mean():.1f} ms")
+        ax[1].axhline(R.DT * 1e3, color="tab:red", lw=2, ls="--", label=f"control budget {R.DT*1e3:.0f} ms")
+        ax[1].set_ylabel("ms"); ax[1].set_title(f"full tick vs budget  ({R.DT*1e3/tm.mean():.0f}x real-time margin)")
+        ax[1].legend(); ax[1].grid(alpha=0.3, axis="y")
+        fig.suptitle("safety-layer computation latency (after the certify_above fix)", y=1.02)
+        fig.tight_layout(); fig.savefig(os.path.join(R.OUTDIR, "fig_latency.png"), dpi=130, bbox_inches="tight")
+        print(f"[lat] wrote {os.path.join(R.OUTDIR, 'fig_latency.png')}")
+    except Exception as e:
+        print(f"[lat] plot skipped: {e}")
+
     if args.sando:
         from sando_native_bridge import SandoNative
         _wrap(SandoNative, "replan", "sando_replan")
