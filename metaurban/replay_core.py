@@ -161,7 +161,7 @@ def _rot(v2, ang):
 
 
 def run_replay(movers, ep, mode="ours", calib=None, predict=True, max_vel=3.0, max_acc=6.0,
-               cont_cert=True, n_sample=0, record=False, dynamics=False):
+               cont_cert=True, n_sample=0, record=False, dynamics=False, flier=None):
     """One replay episode. cont_cert=True uses the continuous-time Bernstein cylinder cert; if False (ablation)
     the gate uses n_sample fixed-rate samples of the committed B-spline instead.
     dynamics=True flies the planned set-points through real QUADROTOR dynamics (tilt-to-accel, inertia, thrust
@@ -307,8 +307,12 @@ def run_replay(movers, ep, mode="ours", calib=None, predict=True, max_vel=3.0, m
                 v_ref = np.array([away[0] * max_vel, away[1] * max_vel, 0.0]); a_ref = np.zeros(3)
             counts[kind] = counts.get(kind, 0) + 1
 
-        # apply the set-point: fly it through real quadrotor dynamics (renderer/PX4 reality) or teleport (optimistic)
-        if dynamics:
+        # apply the set-point: real PX4 SITL (flier) > local quadrotor model (dynamics) > teleport (optimistic)
+        if flier is not None:                              # real PX4 SITL in the loop (flier streams the set-point)
+            pf, vf = flier(p_ref, v_ref, a_ref, DT)
+            track_err.append(float(np.linalg.norm(np.asarray(pf)[:2] - p_ref[:2])))
+            p_d, v_d, a_d = np.asarray(pf, float), np.asarray(vf, float), np.zeros(3)
+        elif dynamics:
             pf, vf = quad.step(p_ref, v_ref, a_ref, DT)
             track_err.append(float(np.linalg.norm(np.asarray(pf)[:2] - p_ref[:2])))
             p_d, v_d, a_d = np.asarray(pf, float), np.asarray(vf, float), quad.a.copy()
