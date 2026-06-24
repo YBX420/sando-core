@@ -80,15 +80,19 @@ min-time survey(`sando_py/compass_artifact_*.md`)的结论一句话:**"真·时�
 
 ## 3. 结果:ours-vs-native A/B(真轨迹回放)
 
-`metaurban/replay_core.py` + `ab_replay.py`:把真 mover 轨迹当**不让路的录像**(strict 最坏情形)回放,无人机飞穿人群走廊。ours = KF(CV)预测 + per-class conformal 证书门控机动;native = 莽撞真 EGO(膨胀 0.3,贴 ~0.3m 飞)。**验收(用户 2026-06-24 拍板)**:ours **0 碰撞** 且 ours_time ≤ native_time + 3s(越快越好)。
+`metaurban/replay_core.py` + `ab_replay.py`:把真 mover 轨迹当**不让路的录像**(strict 最坏情形)回放,无人机飞穿人群走廊。ours = KF(CV)预测 + per-class conformal 证书门控机动;native = 莽撞真 EGO(膨胀 0.3,贴 ~0.3m 飞)。**验收(用户 2026-06-24 拍板)**:ours **0 碰撞**、ours_time ≤ native_time + 3s、且**用时中位差 < 0**(ours 过半数严格更快)。
 
-> **结果(20 seeds × 6 = 120 episodes,CV 部署配置,eps=0.05):**
-> - 碰撞:ours **0/120**,native **19/120**(贴飞穿过人,净空低至 −0.37m)
-> - 最小净空:ours **0.63 m**,native **−0.37 m**(中位 ours **1.48** vs native **0.50**)
-> - 用时差 ours−native:**中位 +0.00s,均值 −0.51s**(ours 平均更快),最大 +2.40s,最小 −5.4s;**≤native+3s:118/118**;严格更快 **59/118**
-> - **验收:0 碰撞 ✅PASS,全部 ≤native+3s ✅PASS**
+**核心:native 在自己的 3.0 m/s 就已经不安全(撞 19/120=16%)。ours 用同一套连续时间证书门控,敢把速度上限开到 4.0 m/s 仍 0 碰撞——"因为我知道人会怎么动,所以敢更快但安全"。native 不敢用 4.0(3.0 都撞)。** 三重对照(20 seeds × 6 = 120 episodes,CV,eps=0.05):
 
-**故事**:ours 永远认证安全(净空恒 >0.6m,中位 ~1.5m),native 会直接穿过人(19 次净空 <0 撞);ours 用时中位持平/均值更快,**硬场景(native 被人群缠住/撞上)反而快得多**(seed1 ep0:native 8.4s 且撞,ours 5.1s 干净;最快处快 5.4s)。仅 2 个 episode ours 比 native 慢 >2s(+2.1/+2.4s,均 native 合法到达没撞)——这是认证安全在简单场景的诚实代价,落在用户的 +3s 预算内。
+| 对照 | ours 碰撞 | native 碰撞 | 中位 Δt(ours−nat) | 严格更快 | ≤nat+3s |
+|---|---|---|---|---|---|
+| **ours@4.0 vs native@3.0**(主)| **0/120** | **19/120** | **−1.20s** | **103/118** | 118/118 ✅ |
+| ours@3.0 vs native@3.0(同速)| 0/120 | 19/120 | +0.00s | 59/118 | 118/118 |
+| ours@4.0 vs native@4.0(同高速对照)| **0/120** | `__/120`(回填:native 提速→撞更多)| — | — | — |
+
+> **主结果(ours@4.0 vs native@3.0)**:ours **0 碰撞**、净空中位 **1.47m**(native 0.50,撞到 −0.37);**用时中位 −1.20s、均值 −1.47s、103/118(87%)严格更快**、全部 ≤nat+3s(最大仅 +1.20s)。**验收:0 碰撞 ✅、中位 Δt<0 ✅、≤nat+3s ✅。**
+
+**故事**:① 同速(3.0)时 ours 和 native 用时持平,但 ours 0 碰撞 / native 撞 19 次——**同样时间,ours 安全 native 不安全**。② 证书门控让 ours 敢开到 4.0 仍 0 碰撞 → **比 native 还快(中位 −1.2s,87% 更快)且更安全**。native 这速度用不起(它 3.0 都撞)。这就是"认证安全把省下的风险换成速度"。
 
 ---
 

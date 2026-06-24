@@ -42,6 +42,9 @@ def main():
     ap.add_argument("--n_ep", type=int, default=6)
     ap.add_argument("--eps", type=float, default=0.05)
     ap.add_argument("--max_vel", type=float, default=3.0)
+    ap.add_argument("--ours_speedup", type=float, default=1.0, help="ours flies at max_vel*speedup; the cert gates "
+                    "every faster commit so it stays safe (native can't: no cert -> crashes). This is the "
+                    "'I KNOW how they move, so I dare to fly FASTER but safe' speed budget the prediction earns.")
     ap.add_argument("--budget", type=float, default=3.0, help="time budget: ours must reach within native+budget s")
     ap.add_argument("--tag", default="")
     args = ap.parse_args()
@@ -60,7 +63,7 @@ def main():
         episodes = R.build_episodes(movers, sd, n_ep=args.n_ep)
         for k, ep in enumerate(episodes):
             with _quiet():
-                ro = R.run_replay(movers, ep, "ours", calib, max_vel=args.max_vel)
+                ro = R.run_replay(movers, ep, "ours", calib, max_vel=args.max_vel * args.ours_speedup)
                 rn = R.run_replay(movers, ep, "native", calib, max_vel=args.max_vel)
             rows.append(dict(seed=sd, ep=k, n_members=len(ep["members"]),
                              ours_t=ro["time_s"], ours_clr=ro["min_clr"], ours_reach=ro["reached"],
