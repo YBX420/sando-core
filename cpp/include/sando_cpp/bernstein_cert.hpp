@@ -292,9 +292,15 @@ inline double g_seg_worst(const std::vector<Iv>& S, const Iv& R2, int depth, int
 // the deficit must be formed BEFORE de Casteljau subdivision (subdividing a fixed R^2 against S is only
 // valid for a constant tube).  hull = max_k b_hi_k; subdivide b (sound convex combos) and recurse.
 inline double g_seg_worst_deficit(const std::vector<Iv>& b, int depth, int maxdepth) {
+  // hull = max(coeff.hi) is an UPPER bound on the segment's sup deficit; lo_min = min(coeff.lo) is a guaranteed
+  // LOWER bound on every value (Bernstein convex-hull property: value(t) in [min coeff, max coeff]).
   double hull = -std::numeric_limits<double>::infinity();
-  for (const auto& s : b) { if (s.hi > hull) hull = s.hi; }
-  if (hull <= 0.0 || depth >= maxdepth) return hull;
+  double lo_min = std::numeric_limits<double>::infinity();
+  for (const auto& s : b) { if (s.hi > hull) hull = s.hi; if (s.lo < lo_min) lo_min = s.lo; }
+  // early-exit, SOUND both ways: hull<=0 => sup<=0 (this segment is safe); lo_min>0 => the deficit is provably
+  // POSITIVE everywhere => sup>0 (NOT certifiable, e.g. a ground candidate vs a fly-OVER plane) -> stop now
+  // instead of subdividing to maxdepth (this is what made certify_above ~2000x slower than certify_horizontal).
+  if (hull <= 0.0 || lo_min > 0.0 || depth >= maxdepth) return hull;
   std::vector<Iv> L, R; g_subdiv(b, L, R);
   return std::max(g_seg_worst_deficit(L, depth + 1, maxdepth), g_seg_worst_deficit(R, depth + 1, maxdepth));
 }
