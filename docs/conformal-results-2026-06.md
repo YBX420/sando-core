@@ -110,6 +110,14 @@ min-time survey(`sando_py/compass_artifact_*.md`)的结论一句话:**"真·时�
 
 ---
 
+## 3.8 结果:ours vs native SANDO(MIT-ACL 原版,GUROBI)
+
+native SANDO(`sando_native/`,heat-A* + DecompUtil SFC + GUROBI 局部解;GUROBI 11.0.3 WLS 学术 license)接进同一回放(`replay_core mode="sando"`,`ab_replay --baseline sando` / `compare3.py`)。SANDO 拿到同样的 mover 信息(KF 位置+速度作 analytic DynTraj),用它自己的预测/避障。
+
+> **headless 60 episode(eps=0.05,等速对比):ours 到达 60/60(100%)、0 碰撞;native SANDO 到达 0/60(0%)。** SANDO 在密集横穿场景里**无法收敛**(committed path 来回振荡、净空大但绕不出去、到不了目标);ours ~4s 干净到达。**ours 完胜 SANDO**——不是快一点,是 SANDO 在这类场景**根本不行**。
+
+**三方等速扫描(`compare3.py`,速度 3→8 m/s × 120 episode,CSV `out/conformal/compare3_matched.csv`,可复用)** + **PX4 上 ours/EGO/SANDO 三方(`px4_batch.py`)** + **可靠性大批量(ours,`reliability.py`,统计 0 碰撞率)** 正在跑,数字回填。
+
 ## 4. 结果:连续时间证书 vs 离散采样(soundness 消融)
 
 `metaurban/cert_ablation.py`:对大量(EGO 已承诺 B-spline + 快速移动圆柱)案例,比 ①连续 Bernstein 证书 ②N 点离散采样 ③稠密 4000 点真值,统计 **false-safe(判安全实则撞)**。
@@ -160,6 +168,18 @@ python metaurban/cert_ablation.py --trials 500
 python metaurban/predictor_compare.py
 ```
 产物都在 `out/conformal/`。
+
+## 8.5 图表清单(out/conformal/)
+
+| 图 | 内容 |
+|---|---|
+| `calib_coverage.png` | per-class 残差散点 + 各 ε 的 conformal keep-out 管 + 覆盖率 |
+| `fig_predictor.png` | CA vs CV 预测器的 per-class v_eff(CV 砍半行人 keep-out) |
+| `fig_cert_ablation.png` | 连续证书 0 false-safe vs 离散采样穿越漏撞(柱状) |
+| `fig_ab.png` | **headline**:ours vs native EGO 时间散点 + 时间差直方(中位 −1.20s)+ 净空 CDF(ours 恒>0.9m,native 撞 19) |
+| `accel_profile.png` | ours vs native 的 \|a(t)\|、jerk、速度(预测带来的更平滑加速度) |
+| `fig_trajectory.png` | 俯视:ours vs native 穿过真人群的路径(ours 绕开未来不撞,native 反应晚撞上) |
+| `safety_dial.png` | ε 作为安全↔速度拨盘(keep-out / 用时 / 净空 vs ε) |
 
 ---
 
