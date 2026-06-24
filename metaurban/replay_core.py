@@ -327,7 +327,9 @@ def run_replay(movers, ep, mode="ours", calib=None, predict=True, max_vel=3.0, m
         if record:
             hist.append(dict(tick=tick, t=round(t, 2), clr=round(tick_clr, 3) if tick_clr < 1e17 else None,
                              kind=kind, z=round(float(p_d[2]), 2),
-                             p=[round(float(p_d[0]), 2), round(float(p_d[1]), 2)]))
+                             p=[round(float(p_d[0]), 2), round(float(p_d[1]), 2)],
+                             a=round(float(np.linalg.norm(a_d)), 4), v=round(float(np.linalg.norm(v_d)), 4),
+                             ax=round(float(a_d[0]), 4), ay=round(float(a_d[1]), 4)))
         dgoal = float(np.linalg.norm(p_d[:2] - goal[:2]))
         if dgoal < 0.8:
             reached = True; break
