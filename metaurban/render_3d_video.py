@@ -36,6 +36,7 @@ from ego_bridge import EGOPlanner  # standalone EGO-Planner core (used when --eg
 # sando_native_bridge is imported lazily inside the --native branch (its .so links GUROBI; only load on demand)
 from metaurban import SidewalkDynamicMetaUrbanEnv
 from metaurban.component.sensors.rgb_camera import RGBCamera
+from metaurban.component.sensors.depth_camera import DepthCamera   # D435i depth perception input (--d435i)
 from metaurban.obs.observation_base import DummyObservation   # skip per-step obs gather (no wasted readback)
 from metaurban.component.agents.pedestrian.base_pedestrian import BasePedestrian
 from metaurban.component.delivery_robot.base_deliveryrobot import BaseDeliveryRobot
@@ -66,6 +67,7 @@ ap.add_argument("--ego", action="store_true", help="use the standalone EGO-Plann
 ap.add_argument("--native", action="store_true", help="use the NATIVE MIT-ACL SANDO baseline (de-ROS'd: heat-A* + DecompUtil SFC + GUROBI), fed the depth-FOV cloud, instead of our MINCO core")
 ap.add_argument("--fov_range", type=float, default=8.0, help="depth-camera perception range (m) when --ego (D435i ~ a few m); only obstacles in this forward cone are seen")
 ap.add_argument("--fov_deg", type=float, default=45.0, help="depth-camera half-FOV (deg) for the forward perception cone when --ego")
+ap.add_argument("--d435i", action="store_true", help="use a REAL Intel RealSense D435i depth camera as the perception INPUT: mount a D435i-spec DepthCamera (FOV 87x58, range ~0.3-8m, axial noise) on the drone nose, render the depth image, deproject to a world point cloud, and feed THAT to EGO instead of the GT-omniscient fov_cloud. Occlusion + range + noise = sim2real-faithful perception. Same point-cloud interface accepts a real D435i via pyrealsense2. Needs --ego")
 ap.add_argument("--seam", action="store_true", help="enable seam C2-from-exec-state (A4): re-anchor each MINCO solve at the drone's real execution state so 'what flies == what is certified' (our MINCO core only)")
 ap.add_argument("--ego_safe", action="store_true", help="wrap EGO with MINCO's per-class certified MOVER safety: certify EGO's committed B-spline (S3 continuous-time deficit) against each detected mover with per-class d_safe (human0.8/vehicle0.6/animal0.7); uncertified commit -> RTA HOLD. Static stays EGO's own cloud avoidance. Needs --ego")
 ap.add_argument("--maneuver", action="store_true", help="NO-HOLD CYLINDER maneuvering (M3): each step, run a fastest-safe candidate tournament (straight/around-L/R/over/climb sub-goals), certify each committed B-spline vs every mover with the CYLINDER disjunction (horizontal sqrt(dx^2+dy^2)>=r+d_safe OR vertical p_z>=z_clear), and FLY the certified candidate with the most goal-ward speed. Fly OVER a wall, AROUND a crosser, climb as the no-freeze escape. Needs --ego; replaces --ego_safe's HOLD")
@@ -113,7 +115,9 @@ def p3(xy, z): return np.array([float(xy[0]), float(xy[1]), float(z)], float)
 
 env_cfg = dict(
     crswalk_density=1, object_density=0.9, walk_on_all_regions=False,   # DENSE scene -> the avoider has real work
-    use_render=False, image_observation=True, sensors=dict(rgb_camera=(RGBCamera, args.w, args.h)),
+    use_render=False, image_observation=True,
+    sensors=(dict(rgb_camera=(RGBCamera, args.w, args.h), d435i_depth=(DepthCamera, 160, 106)) if args.d435i
+             else dict(rgb_camera=(RGBCamera, args.w, args.h))),
     interface_panel=[], manual_control=False, map='X', daytime="12:00",
     default_expert=False, drivable_area_extension=55, height_scale=1,
     show_mid_block_map=False, show_ego_navigation=False, debug=False, horizon=100000,
@@ -210,6 +214,21 @@ drone = eng.spawn_object(DroneCls, position=[float(START[0]), float(START[1])],
                          heading_theta=float(np.arctan2(axis[1], axis[0])))
 drone.set_position([float(START[0]), float(START[1]), CRUISE_Z])
 drone_model = getattr(drone, "_model", None)
+
+# --- D435i depth camera as perception INPUT (--d435i): real rendered depth -> deprojected world cloud -> EGO ---
+d435 = None
+if args.d435i:
+    from d435i_sensor import D435iDepth
+    d435 = D435iDepth(eng, width=160, height=106, zmax=float(args.fov_range), noise=True)
+    print(f"[3dv] --d435i: D435i depth camera perception (FOV 87x58, range {args.fov_range}m, axial noise) "
+          f"replaces the GT fov_cloud -> EGO sees occlusion-limited surfaces only", flush=True)
+
+def d435i_cloud(p_d):
+    """Real D435i depth -> world point cloud, mounted on the drone nose (FPV pose carries the heading).
+    Clipped to the obstacle height band [0.2, 3.0] m -> drops the floor/sky, keeps the cylinder column EGO cares
+    about. Drop-in replacement for fov_cloud(p_d, heading, t)."""
+    c = d435.cloud_world(drone.origin, position=FPV_POS, hpr=FPV_HPR, subsample=2, z_floor=0.2, z_ceil=3.0)
+    return c if len(c) else np.zeros((0, 3))
 # real quadrotor flight dynamics: SANDO set-points are TRACKED through this (tilt-to-accelerate, momentum)
 quad = Quadrotor()
 px4 = None
@@ -1045,7 +1064,9 @@ while not quit_now:
             # EGO-Planner core: perceive ONLY the depth-camera FOV cloud (not GT omniscience) PLUS the ground
             # plane (floor knowledge isn't FOV-limited), aim at the waypoint clipped to the receding horizon.
             heading = float(quad.yaw)
-            cloud = np.concatenate([fov_cloud(p_d, heading, t), ground_patch(p_d, radius=EGO_HOR + 4.0)], axis=0)
+            # perception source: real D435i depth (occlusion-limited surfaces) when --d435i, else the GT fov_cloud
+            _percept = d435i_cloud(p_d) if args.d435i else fov_cloud(p_d, heading, t)
+            cloud = np.concatenate([_percept, ground_patch(p_d, radius=EGO_HOR + 4.0)], axis=0)
             if args.slip:                                              # route EGO around movers at the cert margin
                 cloud = np.concatenate([cloud, _slip_mover_cloud(p_d, t)], axis=0)
             ego.update_cloud(cloud, p_d)

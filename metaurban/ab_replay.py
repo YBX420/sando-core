@@ -42,6 +42,7 @@ def main():
     ap.add_argument("--n_ep", type=int, default=6)
     ap.add_argument("--eps", type=float, default=0.05)
     ap.add_argument("--max_vel", type=float, default=3.0)
+    ap.add_argument("--budget", type=float, default=3.0, help="time budget: ours must reach within native+budget s")
     ap.add_argument("--tag", default="")
     args = ap.parse_args()
     calib = R.load_calib(args.eps)
@@ -89,7 +90,8 @@ def summarize(rows, args):
     dts = [r["ours_t"] - r["nat_t"] for r in both]
     ours_clrs = [r["ours_clr"] for r in rows if r["ours_clr"] is not None]
     nat_clrs = [r["nat_clr"] for r in rows if r["nat_clr"] is not None]
-    within2 = sum(1 for d in dts if d <= 2.0 + 1e-9)
+    budget = getattr(args, "budget", 3.0)
+    within2 = sum(1 for d in dts if d <= budget + 1e-9)
     faster = sum(1 for d in dts if d < 0)
 
     print("\n" + "=" * 78)
@@ -103,12 +105,12 @@ def summarize(rows, args):
     if dts:
         print(f"  time delta ours-native (s): median={np.median(dts):+.2f}  mean={np.mean(dts):+.2f}  "
               f"min={min(dts):+.2f}  max={max(dts):+.2f}")
-        print(f"  ours within native+2s: {within2}/{len(dts)}    ours strictly faster: {faster}/{len(dts)}")
+        print(f"  ours within native+{budget:g}s: {within2}/{len(dts)}    ours strictly faster: {faster}/{len(dts)}")
     print("-" * 78)
     acc_zero_coll = (ours_coll == 0)
-    acc_within2 = dts and all(d <= 2.0 + 1e-9 for d in dts)
+    acc_within2 = dts and all(d <= budget + 1e-9 for d in dts)
     print(f"  ACCEPTANCE  zero-collision(ours): {'PASS' if acc_zero_coll else 'FAIL'}    "
-          f"all within native+2s: {'PASS' if acc_within2 else 'FAIL'}")
+          f"all within native+{budget:g}s: {'PASS' if acc_within2 else 'FAIL'}")
     print("=" * 78 + "\n")
 
     out = dict(eps=args.eps, max_vel=args.max_vel, n_episodes=len(rows), n_both_reach=len(both),

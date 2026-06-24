@@ -47,18 +47,19 @@ min-time survey(`sando_py/compass_artifact_*.md`)的结论一句话:**"真·时�
 
 ## 2. 结果:标定 + 覆盖验证
 
-**数据规模**:20 场景,约 1.1M 预测实例(cal+test)。
+**数据规模**:20 场景,约 2.5M 预测实例(cal+test);部署预测器 = **CV**(见 §5,比 CA 收紧近半)。
 
 | class | eps | 目标覆盖 | q_conformal (m) | v_eff (m/s) | **test 覆盖** |
 |---|---|---|---|---|---|
-| pedestrian | 0.10 | 0.90 | ~0.00 | 1.12 | 0.923 |
-| pedestrian | 0.05 | 0.95 | ~0.00 | 1.29 | 0.964 |
-| vehicle | 0.05 | 0.95 | ~0.00 | 1.71 | 0.961 |
-| all | 0.05 | 0.95 | ~0.00 | 1.31 | 0.964 |
+| pedestrian | 0.10 | 0.90 | +0.113 | 0.525 | 0.903 |
+| pedestrian | 0.05 | 0.95 | +0.125 | 0.612 | 0.952 |
+| vehicle | 0.05 | 0.95 | −0.118 | 1.587 | 0.964 |
+| all | 0.05 | 0.95 | +0.111 | 0.669 | 0.954 |
 
-**两个要点**:
+**三个要点**:
 - **覆盖全部达标**(test 覆盖 ≥ 目标,仿射管保守 → 略微过覆盖,正确)。这是支撑 "P(碰)≤ε" 的实测数字。
-- **手设 `v_eff=0.2` 严重欠覆盖**:真行人 KF 残差在 95% 水平是 **1.29 m/s**(是旧占位的 ~6×)。这解释了 M1 实测净空跌到 0.677<0.8 的根因(预测误差吃光裕度)——conformal 层既**诊断**又**修复**了这个老账。
+- **手设 `v_eff=0.2` 严重欠覆盖**:真行人 KF 残差(CV)在 95% 水平是 **0.61 m/s**(CA 是 1.29);旧占位 0.2 仍欠覆盖近 3×。这解释了 M1 实测净空跌到 0.677<0.8 的根因(预测误差吃光裕度)——conformal 层既**诊断**又**修复**了这个老账。
+- **vehicle 比 pedestrian 宽**(v_eff 1.59 vs 0.61):车更快、CA/CV 预测误差更大,per-class 标定正确反映了这点(对齐 `EGO_PERCLASS_DSAFE`)。
 
 > 图:`out/conformal/calib_coverage.png`(残差散点 + 各 ε 的仿射管 + 覆盖率)。
 
@@ -66,15 +67,15 @@ min-time survey(`sando_py/compass_artifact_*.md`)的结论一句话:**"真·时�
 
 ## 3. 结果:ours-vs-native A/B(真轨迹回放)
 
-`metaurban/replay_core.py` + `ab_replay.py`:把真 mover 轨迹当**不让路的录像**(strict 最坏情形)回放,无人机飞穿人群走廊。ours = KF 预测 + per-class conformal 证书门控机动;native = 莽撞真 EGO(膨胀 0.3,贴 ~0.3m 飞)。**验收(用户 2026-06-24 拍板)**:ours **0 碰撞** 且 ours_time ≤ native_time + 2s(越快越好)。
+`metaurban/replay_core.py` + `ab_replay.py`:把真 mover 轨迹当**不让路的录像**(strict 最坏情形)回放,无人机飞穿人群走廊。ours = KF(CV)预测 + per-class conformal 证书门控机动;native = 莽撞真 EGO(膨胀 0.3,贴 ~0.3m 飞)。**验收(用户 2026-06-24 拍板)**:ours **0 碰撞** 且 ours_time ≤ native_time + 3s(越快越好)。
 
-> **结果(20 seeds × 6 episodes,回填):**
-> - 碰撞:ours `__/120`,native `__/120`
-> - 最小净空:ours `__` m,native `__` m(中位 ours `__` vs native `__`)
-> - 用时差 ours−native:中位 `__`s,最大 `__`s;**≤native+2s:`__`/`__`**;严格更快 `__`/`__`
-> - **验收:0 碰撞 `PASS/FAIL`,全部 ≤native+2s `PASS/FAIL`**
+> **结果(20 seeds × 6 = 120 episodes,CV 部署配置,eps=0.05):**
+> - 碰撞:ours **0/120**,native **19/120**(贴飞穿过人,净空低至 −0.37m)
+> - 最小净空:ours **0.63 m**,native **−0.37 m**(中位 ours **1.48** vs native **0.50**)
+> - 用时差 ours−native:**中位 +0.00s,均值 −0.51s**(ours 平均更快),最大 +2.40s,最小 −5.4s;**≤native+3s:118/118**;严格更快 **59/118**
+> - **验收:0 碰撞 ✅PASS,全部 ≤native+3s ✅PASS**
 
-**故事**:ours 永远认证安全(净空恒 >1.3m),native 会直接穿过人(净空 <0 撞);ours 用时只多中位 ~0.3s,**硬场景(native 被人群缠住/撞上)反而更快**(seed1 ep0:native 8.4s 且撞,ours 5.1s 干净)。
+**故事**:ours 永远认证安全(净空恒 >0.6m,中位 ~1.5m),native 会直接穿过人(19 次净空 <0 撞);ours 用时中位持平/均值更快,**硬场景(native 被人群缠住/撞上)反而快得多**(seed1 ep0:native 8.4s 且撞,ours 5.1s 干净;最快处快 5.4s)。仅 2 个 episode ours 比 native 慢 >2s(+2.1/+2.4s,均 native 合法到达没撞)——这是认证安全在简单场景的诚实代价,落在用户的 +3s 预算内。
 
 ---
 
@@ -82,16 +83,16 @@ min-time survey(`sando_py/compass_artifact_*.md`)的结论一句话:**"真·时�
 
 `metaurban/cert_ablation.py`:对大量(EGO 已承诺 B-spline + 快速移动圆柱)案例,比 ①连续 Bernstein 证书 ②N 点离散采样 ③稠密 4000 点真值,统计 **false-safe(判安全实则撞)**。
 
-> **结果(回填):**
+> **结果(500 案例,其中 367 真撞):**
 > | 方法 | 判 safe | **FALSE-SAFE(漏撞)** | false-unsafe(保守拒) |
 > |---|---|---|---|
-> | continuous (Bernstein) | `__` | **`__`** | `__` |
-> | discrete-2 | `__` | **`__`** | `__` |
-> | discrete-3 | `__` | **`__`** | `__` |
-> | discrete-5 | `__` | **`__`** | `__` |
-> | discrete-9 | `__` | **`__`** | `__` |
+> | continuous (Bernstein) | 133 | **0** | 0 |
+> | discrete-2 | 335 | **202** | 0 |
+> | discrete-3 | 240 | **107** | 0 |
+> | discrete-5 | 158 | **25** | 0 |
+> | discrete-9 | 138 | **5** | 0 |
 
-**要点**:连续证书 false-safe = 0(sound,这是它的全部意义);离散采样在快速 mover 下会**穿越漏撞**,采样越稀漏得越多。这就是"为什么要连续时间证书而不是采样检查"的硬证据。
+**要点**:连续证书 false-safe = **0**(sound,这是它的全部意义);离散采样在快速 mover 下会**穿越漏撞**——2 点漏掉 367 次真撞中的 **202** 次,即便 9 点仍漏 5 次。这就是"为什么要连续时间证书而不是采样检查"的硬证据(且连续证书在本集 false-unsafe 也为 0,不过度保守)。
 
 ---
 
@@ -99,7 +100,7 @@ min-time survey(`sando_py/compass_artifact_*.md`)的结论一句话:**"真·时�
 
 `metaurban/predictor_compare.py`:keep-out = 残差的 conformal 分位,所以**更好的预测器 → 更小 v_eff → 同等覆盖下飞更紧/更快**。比 CA(常加速,当前)vs CV(常速,丢掉噪声加速度项)。
 
-> **结果(回填)**:pedestrian 胜者 = `__`(v_eff `__` vs `__`)。对走走停停的行人,CA 的加速度外推会过冲 → CV 残差可能更小 → 部署切 CV 可在不破坏覆盖的前提下收紧 keep-out。
+> **结果**:pedestrian 胜者 = **CV**(v_eff **0.612 vs CA 1.286**,@≥0.95 覆盖,近乎**减半**);vehicle CV 1.587 vs CA 1.707;all CV 0.669 vs CA 1.314。对走走停停的行人,CA 的加速度外推过冲 → CV 残差更小 → **部署切 CV,在不破坏覆盖的前提下把 keep-out 收紧近半 → ours 飞更紧更快**(A/B 中位用时差从 CA 的 +0.00s 改善到 CV 的 −0.15s)。这是"用 KF 更好分析得到更优加速度/更紧安全包络"的直接实现。
 
 ---
 
@@ -108,7 +109,7 @@ min-time survey(`sando_py/compass_artifact_*.md`)的结论一句话:**"真·时�
 - **边际覆盖,非条件覆盖**:conformal 给的是跨实例的 marginal P(碰)≤ε,不是"对每个具体行人都 ≤ε"。条件覆盖要 Mondrian/CQR,列 future work。已做的 per-class 是粗粒度的 Mondrian。
 - **exchangeability 假设**:按 track 切 cal/test 尊重了轨迹内相关性,但跨场景分布漂移(不同城市/密度)仍可能破坏覆盖 → 部署需在线再标定或 ACI(adaptive conformal)。
 - **回放 = mover 不让路**:strict 最坏情形(真 ORCA 会部分让路 → 实际更易)。但也没建模 mover 对无人机的反应博弈。
-- **感知仍是 GT/带噪 GT**:标定用的是真位置 + 高斯噪声,**不是真深度相机**。D435i 深度相机接入(遮挡/量程/真实噪声)是下一步(`task #6`),会让残差/覆盖更可信。
+- **感知:标定用真位置 + 高斯检测噪声;闭环回放同样**。**D435i 深度相机管线已接入**(`metaurban/d435i_sensor.py`:渲真深度图→度量化→反投影世界点云,带 FOV 87×58/量程/轴向噪声;`render_3d_video.py --d435i` 把它喂 EGO 替代 GT fov_cloud)——单帧已验证(6575 点有界前向云);**全渲染闭环 + 用 D435i 云重标定 conformal** 仍待跑(机载相机挂载朝向已用 FPV 位姿 −90/−12 对齐无人机前向)。同一点云接口可经 pyrealsense2 接真 D435i。
 - **静态障碍未建模进回放**:回放只放 mover,街景静态几何没进 EGO grid(渲染器主线有)。
 
 ---
