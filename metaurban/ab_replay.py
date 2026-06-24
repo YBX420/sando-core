@@ -45,6 +45,8 @@ def main():
     ap.add_argument("--ours_speedup", type=float, default=1.0, help="ours flies at max_vel*speedup; the cert gates "
                     "every faster commit so it stays safe (native can't: no cert -> crashes). This is the "
                     "'I KNOW how they move, so I dare to fly FASTER but safe' speed budget the prediction earns.")
+    ap.add_argument("--baseline", default="native", choices=["native", "sando"],
+                    help="the planner ours is compared against: 'native' = reckless EGO, 'sando' = MIT-ACL SANDO")
     ap.add_argument("--budget", type=float, default=3.0, help="time budget: ours must reach within native+budget s")
     ap.add_argument("--dynamics", action="store_true", help="fly set-points through real QUADROTOR dynamics and "
                     "measure clearance on the FLOWN path (renderer/PX4 reality: what flies != what's planned), "
@@ -68,7 +70,7 @@ def main():
             with _quiet():
                 ro = R.run_replay(movers, ep, "ours", calib, max_vel=args.max_vel * args.ours_speedup,
                                   dynamics=args.dynamics)
-                rn = R.run_replay(movers, ep, "native", calib, max_vel=args.max_vel, dynamics=args.dynamics)
+                rn = R.run_replay(movers, ep, args.baseline, calib, max_vel=args.max_vel, dynamics=args.dynamics)
             rows.append(dict(seed=sd, ep=k, n_members=len(ep["members"]),
                              ours_t=ro["time_s"], ours_clr=ro["min_clr"], ours_reach=ro["reached"],
                              ours_coll=ro["collided"], ours_maxz=round(ro["max_z"], 2), counts=ro["counts"],

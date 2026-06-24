@@ -202,6 +202,7 @@ def run_replay(movers, ep, mode="ours", calib=None, predict=True, max_vel=3.0, m
         ego = EGOPlanner(map_origin=(-40, -40, -1), map_size=(80, 80, 8), res=0.2, inflation=infl)
         ego.set_params(max_vel=max_vel, max_acc=max_acc, horizon=HORIZON)
     last_rt = 0.0
+    sando_path = None          # SANDO's last committed path; replan periodically + EXECUTE it (not replan every tick)
     trackers = {}                                   # mover idx -> MoverTracker (created on first detection)
     rng = np.random.default_rng(1234567)
 
@@ -255,20 +256,40 @@ def run_replay(movers, ep, mode="ours", calib=None, predict=True, max_vel=3.0, m
             import time as _time
             t_loc = tick * DT
             sn.update_state(p_d, v_d, a_d, float(math.atan2(gdir[1], gdir[0])))
-            for i in near:
-                c = dets[i]; cls = movers.m[i]["cls"]; rr = movers.m[i]["r"]; hh = movers.m[i]["h"]
-                vv = trackers[i].state()[1] if trackers[i].ready else np.zeros(3)
-                bb = (rr + R_DRONE + D_SAFE_H, rr + R_DRONE + D_SAFE_H, hh)
-                sn.add_traj(i, bb, tx=f"{c[0]:.3f}+({vv[0]:.3f})*(t-({t_loc:.3f}))",
-                            ty=f"{c[1]:.3f}+({vv[1]:.3f})*(t-({t_loc:.3f}))", tz="1.5",
-                            vx=f"{vv[0]:.3f}", vy=f"{vv[1]:.3f}", vz="0", is_agent=(cls == "pedestrian"), t=t_loc)
-            sn.update_occupancy(_ground(p_d), t_loc)          # SANDO needs an occupancy map each tick (ground)
-            sn.clean_old_trajs(t_loc)
-            _t0 = _time.perf_counter()
-            sn.replan(last_rt, t_loc); last_rt = _time.perf_counter() - _t0
-            okn, ng = sn.get_next_goal()
-            if okn:
-                p_ref, v_ref, a_ref = (np.asarray(ng[0], float), np.asarray(ng[1], float), np.asarray(ng[2], float))
+            # replan every 5 ticks (1.5 s) and EXECUTE the committed path in between; replanning every tick made
+            # SANDO re-decide constantly and wander (dgoal oscillated). Periodic replan = stable plan to follow.
+            if tick % 5 == 0 or sando_path is None or len(sando_path) < 2:
+                for i in near:
+                    c = dets[i]; cls = movers.m[i]["cls"]; rr = movers.m[i]["r"]; hh = movers.m[i]["h"]
+                    vv = trackers[i].state()[1] if trackers[i].ready else np.zeros(3)
+                    bb = (rr + R_DRONE + D_SAFE_H, rr + R_DRONE + D_SAFE_H, hh)
+                    sn.add_traj(i, bb, tx=f"{c[0]:.3f}+({vv[0]:.3f})*(t-({t_loc:.3f}))",
+                                ty=f"{c[1]:.3f}+({vv[1]:.3f})*(t-({t_loc:.3f}))", tz="1.5",
+                                vx=f"{vv[0]:.3f}", vy=f"{vv[1]:.3f}", vz="0", is_agent=(cls == "pedestrian"), t=t_loc)
+                sn.update_occupancy(_ground(p_d), t_loc)      # SANDO needs an occupancy map to be 'ready'
+                sn.clean_old_trajs(t_loc)
+                _t0 = _time.perf_counter()
+                sn.replan(last_rt, t_loc); last_rt = _time.perf_counter() - _t0
+                sando_path = sn.get_setpoints()
+            # FLY the committed path at cruise speed: walk max_vel*DT of arc-length from the nearest point
+            # (get_next_goal only advances ~0.05 m/call -> crawl). SANDO = path planner here; a fair DT-step.
+            sp = sando_path
+            if sp is not None and len(sp) >= 2:
+                d = np.linalg.norm(sp[:, :2] - p_d[:2], axis=1); j = int(np.argmin(d))
+                acc = 0.0; tgt = max_vel * DT
+                while j < len(sp) - 1 and acc < tgt:
+                    acc += float(np.linalg.norm(sp[j + 1, :2] - sp[j, :2])); j += 1
+                # cap the per-tick step at max_vel*DT so an erratic/looping committed path can't fling the drone
+                step = np.asarray(sp[j], float)[:2] - p_d[:2]; ns = float(np.linalg.norm(step))
+                if ns > max_vel * DT:
+                    step = step * (max_vel * DT / ns); ns = max_vel * DT
+                p_ref = np.array([p_d[0] + step[0], p_d[1] + step[1], CRUISE_Z])
+                v_ref = np.array([step[0] / DT, step[1] / DT, 0.0]) if ns > 1e-6 else np.zeros(3)
+                a_ref = np.zeros(3)
+            else:
+                okn, ng = sn.get_next_goal()
+                if okn:
+                    p_ref, v_ref, a_ref = (np.asarray(ng[0], float), np.asarray(ng[1], float), np.asarray(ng[2], float))
             counts["sando"] += 1; kind = "sando"
         else:
             # near-term predicted cloud for EGO's grid
