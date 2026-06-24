@@ -69,12 +69,15 @@ ap.add_argument("--fov_deg", type=float, default=45.0, help="depth-camera half-F
 ap.add_argument("--seam", action="store_true", help="enable seam C2-from-exec-state (A4): re-anchor each MINCO solve at the drone's real execution state so 'what flies == what is certified' (our MINCO core only)")
 ap.add_argument("--ego_safe", action="store_true", help="wrap EGO with MINCO's per-class certified MOVER safety: certify EGO's committed B-spline (S3 continuous-time deficit) against each detected mover with per-class d_safe (human0.8/vehicle0.6/animal0.7); uncertified commit -> RTA HOLD. Static stays EGO's own cloud avoidance. Needs --ego")
 ap.add_argument("--maneuver", action="store_true", help="NO-HOLD CYLINDER maneuvering (M3): each step, run a fastest-safe candidate tournament (straight/around-L/R/over/climb sub-goals), certify each committed B-spline vs every mover with the CYLINDER disjunction (horizontal sqrt(dx^2+dy^2)>=r+d_safe OR vertical p_z>=z_clear), and FLY the certified candidate with the most goal-ward speed. Fly OVER a wall, AROUND a crosser, climb as the no-freeze escape. Needs --ego; replaces --ego_safe's HOLD")
+ap.add_argument("--slip", action="store_true", help="SLIP (space-time speed-warp): plan ONE tight near-native EGO path, then fly it at the FASTEST scalar speed-warp s whose RE-TIMED flight the continuous-time cert proves clears every KF-predicted moving object (s>1 slip-AHEAD = faster than EGO, s<1 slip-BEHIND a crosser). KF relative velocity optimizes the acceleration; no re-route, no climb. Needs --ego")
 ap.add_argument("--clear_spawn", action="store_true", help="re-roll the route until the drone's START is genuinely clear of static obstacles (full field incl. trees), so it never spawns inside foliage. Deterministic per seed, so A/B stays controlled")
 ap.add_argument("--mp4", action="store_true", help="also write out/drone_3d.mp4")
 ap.add_argument("--loop_scene", action="store_true", help="restart the fly-through forever for continuous live viewing")
 args = ap.parse_args()
 if args.maneuver:
     args.ego = True; args.ego_safe = False   # the no-HOLD tournament REPLACES the ego_safe HOLD wrapper
+if args.slip:
+    args.ego = True; args.ego_safe = False; args.maneuver = False   # SLIP replaces the brake/tournament with speed-warp
 
 CRUISE_Z = float(LOOP["cruise_z"]); SENSE_R = float(LOOP["sense_cull_r"])
 REPLAN_DT = float(LOOP["replan_dt"]); MIN_GOAL = float(LOOP["min_goal_dist"])
@@ -326,6 +329,13 @@ EGO_APPROACH_EPS = 0.2  # m/s: closing-speed threshold. A mover that is separati
                         # this) is NOT a threat -> skip its anticipatory brake band (kills same-direction
                         # jitter); the hard d_safe stop still applies to everyone.
 EGO_G_RELEASE = 0.15    # per-replan cap on how fast the speed scale RISES (brake instantly, release slowly)
+# ---- SLIP space-time speed-warp knobs ----
+EGO_S_MIN = 0.30        # slowest warp before we give up and hover (no certified slip-behind)
+EGO_S_MAX = 1.60        # fastest warp (slip-AHEAD): fly up to 1.6x EGO's planned speed when space-time is clear
+EGO_S_STEP = 0.1        # warp scan granularity
+EGO_VEFF_SLIP = float(os.environ.get("EGO_VEFF", 0.25))   # KF-residual tube (covers prediction error; calibrate)
+EGO_SLIP_DSAFE = float(os.environ.get("EGO_SLIPDSAFE", 0.2))   # SLIP standoff: tight like native (cert guarantees
+                                                              # it, so never collides). User-tunable; only no-collision matters.
 if args.ego:
     ego = EGOPlanner(map_origin=(-200, -200, -1), map_size=(400, 400, 8), res=0.2, inflation=0.3)
     ego.set_params(max_vel=float(PLN.get("v_max", 6.0)), max_acc=float(PLN.get("a_max", 10.0)),
@@ -536,6 +546,96 @@ def ego_certify_commit(p_d, v_d, t_sim):
             if g_mover < 1.0:
                 worst = next((k for k, v in EGO_PERCLASS_DSAFE.items() if abs(v - d_safe) < 1e-9), "obstacle")
     return g, worst
+
+
+def _slip_mover_cloud(p_d, t_sim):
+    """SLIP occupancy for the movers: each CURRENT KF mover as a vertical cylinder inflated to the cert margin
+    (r_obs + drone_radius + d_safe) so EGO's own route already clears what the cert demands -> the cert PASSES
+    the route at full speed (no permanent hover) instead of rejecting every warp because EGO routed 0.1 m too
+    tight. Current position only (no swath): the speed-warp + per-tick re-cert handle the timing; this just keeps
+    EGO from planning THROUGH a mover. Capped at head height (overhead free)."""
+    pts = []
+    body = float(par.drone_radius)
+    for (oid, c0, vel, r_obs, d_safe) in kf_movers(p_d, t_sim):
+        c0 = np.asarray(c0, float)
+        if np.linalg.norm(c0[:2] - p_d[:2]) > SENSE_R:
+            continue
+        R = r_obs + body + EGO_SLIP_DSAFE; head = 2.0 * c0[2]
+        for th in np.linspace(0, 2 * np.pi, 12, endpoint=False):
+            for z in np.linspace(0.3, head, 3):
+                pts.append([c0[0] + R * np.cos(th), c0[1] + R * np.sin(th), z])
+    return np.asarray(pts, float) if pts else np.zeros((0, 3))
+
+
+def ego_speed_search(p_d, v_d, t_sim):
+    """SLIP core. EGO has just committed ONE tight B-spline X(u). Pick the FASTEST scalar speed-warp s such that
+    flying X at rate s is certified clear of every KF-predicted moving object, via the SOUND re-timing
+    substitution: flying X(u) at rate s -> real time tau=u/s -> mover c(tau)=c0+v tau+0.5 a tau^2 becomes, in the
+    trajectory's own param u, c0 + (v/s)u + 0.5(a/s^2)u^2; real horizon [0,TAU] -> param [0, s*TAU]; tube in real
+    time -> v_eff/s, delta*s. So certify_horizontal(c0, R, obs_vel=v/s, obs_acc=a/s^2, t_hi=s*TAU, v_eff=VEFF/s,
+    delta=REPLAN_DT*s) proves ||X(s*tau)-c(tau)||>=rho for ALL real tau in [0,TAU] — the ACTUAL flown space-time
+    path. s>1 = slip-AHEAD (faster than EGO's plan); s<1 = slip-BEHIND a crosser. Returns (s_best, worst_class).
+    s_best=0 -> hover (no certified warp). The flown (post-LPF) scale MUST be re-certified by the caller."""
+    dur = ego.duration()
+    if dur <= 1e-3:
+        return 0.0, "stale"
+    # kinodynamic ceiling: one eval sweep -> peak speed/accel -> how much we can warp UP before exceeding limits
+    vp = ap = 1e-6
+    for u in np.linspace(0.0, dur, 16):
+        r = ego.eval(u)
+        if r is None:
+            continue
+        vp = max(vp, float(np.linalg.norm(r[1]))); ap = max(ap, float(np.linalg.norm(r[2])))
+    vmax = float(PLN.get("v_max", 6.0)); amax = float(PLN.get("a_max", 10.0))
+    s_kino = min(vmax / vp, float(np.sqrt(amax / ap)))
+    s_max = min(EGO_S_MAX, s_kino)
+    body = float(par.drone_radius)
+    # threatening movers only (direction gate): a separating / co-moving mover not currently breaching is skipped
+    threat = []
+    for (oid, c0, vel, r_obs, d_safe) in kf_movers(p_d, t_sim):
+        rel = np.asarray(c0, float)[:2] - p_d[:2]; dist = float(np.linalg.norm(rel))
+        closing = float(np.dot(np.asarray(v_d, float)[:2] - np.asarray(vel, float)[:2], rel / dist)) if dist > 1e-6 else 1.0
+        if closing <= EGO_APPROACH_EPS and dist > r_obs + body + EGO_SLIP_DSAFE:
+            continue
+        threat.append((np.asarray(c0, float), np.asarray(vel, float), r_obs, d_safe))
+    if not threat:
+        return s_max, None                                   # nothing to yield to -> fly as fast as kinodynamics allow
+    s = s_max
+    while s >= EGO_S_MIN - 1e-9:
+        ok = True
+        for (c0, vel, r_obs, d_safe) in threat:
+            R = r_obs + body + EGO_SLIP_DSAFE                # tight standoff; the v_eff tube covers KF residual
+            # certify the PREDICTED moving obstacle (re-timed). NO frozen-mover variant: it certifies the mover's
+            # CURRENT position, which is exactly where slip-behind passes through -> it would forbid every slip.
+            # KF deviation is covered by the v_eff tube + the 0.1s per-tick re-cert (a mover can't jump in one DT).
+            hp, _ = ego.certify_horizontal(obs_c0=c0, R=R, obs_vel=tuple(vel / s), obs_acc=(0, 0, 0),
+                                           t_hi=s * EGO_TAU_TRUST, v_eff=EGO_VEFF_SLIP / s, delta=REPLAN_DT * s)
+            if not hp:
+                ok = False; break
+        if ok:
+            return float(s), None
+        s -= EGO_S_STEP
+    return 0.0, "blocked"                                    # no certified warp -> hover on the same path
+
+
+def ego_slip_feasible(p_d, v_d, t_sim, s):
+    """Re-certify ONE specific speed-warp s against the current KF movers (used to certify the post-LPF FLOWN
+    scale: the LPF may release to a slower s that is NOT certified — for a slip-ahead mover, slowing is unsafe)."""
+    if s <= 1e-3:
+        return False
+    body = float(par.drone_radius)
+    for (oid, c0, vel, r_obs, d_safe) in kf_movers(p_d, t_sim):
+        c0 = np.asarray(c0, float); vel = np.asarray(vel, float)
+        rel = c0[:2] - p_d[:2]; dist = float(np.linalg.norm(rel))
+        closing = float(np.dot(np.asarray(v_d, float)[:2] - vel[:2], rel / dist)) if dist > 1e-6 else 1.0
+        if closing <= EGO_APPROACH_EPS and dist > r_obs + body + EGO_SLIP_DSAFE:
+            continue
+        R = r_obs + body + EGO_SLIP_DSAFE
+        hp, _ = ego.certify_horizontal(obs_c0=c0, R=R, obs_vel=tuple(vel / s), obs_acc=(0, 0, 0),
+                                       t_hi=s * EGO_TAU_TRUST, v_eff=EGO_VEFF_SLIP / s, delta=REPLAN_DT * s)
+        if not hp:
+            return False
+    return True
 
 
 MAN_REACH_PAD = 0.3   # posture/arm reach added to a mover's head-top for the fly-OVER vertical clearance
@@ -946,6 +1046,8 @@ while not quit_now:
             # plane (floor knowledge isn't FOV-limited), aim at the waypoint clipped to the receding horizon.
             heading = float(quad.yaw)
             cloud = np.concatenate([fov_cloud(p_d, heading, t), ground_patch(p_d, radius=EGO_HOR + 4.0)], axis=0)
+            if args.slip:                                              # route EGO around movers at the cert margin
+                cloud = np.concatenate([cloud, _slip_mover_cloud(p_d, t)], axis=0)
             ego.update_cloud(cloud, p_d)
             man_kind = None
             if args.maneuver:
@@ -986,6 +1088,23 @@ while not quit_now:
                     ego_cert_hold = True; ego_hold_class = wc; ego_n_hold += 1; ego_stuck += 1   # hard stop
                 else:
                     ego_hold_class = wc; ego_n_slow += 1     # anticipatory brake: slowing, not stopped
+            elif args.slip and ego_dur > 1e-3:
+                # SLIP: fastest space-time speed-warp the cert allows (>1 = slip-AHEAD, faster than EGO's plan).
+                s_raw, wc = ego_speed_search(p_d, v_d, t)
+                g = s_raw if s_raw < ego_g_prev else min(s_raw, ego_g_prev + EGO_G_RELEASE)   # brake free, release slow
+                while g >= EGO_S_MIN - 1e-9 and not ego_slip_feasible(p_d, v_d, t, g):         # RE-CERT THE FLOWN SCALE
+                    g -= EGO_S_STEP
+                ego_speed_g = g if g >= EGO_S_MIN - 1e-9 else 0.0
+                ego_g_prev = ego_speed_g
+                if ego_speed_g <= 1e-3:
+                    # blocked by a mover -> HOVER IN PLACE and wait for it to pass; do NOT increment ego_stuck
+                    # (that would trigger the static-entrapment climb recovery, which strands the drone at altitude
+                    # where the horizontal cert still rejects). The mover layer waits + resumes; it never climbs.
+                    ego_cert_hold = True; ego_hold_class = "slip"; ego_n_hold += 1
+                elif ego_speed_g >= 0.999:
+                    ego_n_cert += 1                          # slip-ahead / clear -> at or above EGO's planned speed
+                else:
+                    ego_hold_class = "yield"; ego_n_slow += 1   # slip-behind a crosser
         elif native is not None:
             # NATIVE MIT-ACL SANDO: feed state + depth-FOV occupancy + analytic DynTraj, then replan
             # (heat-A* global -> DecompUtil safe-flight-corridor -> GUROBI local).
@@ -1022,8 +1141,13 @@ while not quit_now:
                 if s is not None:
                     t_ego += ego_speed_g * DT
                     sp_pos, sp_vel, sp_acc = s; sp_pos = np.asarray(sp_pos, float).copy()
-                    sp_vel = np.asarray(sp_vel, float) * ego_speed_g            # feed-forward vel matches the slow-down
+                    sp_vel = np.asarray(sp_vel, float) * ego_speed_g            # feed-forward vel matches the warp
                     sp_acc = np.asarray(sp_acc, float) * (ego_speed_g ** 2)
+                    if args.slip:                                              # SLIP g>1 (slip-ahead): hard-cap to limits
+                        _vmx = float(PLN.get("v_max", 6.0)); _amx = float(PLN.get("a_max", 10.0))
+                        _nv = float(np.linalg.norm(sp_vel)); _na = float(np.linalg.norm(sp_acc))
+                        if _nv > _vmx: sp_vel = sp_vel * (_vmx / _nv)
+                        if _na > _amx: sp_acc = sp_acc * (_amx / _na)
                     if sp_pos[2] < MIN_FLY_Z:                       # never command the quad into the ground
                         sp_pos[2] = MIN_FLY_Z
                         if sp_vel[2] < 0: sp_vel = sp_vel.copy(); sp_vel[2] = 0.0
@@ -1099,7 +1223,7 @@ while not quit_now:
         else:
             gpath = [p_d] + [np.array([w[0], w[1], CRUISE_Z], float) for w in wp[wp_i:]]
         draw_path(gpath, next_goal_pos, p_d)   # <- the path the drone just chose
-        if args.maneuver:
+        if args.maneuver or args.slip:
             draw_predictions()                 # <- the LIVE Kalman forecast every mover is routed around
         step_env()
         c, per = clearance(p_d, fed); mclr = min(mclr, c)
