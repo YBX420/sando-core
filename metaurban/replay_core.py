@@ -148,6 +148,18 @@ def _cyl_cloud(centres, r, z_lo, z_hi, n_th=12, n_z=3):
     return pts
 
 
+_GP = None
+def _ground(p_d, radius=18.0, step=1.0):
+    """Flat ground patch (z=0) under the drone — SANDO needs an occupancy map each tick or it is 'not ready'."""
+    global _GP
+    if _GP is None:
+        xs = np.arange(-radius, radius + 1e-6, step)
+        gx, gy = np.meshgrid(xs, xs); m = (gx * gx + gy * gy) <= radius * radius
+        _GP = np.column_stack([gx[m], gy[m]])
+    out = np.zeros((_GP.shape[0], 3)); out[:, 0] = _GP[:, 0] + p_d[0]; out[:, 1] = _GP[:, 1] + p_d[1]
+    return out
+
+
 def _clearance(p, c_xy, r, h):
     horiz = math.hypot(p[0] - c_xy[0], p[1] - c_xy[1])
     if p[2] <= h:
@@ -178,15 +190,24 @@ def run_replay(movers, ep, mode="ours", calib=None, predict=True, max_vel=3.0, m
     def pos_l(i, t):                                   # mover position in the local frame
         return movers.pos(i, t) - org
 
-    infl = 0.3 if mode == "native" else float(os.environ.get("REP_OURS_INFL", 0.45))
-    ego = EGOPlanner(map_origin=(-40, -40, -1), map_size=(80, 80, 8), res=0.2, inflation=infl)
-    ego.set_params(max_vel=max_vel, max_acc=max_acc, horizon=HORIZON)
+    ego = sn = None
+    if mode == "sando":
+        from sando_native_bridge import SandoNative                # native MIT-ACL SANDO (GUROBI); LD_LIBRARY_PATH req
+        sn = SandoNative(overrides=dict(v_max=max_vel, a_max=max_acc, j_max=30.0,
+                                        x_min=-60, x_max=60, y_min=-60, y_max=60, z_min=0.0, z_max=6.0,
+                                        default_goal_z=CRUISE_Z, drone_radius=R_DRONE, goal_radius=0.8, horizon=8.0))
+        sn.set_terminal_goal([float(goal[0]), float(goal[1]), CRUISE_Z])
+    else:
+        infl = 0.3 if mode == "native" else float(os.environ.get("REP_OURS_INFL", 0.45))
+        ego = EGOPlanner(map_origin=(-40, -40, -1), map_size=(80, 80, 8), res=0.2, inflation=infl)
+        ego.set_params(max_vel=max_vel, max_acc=max_acc, horizon=HORIZON)
+    last_rt = 0.0
     trackers = {}                                   # mover idx -> MoverTracker (created on first detection)
     rng = np.random.default_rng(1234567)
 
     p_d = start.copy(); v_d = np.zeros(3); a_d = np.zeros(3)
     min_clr = 1e18; max_z = start[2]; reached = False
-    counts = {k: 0 for k in ("straight", "around_l", "around_r", "over", "climb", "evade", "native")}
+    counts = {k: 0 for k in ("straight", "around_l", "around_r", "over", "climb", "evade", "native", "sando")}
     hist = []
     best_d = 1e18; stall = 0                            # early-stop degenerate episodes (EGO can't plan -> evade spins)
     quad = Quadrotor() if dynamics else None            # real flight dynamics (what FLIES != what's planned)
@@ -226,6 +247,29 @@ def run_replay(movers, ep, mode="ours", calib=None, predict=True, max_vel=3.0, m
                 if r is not None:
                     p_ref, v_ref, a_ref = (np.asarray(x, float) for x in r)
             counts["native"] += 1; kind = "native"
+        elif mode == "sando":
+            # native MIT-ACL SANDO baseline: feed current state + each mover as an analytic linear DynTraj (the
+            # KF position+velocity it perceives), then heat-A* + DecompUtil SFC + GUROBI local solve. SANDO runs
+            # its OWN prediction/avoidance on the trajectories; we read back its committed next set-point. SANDO
+            # is time-aware via the t argument, so advancing t by DT each tick paces its plan. No cert (baseline).
+            import time as _time
+            t_loc = tick * DT
+            sn.update_state(p_d, v_d, a_d, float(math.atan2(gdir[1], gdir[0])))
+            for i in near:
+                c = dets[i]; cls = movers.m[i]["cls"]; rr = movers.m[i]["r"]; hh = movers.m[i]["h"]
+                vv = trackers[i].state()[1] if trackers[i].ready else np.zeros(3)
+                bb = (rr + R_DRONE + D_SAFE_H, rr + R_DRONE + D_SAFE_H, hh)
+                sn.add_traj(i, bb, tx=f"{c[0]:.3f}+({vv[0]:.3f})*(t-({t_loc:.3f}))",
+                            ty=f"{c[1]:.3f}+({vv[1]:.3f})*(t-({t_loc:.3f}))", tz="1.5",
+                            vx=f"{vv[0]:.3f}", vy=f"{vv[1]:.3f}", vz="0", is_agent=(cls == "pedestrian"), t=t_loc)
+            sn.update_occupancy(_ground(p_d), t_loc)          # SANDO needs an occupancy map each tick (ground)
+            sn.clean_old_trajs(t_loc)
+            _t0 = _time.perf_counter()
+            sn.replan(last_rt, t_loc); last_rt = _time.perf_counter() - _t0
+            okn, ng = sn.get_next_goal()
+            if okn:
+                p_ref, v_ref, a_ref = (np.asarray(ng[0], float), np.asarray(ng[1], float), np.asarray(ng[2], float))
+            counts["sando"] += 1; kind = "sando"
         else:
             # near-term predicted cloud for EGO's grid
             cloud = []
@@ -328,6 +372,8 @@ def run_replay(movers, ep, mode="ours", calib=None, predict=True, max_vel=3.0, m
             hist.append(dict(tick=tick, t=round(t, 2), clr=round(tick_clr, 3) if tick_clr < 1e17 else None,
                              kind=kind, z=round(float(p_d[2]), 2),
                              p=[round(float(p_d[0]), 2), round(float(p_d[1]), 2)],
+                             pref=[round(float(p_ref[0]), 2), round(float(p_ref[1]), 2)],
+                             dgoal=round(float(np.linalg.norm(p_d[:2] - goal[:2])), 2),
                              a=round(float(np.linalg.norm(a_d)), 4), v=round(float(np.linalg.norm(v_d)), 4),
                              ax=round(float(a_d[0]), 4), ay=round(float(a_d[1]), 4)))
         dgoal = float(np.linalg.norm(p_d[:2] - goal[:2]))
