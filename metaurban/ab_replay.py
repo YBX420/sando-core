@@ -46,6 +46,9 @@ def main():
                     "every faster commit so it stays safe (native can't: no cert -> crashes). This is the "
                     "'I KNOW how they move, so I dare to fly FASTER but safe' speed budget the prediction earns.")
     ap.add_argument("--budget", type=float, default=3.0, help="time budget: ours must reach within native+budget s")
+    ap.add_argument("--dynamics", action="store_true", help="fly set-points through real QUADROTOR dynamics and "
+                    "measure clearance on the FLOWN path (renderer/PX4 reality: what flies != what's planned), "
+                    "instead of a perfect-tracking point mass. Use to get render-faithful numbers without rendering.")
     ap.add_argument("--tag", default="")
     args = ap.parse_args()
     calib = R.load_calib(args.eps)
@@ -63,8 +66,9 @@ def main():
         episodes = R.build_episodes(movers, sd, n_ep=args.n_ep)
         for k, ep in enumerate(episodes):
             with _quiet():
-                ro = R.run_replay(movers, ep, "ours", calib, max_vel=args.max_vel * args.ours_speedup)
-                rn = R.run_replay(movers, ep, "native", calib, max_vel=args.max_vel)
+                ro = R.run_replay(movers, ep, "ours", calib, max_vel=args.max_vel * args.ours_speedup,
+                                  dynamics=args.dynamics)
+                rn = R.run_replay(movers, ep, "native", calib, max_vel=args.max_vel, dynamics=args.dynamics)
             rows.append(dict(seed=sd, ep=k, n_members=len(ep["members"]),
                              ours_t=ro["time_s"], ours_clr=ro["min_clr"], ours_reach=ro["reached"],
                              ours_coll=ro["collided"], ours_maxz=round(ro["max_z"], 2), counts=ro["counts"],

@@ -19,6 +19,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from ego_bridge import EGOPlanner
 from kf_tracker import MoverTracker
+from quadrotor import Quadrotor   # real multicopter dynamics (the SAME model the renderer/PX4 seam flies)
 
 OUTDIR = os.path.join(os.path.dirname(HERE), "out", "conformal")
 
@@ -160,9 +161,12 @@ def _rot(v2, ang):
 
 
 def run_replay(movers, ep, mode="ours", calib=None, predict=True, max_vel=3.0, max_acc=6.0,
-               cont_cert=True, n_sample=0, record=False):
+               cont_cert=True, n_sample=0, record=False, dynamics=False):
     """One replay episode. cont_cert=True uses the continuous-time Bernstein cylinder cert; if False (ablation)
-    the gate uses n_sample fixed-rate samples of the committed B-spline instead. Returns a result dict."""
+    the gate uses n_sample fixed-rate samples of the committed B-spline instead.
+    dynamics=True flies the planned set-points through real QUADROTOR dynamics (tilt-to-accel, inertia, thrust
+    limit) and measures clearance on the FLOWN position -- the renderer/PX4 reality (what flies != what's planned).
+    With dynamics=False the drone is a perfect-tracking point mass (the optimistic headless number). Returns a dict."""
     calib = calib or load_calib()
     # work in a LOCAL frame centred on the corridor midpoint: MetaUrban world coords span hundreds of metres,
     # so a global grid would be billions of voxels. Translate everything by -org -> a small local map suffices.
@@ -185,6 +189,10 @@ def run_replay(movers, ep, mode="ours", calib=None, predict=True, max_vel=3.0, m
     counts = {k: 0 for k in ("straight", "around_l", "around_r", "over", "climb", "evade", "native")}
     hist = []
     best_d = 1e18; stall = 0                            # early-stop degenerate episodes (EGO can't plan -> evade spins)
+    quad = Quadrotor() if dynamics else None            # real flight dynamics (what FLIES != what's planned)
+    if quad is not None:
+        quad.reset(start)
+    track_err = []                                      # per-tick plan->flown deviation (to calibrate the margin)
 
     def present_idx(t):
         return [i for i in range(len(movers.m)) if movers.present(i, t)]
@@ -206,6 +214,7 @@ def run_replay(movers, ep, mode="ours", calib=None, predict=True, max_vel=3.0, m
         gxy = goal[:2] - p_d[:2]; dist = float(np.linalg.norm(gxy))
         gdir = gxy / dist if dist > 1e-6 else np.array([1.0, 0.0])
         kind = None
+        p_ref, v_ref, a_ref = p_d.copy(), np.zeros(3), np.zeros(3)   # the set-point this tick (flown via quad if dynamics)
 
         if mode == "native":
             cloud = []
@@ -215,7 +224,7 @@ def run_replay(movers, ep, mode="ours", calib=None, predict=True, max_vel=3.0, m
             if ego.replan(p_d, v_d, a_d, goal) and ego.duration() > 1e-3:
                 r = ego.eval(min(DT, max(ego.duration() - 1e-3, 0.0)))
                 if r is not None:
-                    p_d, v_d, a_d = (np.asarray(x, float) for x in r)
+                    p_ref, v_ref, a_ref = (np.asarray(x, float) for x in r)
             counts["native"] += 1; kind = "native"
         else:
             # near-term predicted cloud for EGO's grid
@@ -288,15 +297,23 @@ def run_replay(movers, ep, mode="ours", calib=None, predict=True, max_vel=3.0, m
                 else:
                     kind = "evade"; chosen = None
             if chosen is not None:
-                p_d, v_d, a_d = chosen
+                p_ref, v_ref, a_ref = chosen
             elif idx:
                 nn_i = min(idx, key=lambda i: np.linalg.norm(dets[i][:2] - p_d[:2]))
                 away = p_d[:2] - dets[nn_i][:2]; nn = np.linalg.norm(away)
                 away = away / nn if nn > 1e-6 else gdir
-                p_d = p_d + np.array([away[0] * 0.6 * max_vel * DT, away[1] * 0.6 * max_vel * DT,
-                                      min(0.4 * max_vel * DT, max(0.0, ztop - p_d[2]))])
-                v_d = np.array([away[0] * max_vel, away[1] * max_vel, 0.0]); a_d = np.zeros(3)
+                p_ref = p_d + np.array([away[0] * 0.6 * max_vel * DT, away[1] * 0.6 * max_vel * DT,
+                                        min(0.4 * max_vel * DT, max(0.0, ztop - p_d[2]))])
+                v_ref = np.array([away[0] * max_vel, away[1] * max_vel, 0.0]); a_ref = np.zeros(3)
             counts[kind] = counts.get(kind, 0) + 1
+
+        # apply the set-point: fly it through real quadrotor dynamics (renderer/PX4 reality) or teleport (optimistic)
+        if dynamics:
+            pf, vf = quad.step(p_ref, v_ref, a_ref, DT)
+            track_err.append(float(np.linalg.norm(np.asarray(pf)[:2] - p_ref[:2])))
+            p_d, v_d, a_d = np.asarray(pf, float), np.asarray(vf, float), quad.a.copy()
+        else:
+            p_d, v_d, a_d = np.asarray(p_ref, float), np.asarray(v_ref, float), np.asarray(a_ref, float)
 
         max_z = max(max_z, float(p_d[2]))
         tick_clr = 1e18
@@ -319,7 +336,9 @@ def run_replay(movers, ep, mode="ours", calib=None, predict=True, max_vel=3.0, m
 
     return dict(mode=mode, reached=reached, ticks=tick + 1, time_s=(tick + 1) * DT,
                 min_clr=float(min_clr) if min_clr < 1e17 else None,
-                collided=(min_clr < -1e-6), max_z=max_z, counts=counts,
+                collided=(min_clr < -1e-6), max_z=max_z, counts=counts, dynamics=dynamics,
+                track_err_med=float(np.median(track_err)) if track_err else 0.0,
+                track_err_max=float(np.max(track_err)) if track_err else 0.0,
                 predict=predict, cont_cert=cont_cert, history=hist if record else None)
 
 
