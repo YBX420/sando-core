@@ -34,3 +34,8 @@ metaurban/out_s*/
 .vscode/
 *.log
 metaurban/out/
+
+# conformal pipeline: ignore the bulk harvested trajectory data (reproducible via conformal_harvest.py),
+# KEEP the small calibrated artifacts (calib.json, ab_summary*.json, *.png)
+out/conformal/*.npz
+logs/
