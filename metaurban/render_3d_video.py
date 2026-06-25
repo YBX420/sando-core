@@ -832,15 +832,11 @@ def ego_maneuver_replan(p_d, v_d, a_d, cur_wp, t_sim):
                 return False
         return True
 
-    # ONE smooth EGO trajectory straight to the goal at cruise, routing around the KF-PREDICTED future occupancy
-    # (the swept footprint already in the grid). Because EGO weaves around where movers WILL be — not where they
-    # ARE — the single B-spline stays smooth and never brakes late, so the acceleration is graceful and the drone
-    # is FASTER than reactive native. No candidate switching = no chopped-up jerky path. The certificate is a guard.
+    # Tournament: straight (clipped to the receding horizon) -> fly OVER -> climb. NB: the headless harness's blind
+    # EVADE fallback (flee nearest mover) is NOT used here -- the render has a dense 3-D static scene and fleeing
+    # drives the drone INTO buildings (seed 3 regressed to -3 m static when evade was ported). Climb is the
+    # static-safe no-freeze escape. The cert keep-out / q / v_eff DO match headless (safety_layer constants).
     chosen = "straight"
-    # CLIP the goal to the receding horizon L (<=EGO_HOR), exactly like the native --ego path. EGO optimises a
-    # LOCAL B-spline through the perceived region; handing it the raw 75 m goal makes it extrapolate far past the
-    # depth-camera range (8 m) into unmapped space -> optimise fails -> needless climb. The local goal keeps every
-    # replan reachable, so the drone weaves on the ground (fast) instead of climbing out of the perception band.
     lg2 = p_d[:2] + gdir * L
     ego.replan(p_d, v_d, a_d, np.array([lg2[0], lg2[1], CRUISE_Z]))
     if ego.duration() <= 1e-3 or not cert_clear():
