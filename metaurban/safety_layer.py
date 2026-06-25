@@ -82,17 +82,23 @@ def _rot(v2, ang):
     return np.array([c * v2[0] - s * v2[1], s * v2[0] + c * v2[1]])
 
 
-def maneuver_decide(ego, p_d, v_d, a_d, goal, ztop, clear_fn, cruise_z=CRUISE_Z, horizon=HORIZON):
+def maneuver_decide(ego, p_d, v_d, a_d, goal, ztop, clear_fn, cruise_z=CRUISE_Z, horizon=HORIZON,
+                    straight_clip=None):
     """Run the fastest-safe tournament and LEAVE ego holding the chosen B-spline. `clear_fn()` -> bool gates each
     committed candidate (normally cert_clear(ego, cyl); the discrete-sampling ablation passes its own). Returns the
     kind 'straight'|'around_l'|'around_r'|'over'|'climb'|'evade'. 'evade' = nothing certified -> caller flees via
-    evade_setpoint(); any other kind = ego holds a certified (or, for 'climb', the no-freeze) plan."""
+    evade_setpoint(); any other kind = ego holds a certified (or, for 'climb', the no-freeze) plan.
+    straight_clip: if set (the renderer's EGO_HOR), the STRAIGHT goal is clipped to a receding horizon too -- a 75 m
+    raw goal makes EGO extrapolate past the perceived region and fail; the headless corridor goal is short so it
+    leaves it None (replan straight to the true goal)."""
     p_d = np.asarray(p_d, float); goal = np.asarray(goal, float)
     gxy = goal[:2] - p_d[:2]; dist = float(np.linalg.norm(gxy))
     gdir = gxy / dist if dist > 1e-6 else np.array([1.0, 0.0])
     L = min(horizon, max(dist, 1.0))
+    straight_goal = (np.array([goal[0], goal[1], cruise_z]) if straight_clip is None
+                     else np.array([*(p_d[:2] + gdir * min(straight_clip, dist)), cruise_z]))
 
-    for gk, gsub in (("straight", np.array([goal[0], goal[1], cruise_z])),
+    for gk, gsub in (("straight", straight_goal),
                      ("around_l", np.array([*(p_d[:2] + L * _rot(gdir, PHI)), cruise_z])),
                      ("around_r", np.array([*(p_d[:2] + L * _rot(gdir, -PHI)), cruise_z])),
                      ("around_l", np.array([*(p_d[:2] + L * _rot(gdir, 2 * PHI)), cruise_z])),

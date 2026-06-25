@@ -1445,6 +1445,28 @@ while not quit_now:
         step_env()
         c, per = clearance(p_d, fed); mclr = min(mclr, c)
         for k, val in per.items(): per_all[k] = min(per_all.get(k, np.inf), val)
+        if c < -1e-6 and os.environ.get("MAN_COLLDBG") == "1":
+            # which fed entry is the offender, and what did the cert see for it?
+            hit_cls = min(per, key=per.get)
+            off = min(((cl, c3, sz) for (cl, c3, sz) in fed if cl == hit_cls),
+                      key=lambda e: (np.linalg.norm((p_d - e[1])[:2]) - 0.5 * max(e[2][0], e[2][1])))
+            ocls, oc3, osz = off
+            mv = next(((oid, mc3, mvel, r_obs, ds) for (oid, mc3, mvel, r_obs, ds) in kf_movers(p_d, t)
+                       if np.linalg.norm((np.asarray(mc3)[:2] - np.asarray(oc3)[:2])) < 1.5), None)
+            print(f"\n[COLLDBG] t={t:.2f}s class={hit_cls} clr={per[hit_cls]:+.3f}m", flush=True)
+            print(f"[COLLDBG] drone p={np.round(p_d,2)} v=({v_d[0]:.2f},{v_d[1]:.2f},{v_d[2]:.2f}) |v|={np.linalg.norm(v_d):.2f}", flush=True)
+            print(f"[COLLDBG] GT obstacle pos={np.round(oc3,2)} size={np.round(osz,2)} "
+                  f"box_halfR=({0.5*osz[0]:.2f},{0.5*osz[1]:.2f}) cyl_r={0.5*max(osz[0],osz[1]):.2f}", flush=True)
+            if mv is not None:
+                oid, mc3, mvel, r_obs, ds = mv
+                print(f"[COLLDBG] KF est pos={np.round(mc3,2)} vel=({mvel[0]:.2f},{mvel[1]:.2f}) |vel|={np.hypot(mvel[0],mvel[1]):.2f} "
+                      f"r_obs={r_obs:.2f} d_safe={ds:.2f}  cert_R={r_obs+MAN_DSAFE+MAN_QCONF+MAN_TRACK:.2f} "
+                      f"(=r_obs+DSAFE{MAN_DSAFE}+QCONF{MAN_QCONF}+TRACK{MAN_TRACK})", flush=True)
+                gt_v = np.asarray(oc3) - np.asarray(mc3)
+                print(f"[COLLDBG] KF-vs-GT pos err={np.linalg.norm(gt_v[:2]):.2f}m  "
+                      f"flown-vs-plan tracking: see static gate (mover gate has NO forward-sim)", flush=True)
+            else:
+                print(f"[COLLDBG] (mover not in kf_movers list -> NOT tracked/fed to cert!)", flush=True)
         if c < -1e-6 and os.environ.get("NO_STOP_ON_CRASH") != "1":
             crashed = True; break       # a COLLISION is a crash: stop here, NOT a reach (realistic; same for both)
         frame = None

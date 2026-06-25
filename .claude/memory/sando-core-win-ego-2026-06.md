@@ -29,3 +29,15 @@ metadata:
 6. **`pkill -f sweep_predict` 会杀自己的 shell**(命令行含该串)→ 用 `[d]` 括号技巧或按 PID;Bash 默认 120s 超时会留 python 孤儿,跑长扫描用 `run_in_background`。
 
 **可调旋钮(env):** `EGO_QCONF`(默认 0.15)、`EGO_INFLX`(地面膨胀 slack,默认 0.1)、`EGO_VEFF`/`EGO_TAU`。工具:`metaurban/sweep_predict.py`(单配置统计)、`tune_config.py`(支配度评分)、scratchpad/qtest.py(ours vs native 表)。相关:[[sando-core-goaround-m1-2026-06]] [[metaurban-render-recipe-2026-06]]。
+
+---
+
+**2026-06-24 根本性结论(用户拍板接受,SLIP 攻坚 + min-time survey 共同确认):**
+
+**目标"渲染后也严格比 native EGO 更快"被物理排除。** 证据链:① 认证证书必须算 `R=r+无人机半径(0.25)+d_safe` → EGO 按 grid 膨胀 0.3 绕行比 R 窄 → 证书拒 → SLIP 在窄走廊反复卡死(5 版不同参数卡同一点 y=−26);② **native 的快来自不要命**(seed13 native 自己 `min_clr−0.01 撞了`、平时贴 0.16–0.41m 飞、不正经算自身体积);③ 你不可能既比一个东西安全、又比它快,如果它的快正来自不安全;④ **min-time survey**(`sando_py/compass_artifact_*.md`)明说:最短时间=逼近执行器饱和+像赛车贴障碍切弯(不安全地飞),min-snap/认证安全**必然牺牲时间**。
+
+**survey 给的真定位(金句):** "**真·时间最优 + conformal/认证安全 在动态障碍上几乎没人做过,是真空白、是强 RA-L 选题**"。建议"用 conformal 界 size 障碍 keep-out,给分布无关碰撞概率保证,同时 cost 仍优化时间"——**= 我们项目的精确定位**。
+
+**可达且新颖的 win(已部分验证):认证不撞 + 平滑 + 时间有竞争力 + 同等安全下比 native 快**(native 也膨胀到 d_safe=0.8 时,ours 的 KF 预测让它更快——headless crossers 每个 vmax 都赢)。
+
+**SLIP(space-time speed-warp,`--slip`,已提交 0e271cd):** 设计 workflow 出的方案,sound(重定时 `obs_vel=v/s,t_hi=s·TAU` 单元测试 0 false-certify,见 `test_retime.py`),用 EGO 执行器余量 warp 速度(s>1 抢身前=survey 说的用执行器余量)。但在密集街景**会诚实地拒绝挤过 native 会撞的窄缝→卡/慢**——这是认证规划器该有的正确行为。后续:加飞越让 SLIP 在窄缝爬过(能到达,但更慢);真 conformal 分位标定 v_eff(补 q_conformal=0)。**对外措辞:认证安全 + 同等安全更快,绝不说"比贴飞 native 严格更快"。**

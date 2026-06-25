@@ -50,7 +50,17 @@ def run_one(seed, mode, tmax):
     reached = g(r"reached=(\w+)"); coll = g(r"collided=(\w+)")
     clr = g(r"min_clr=(-?[0-9.]+)"); tg = g(r"t_goal=([0-9.]+|infs)")
     af = str(txt.count("a star error"))
-    return dict(seed=seed, mode=mode, reached=reached, collided=coll, min_clr=clr, astar_fail=af, t_goal=tg)
+    # per-class clearance -> separate the collision type: 撞人/撞车/撞动物 (each mover class) + 坠机/撞静态 (static).
+    # The cert protects comparable-speed movers (ped/animal) perfectly; a vehicle 4x the drone's speed is the hard case.
+    pc = {c: float(m.group(1)) for c in ("pedestrian", "vehicle", "animal", "static")
+          for m in [re.search(rf"{c}:(-?[0-9.]+)", line)] if m}
+    hit = lambda c: bool(c in pc and pc[c] < -1e-6)
+    return dict(seed=seed, mode=mode, reached=reached, collided=coll, min_clr=clr, astar_fail=af, t_goal=tg,
+                hit_ped=hit("pedestrian"), hit_veh=hit("vehicle"), hit_animal=hit("animal"), hit_static=hit("static"),
+                ped_clr=("" if "pedestrian" not in pc else f"{pc['pedestrian']:.3f}"),
+                veh_clr=("" if "vehicle" not in pc else f"{pc['vehicle']:.3f}"),
+                animal_clr=("" if "animal" not in pc else f"{pc['animal']:.3f}"),
+                static_clr=("" if "static" not in pc else f"{pc['static']:.3f}"))
 
 
 def main():
@@ -70,7 +80,8 @@ def main():
             print(f"[screen] {i}/{len(jobs)}  seed={r['seed']} {r['mode']:5} "
                   f"reach={r['reached']} coll={r['collided']} clr={r['min_clr']} astar={r['astar_fail']}", flush=True)
 
-    fields = ["seed", "mode", "reached", "collided", "min_clr", "astar_fail", "t_goal"]
+    fields = ["seed", "mode", "reached", "collided", "hit_ped", "hit_veh", "hit_animal", "hit_static",
+              "min_clr", "ped_clr", "veh_clr", "animal_clr", "static_clr", "astar_fail", "t_goal"]
     rows.sort(key=lambda r: (r["seed"], r["mode"]))
     with open(CSV, "w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=fields); w.writeheader(); w.writerows(rows)
@@ -80,17 +91,14 @@ def main():
     for r in rows:
         by[r["seed"]][r["mode"]] = r
     tf = lambda x: str(x).strip().lower() == "true"
-    navig = sorted(s for s, d in by.items() if "ours" in d and tf(d["ours"]["reached"]) and not tf(d["ours"]["collided"]))
-    print(f"[screen] {len(by)} seeds; NAVIGABLE (ours reached + 0 collision): {len(navig)}")
-    print(f"[screen] navigable seeds: {navig}")
-    if navig:
-        ec = sum(tf(by[s]["ego"]["collided"]) for s in navig if "ego" in by[s])
-        er = sum(tf(by[s]["ego"]["reached"]) for s in navig if "ego" in by[s])
-        contested = sorted(s for s in navig if "ego" in by[s] and tf(by[s]["ego"]["collided"]))
-        print(f"[screen] ON THE NAVIGABLE SET ({len(navig)} seeds):")
-        print(f"           ours        : collide=0/{len(navig)} (0% by construction), reach={len(navig)}/{len(navig)}")
-        print(f"           native EGO  : collide={ec}/{len(navig)}, reach={er}/{len(navig)}")
-        print(f"[screen] CONTESTED navigable (scenario IS navigable yet native EGO collides): {contested}")
+    n = sum(1 for d in by.values() if "ours" in d and "ego" in d)
+    print(f"[screen] {n} seeds (crash=stop semantics). 碰撞按类型拆开:撞人/撞车/撞动物(mover)+ 坠机(static):")
+    print(f"           {'':6} {'安全到达':>8} {'撞人':>5} {'撞车':>5} {'撞动物':>6} {'坠机':>6}")
+    for who in ("ours", "ego"):
+        col = lambda k: sum(tf(by[s][who].get(k, "")) for s in by if who in by[s])
+        re_ = sum(tf(by[s][who]["reached"]) for s in by if who in by[s])
+        print(f"           {who:6} {re_:>5}/{n:<3} {col('hit_ped'):>5} {col('hit_veh'):>5} "
+              f"{col('hit_animal'):>6} {col('hit_static'):>6}")
     print("[screen] done", flush=True)
 
 
