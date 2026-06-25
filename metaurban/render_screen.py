@@ -32,7 +32,9 @@ def expand(spec):
 def run_one(seed, mode, tmax):
     flag = ["--maneuver"] if mode == "ours" else []
     log = os.path.join(LOGDIR, f"{mode}_s{seed}.log")
-    cmd = [MPY, "-u", "metaurban/render_3d_video.py", "--ego", *flag,
+    # --headless: same MetaUrban sim/planner/safety/real-quad dynamics, NO rendering -> CPU-only, ~34s, identical
+    # lap-done numbers to the rendered run, so it parallelises freely and IS the render's scenario (just no pixels).
+    cmd = [MPY, "-u", "metaurban/render_3d_video.py", "--ego", *flag, "--headless",
            "--seed", str(seed), "--clear_spawn", "--t_max", str(tmax)]
     try:
         with open(log, "w") as f:
@@ -53,8 +55,8 @@ def run_one(seed, mode, tmax):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--seeds", default="0-59")
-    ap.add_argument("-P", type=int, default=3)
+    ap.add_argument("--seeds", default="0-99")
+    ap.add_argument("-P", type=int, default=10)   # --headless is CPU-only (no GPU), so parallelise hard
     ap.add_argument("--t_max", type=int, default=20)
     args = ap.parse_args()
     os.makedirs(LOGDIR, exist_ok=True); os.makedirs(os.path.dirname(CSV), exist_ok=True)
