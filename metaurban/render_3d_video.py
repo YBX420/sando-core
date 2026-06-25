@@ -223,12 +223,77 @@ if args.d435i:
     print(f"[3dv] --d435i: D435i depth camera perception (FOV 87x58, range {args.fov_range}m, axial noise) "
           f"replaces the GT fov_cloud -> EGO sees occlusion-limited surfaces only", flush=True)
 
-def d435i_cloud(p_d):
-    """Real D435i depth -> world point cloud, mounted on the drone nose (FPV pose carries the heading).
-    Clipped to the obstacle height band [0.2, 3.0] m -> drops the floor/sky, keeps the cylinder column EGO cares
-    about. Drop-in replacement for fov_cloud(p_d, heading, t)."""
-    c = d435.cloud_world(drone.origin, position=FPV_POS, hpr=FPV_HPR, subsample=2, z_floor=0.2, z_ceil=3.0)
+def d435i_cloud(p_d, heading):
+    """Real D435i depth -> world point cloud, AIMED ALONG `heading` (the planned travel/goal direction), not the
+    lagging body yaw. A real go-around yaws its perception toward where it is flying; bolting the depth cam to the
+    body yaw makes it stare BACKWARD during a climb/turn (frac_ahead -> 0), and EGO then plans against a cloud that
+    is behind the drone -> optimise fails -> climbs more -> yaw swings further: a divergent loop. Mounting on the
+    world origin at the nose offset rotated by `heading` keeps the depth FOV pointed where the planner is going,
+    exactly like fov_cloud(p_d, heading, t) does for the GT cone. Clipped to the [0.2, 3.0] m obstacle band."""
+    hd = float(heading)
+    ch, sh = np.cos(hd), np.sin(hd)
+    wpos = (float(p_d[0]) + FPV_POS[0] * ch, float(p_d[1]) + FPV_POS[0] * sh, float(p_d[2]) + FPV_POS[2])
+    whpr = (np.degrees(hd) + FPV_HPR[0], FPV_HPR[1], FPV_HPR[2])   # world heading - 90 -> cam +Y looks along heading
+    c = d435.cloud_world(eng.origin, position=wpos, hpr=whpr, subsample=2, z_floor=0.2, z_ceil=3.0)
+    # VOXEL-DOWNSAMPLE to ~one point per D435I_VOX m cell. The raw depth cloud is ~4000 dense surface points;
+    # EGO's A* front-end has a hard 0.2 s search budget and TIMES OUT on that density (-> "a star error" -> every
+    # straight/over/climb candidate fails to plan -> erratic altitude + no progress). GT's fov_cloud is a few
+    # hundred coarse voxels and A* is instant. Downsampling to GT-like density keeps the obstacle geometry while
+    # making A* tractable; the certificate still runs on the committed B-spline, so safety is unaffected.
+    if len(c):
+        vox = float(os.environ.get("D435I_VOX", 0.25))
+        keys = np.floor(c / vox).astype(np.int64)
+        _, keep = np.unique(keys, axis=0, return_index=True)
+        c = c[keep]
+    if os.environ.get("D435I_DEBUG") == "1" and len(c):
+        dxy = np.linalg.norm(c[:, :2] - np.asarray(p_d, float)[:2], axis=1)
+        fwd = np.array([ch, sh])
+        ahead = ((c[:, :2] - np.asarray(p_d, float)[:2]) @ fwd) / np.maximum(dxy, 1e-6)
+        print(f"[d435dbg] n={len(c)} dist[min/med/max]={dxy.min():.2f}/{np.median(dxy):.2f}/{dxy.max():.2f} "
+              f"z[{c[:,2].min():.2f},{c[:,2].max():.2f}] frac_ahead={np.mean(ahead>0):.2f} "
+              f"frac_within1m={np.mean(dxy<1.0):.2f}", flush=True)
     return c if len(c) else np.zeros((0, 3))
+
+
+# ---- D435i OCCUPANCY MEMORY: remember the static structure already driven past (closes the occlusion gap vs GT) --
+# The depth camera only sees FRONT surfaces inside an 87deg/8m frustum. Without memory the drone forgets a static
+# obstacle the instant it leaves the FOV and clips its unseen side/back (static collisions GT avoids because GT
+# knows the whole STATIC_CLOUD). Accumulating each frame's cloud in the WORLD frame gives the planner the same
+# persistent static map. Mover surfaces are dropped at accumulation time (the KF cylinder layer handles movers;
+# remembering them would smear phantom walls along their trails). Voxel-deduped + bounded to a radius -> A* stays
+# fast. Reset per lap.
+_OCC_MEM = np.zeros((0, 3))
+_OCC_VOX = float(os.environ.get("OCC_VOX", 0.25))
+_OCC_R = float(os.environ.get("OCC_R", 22.0))     # keep memory within this radius of the drone
+
+
+def occ_reset():
+    global _OCC_MEM
+    _OCC_MEM = np.zeros((0, 3))
+
+
+def occ_remember(new_pts, p_d, movers):
+    """Accumulate `new_pts` (a fresh d435i world cloud) into the persistent static memory, minus mover surfaces,
+    bounded to _OCC_R of the drone and voxel-deduped. Returns the full remembered static cloud."""
+    global _OCC_MEM
+    new_pts = np.asarray(new_pts, float).reshape(-1, 3)
+    if len(new_pts) and movers:
+        keep = np.ones(len(new_pts), bool)
+        for (_oid, c3, _vel, r_obs, _d) in movers:                       # drop this frame's mover surfaces
+            keep &= np.linalg.norm(new_pts[:, :2] - np.asarray(c3, float)[:2], axis=1) > (float(r_obs) + 0.5)
+        new_pts = new_pts[keep]
+    allpts = np.vstack([_OCC_MEM, new_pts]) if (len(_OCC_MEM) and len(new_pts)) else (
+        new_pts if len(new_pts) else _OCC_MEM)
+    if not len(allpts):
+        _OCC_MEM = allpts; return allpts
+    d = np.linalg.norm(allpts[:, :2] - np.asarray(p_d, float)[:2], axis=1)
+    allpts = allpts[d <= _OCC_R]                                          # bound the memory footprint
+    keys = np.floor(allpts / _OCC_VOX).astype(np.int64)                  # voxel dedup -> bounded size, fast A*
+    _, idx = np.unique(keys, axis=0, return_index=True)
+    _OCC_MEM = allpts[idx]
+    return _OCC_MEM
+
+
 # real quadrotor flight dynamics: SANDO set-points are TRACKED through this (tilt-to-accelerate, momentum)
 quad = Quadrotor()
 px4 = None
@@ -698,7 +763,15 @@ def _man_cloud(p_d, heading, t_sim, movers):
     pts = [ground_patch(p_d, radius=EGO_HOR + 4.0)]
     # static perception: real D435i depth (occlusion+range limited) when --d435i, else the GT fov_cloud.
     # (movers are re-added below as KF-predicted inflated cylinders, so static-only here.)
-    stat = np.asarray(d435i_cloud(p_d) if args.d435i else fov_cloud(p_d, heading, t_sim), float)
+    if args.d435i:
+        _raw = d435i_cloud(p_d, heading)
+        # OCC_MEM=1 opts into persistent static occupancy memory. It SHOULD close the occlusion gap vs GT, but the
+        # naive version (mover surfaces removed only at the current frame) leaves phantom walls along mover trails
+        # and over-densifies -> on seed 5 it walled the drone in (froze, climb x31). Default OFF = the validated
+        # single-frame path. Fixing memory (decay + mover-track removal) is future work; see occ_remember().
+        stat = np.asarray(occ_remember(_raw, p_d, movers) if os.environ.get("OCC_MEM") == "1" else _raw, float)
+    else:
+        stat = np.asarray(fov_cloud(p_d, heading, t_sim), float)
     if len(stat):
         pts.append(stat)
     v_nom = np.array([np.cos(heading), np.sin(heading)]) * MAN_VCRUISE   # drone's nominal motion
@@ -713,7 +786,13 @@ def _man_cloud(p_d, heading, t_sim, movers):
         dvn = float(dv @ dv)
         tcpa = float(np.clip(-(dp @ dv) / dvn, 0.0, MAN_PLANHI)) if dvn > 1e-6 else 0.0
         R = r_obs + MAN_DSAFE; head = 2.0 * c3[2]
-        for lead in (0.0, tcpa):                                  # current + closest-approach predicted footprint
+        # GT fov_cloud only voxelises a coarse mover box, so it needs BOTH the current and the predicted keep-out
+        # ring. The D435i depth ALREADY paints the mover's current front surface densely; stacking a 0.8 m ring on
+        # top over-inflates the current position, and in a dense crowd the doubled blobs seal the corridor -> EGO
+        # optimise fails -> stall. With d435i, feed ONLY the PREDICTED (t_cpa) ring (where the mover WILL be, which
+        # depth can't see yet); the current-position d_safe is still enforced by cert_clear()'s static-mover check.
+        leads = (tcpa,) if args.d435i else (0.0, tcpa)
+        for lead in leads:                                        # current + closest-approach predicted footprint
             cx, cy = c3[0] + vel[0] * lead, c3[1] + vel[1] * lead
             ring = [[cx + R * np.cos(a), cy + R * np.sin(a), z]
                     for a in np.linspace(0, 2 * np.pi, 10, endpoint=False) for z in np.linspace(0.3, head, 3)]
@@ -758,9 +837,14 @@ def ego_maneuver_replan(p_d, v_d, a_d, cur_wp, t_sim):
     # ARE — the single B-spline stays smooth and never brakes late, so the acceleration is graceful and the drone
     # is FASTER than reactive native. No candidate switching = no chopped-up jerky path. The certificate is a guard.
     chosen = "straight"
-    ego.replan(p_d, v_d, a_d, np.array([cur_wp[0], cur_wp[1], CRUISE_Z]))
+    # CLIP the goal to the receding horizon L (<=EGO_HOR), exactly like the native --ego path. EGO optimises a
+    # LOCAL B-spline through the perceived region; handing it the raw 75 m goal makes it extrapolate far past the
+    # depth-camera range (8 m) into unmapped space -> optimise fails -> needless climb. The local goal keeps every
+    # replan reachable, so the drone weaves on the ground (fast) instead of climbing out of the perception band.
+    lg2 = p_d[:2] + gdir * L
+    ego.replan(p_d, v_d, a_d, np.array([lg2[0], lg2[1], CRUISE_Z]))
     if ego.duration() <= 1e-3 or not cert_clear():
-        if ego.replan(p_d, v_d, a_d, np.array([cur_wp[0], cur_wp[1], z_top])) and ego.duration() > 1e-3 and cert_clear():
+        if ego.replan(p_d, v_d, a_d, np.array([lg2[0], lg2[1], z_top])) and ego.duration() > 1e-3 and cert_clear():
             chosen = "over"                                   # ground blocked -> fly OVER (certified)
         else:
             ego.replan(p_d, v_d, a_d, np.array([p_d[0], p_d[1], z_top])); chosen = "climb"   # boxed -> climb up
@@ -1050,6 +1134,7 @@ while not quit_now:
     sando = make_sando(lap_start, wp[0]) if (ego is None and native is None) else None; _cache = {}
     if native is not None: native.set_terminal_goal(wp[0])
     quad.reset(np.asarray(lap_start, float), yaw=hdg0)
+    occ_reset()                                          # fresh D435i occupancy memory per lap
     if px4 is not None:
         p_d, _yw0, v_d, _ = px4.get_pose_world(); p_d = np.asarray(p_d, float); v_d = np.asarray(v_d, float)
     else:
@@ -1070,7 +1155,7 @@ while not quit_now:
             # plane (floor knowledge isn't FOV-limited), aim at the waypoint clipped to the receding horizon.
             heading = float(quad.yaw)
             # perception source: real D435i depth (occlusion-limited surfaces) when --d435i, else the GT fov_cloud
-            _percept = d435i_cloud(p_d) if args.d435i else fov_cloud(p_d, heading, t)
+            _percept = d435i_cloud(p_d, heading) if args.d435i else fov_cloud(p_d, heading, t)
             cloud = np.concatenate([_percept, ground_patch(p_d, radius=EGO_HOR + 4.0)], axis=0)
             if args.slip:                                              # route EGO around movers at the cert margin
                 cloud = np.concatenate([cloud, _slip_mover_cloud(p_d, t)], axis=0)
@@ -1288,6 +1373,11 @@ while not quit_now:
         if args.live:
             cv2.imshow(WIN, frame)
             if (cv2.waitKey(1) & 0xFF) in (27, ord('q')): quit_now = True; break
+        if os.environ.get("MAN_TRACE") == "1" and (iters % 20 == 0):
+            print(f"[trace] t={t:5.1f}s p=({p_d[0]:6.1f},{p_d[1]:6.1f},{p_d[2]:4.1f}) "
+                  f"dgoal={np.linalg.norm(p_d[:2]-GOAL[:2]):5.1f}m wp_i={wp_i} kind={man_kind} "
+                  f"vd={np.linalg.norm(v_d[:2]):.2f}", flush=True)
+        iters += 1
         final_close = (wp_i == len(wp) - 1 and np.linalg.norm(p_d - GOAL) < float(par.goal_radius))
         if final_close and (sando is None or sando.get_drone_status() == GOAL_REACHED):
             reached = True

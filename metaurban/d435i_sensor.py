@@ -87,12 +87,20 @@ class D435iDepth:
             return np.zeros((0, 3))
         if subsample > 1:
             pts_cam = pts_cam[::subsample]
-        from panda3d.core import Point3
-        mat = self.cam.cam.getNetTransform().getMat()
-        out = np.empty_like(pts_cam)
-        for i in range(pts_cam.shape[0]):
-            p = mat.xformPoint(Point3(float(pts_cam[i, 0]), float(pts_cam[i, 1]), float(pts_cam[i, 2])))
-            out[i, 0], out[i, 1], out[i, 2] = p[0], p[1], p[2]
+        from panda3d.core import Point3, Vec3, TransformState
+        # IMPORTANT: BaseCamera.perceive() RESTORES the camera to its original pose before returning, so reading
+        # self.cam.cam.getNetTransform() here yields the RESTORED (constant) pose, not the (parent_node, position,
+        # hpr) we just rendered from -> the deprojected cloud would land in a fixed world orientation regardless of
+        # the requested heading. Reconstruct the exact render pose from the inputs instead: world_T_cam =
+        # parent.netTransform o makePosHpr(position, hpr). This is the pose perceive() actually rendered with.
+        local = TransformState.makePosHpr(Vec3(float(position[0]), float(position[1]), float(position[2])),
+                                          Vec3(float(hpr[0]), float(hpr[1]), float(hpr[2])))
+        mat = parent_node.getNetTransform().compose(local).getMat()
+        # vectorised cam->world: panda xformPoint is the row-vector product [x,y,z,1] @ M (translation in row 3).
+        # One matmul over all points instead of a per-point Python loop (the per-tick render hot path).
+        M = np.array([[mat.getCell(r, c) for c in range(4)] for r in range(4)], float)
+        homog = np.column_stack([pts_cam, np.ones(pts_cam.shape[0])])
+        out = (homog @ M)[:, :3]
         if z_floor is not None:
             out = out[out[:, 2] >= z_floor]
         if z_ceil is not None:
