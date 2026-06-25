@@ -18,7 +18,7 @@ Run (metaurban env, from the metaurban repo root):
   # one verification frame (no live window):  ... render_3d_video.py --seed 3 --frame_only
   # record an mp4:                            ... render_3d_video.py --seed 3 --mp4
 """
-import os, sys, time, argparse, random
+import os, sys, time, argparse, random, copy
 import cv2  # IMPORTANT: import cv2 BEFORE panda3d/metaurban — importing it after them segfaults (GL/X lib clash)
 import numpy as np
 import yaml
@@ -75,6 +75,7 @@ ap.add_argument("--slip", action="store_true", help="SLIP (space-time speed-warp
 ap.add_argument("--clear_spawn", action="store_true", help="re-roll the route until the drone's START is genuinely clear of static obstacles (full field incl. trees), so it never spawns inside foliage. Deterministic per seed, so A/B stays controlled")
 ap.add_argument("--mp4", action="store_true", help="also write out/drone_3d.mp4")
 ap.add_argument("--headless", action="store_true", help="run the SAME MetaUrban sim + planner + safety layer + real-quad dynamics but SKIP all 3-D rendering (no grab_views/compose/path overlays) -> fast headless-on-MetaUrban; the lap-done reach/collision/clearance numbers are byte-identical to the rendered run (same scenario, just no pixels). Incompatible with --d435i (which needs the depth camera), --mp4/--live/--serve.")
+ap.add_argument("--pointmass", action="store_true", help="DIAGNOSTIC: fly the commanded set-point exactly (teleport) instead of through the real quadrotor dynamics -> flown==planned, isolates how much of the collision gap is plan->flown TRACKING error vs planning/perception.")
 ap.add_argument("--loop_scene", action="store_true", help="restart the fly-through forever for continuous live viewing")
 args = ap.parse_args()
 if args.maneuver:
@@ -736,9 +737,13 @@ MAN_TRACK = float(os.environ.get("EGO_TRACK", 0.0))    # extra keep-out for plan
 # collides where EGO does. Tune via EGO_MANDSAFE.
 MAN_DSAFE = float(os.environ.get("EGO_MANDSAFE", 0.45))
 PHI_MAN = np.radians(25.0)   # ground around-L/R deflection angle for the maneuver tournament
-MAN_STATIC_MARGIN = float(os.environ.get("EGO_STATICM", 0.55))  # reject a candidate whose committed B-spline comes
-#   within this of KNOWN static (drone radius + tracking standoff): the cert guards MOVERS, but every ours-loses
-#   seed collided with STATIC -> EGO's own avoidance + quad tracking error isn't enough, so we GATE static too.
+# HCT-D tracking-tube HARVEST: TRACK_HARVEST=1 logs per sub-step (window, delta=||flown-planned||, hodograph
+# features ||v||,||a||,lateral-accel) so a split-conformal tracking tube kappa*g can be calibrated off-line.
+_TRACKH = os.environ.get("TRACK_HARVEST") == "1"
+_track_rows = []
+MAN_STATIC_MARGIN = float(os.environ.get("EGO_STATICM", 0.35))  # reject a candidate whose PREDICTED-FLOWN path
+#   comes within this of KNOWN static. Because the gate now forward-sims the real quad (overshoot included), this is
+#   just the drone BODY radius + a small buffer -- the tracking tube is in the flown path, not the margin.
 MAN_PLANHI = float(os.environ.get("EGO_PLANHI", 0.7))   # how far ahead the KF-predicted SWEPT footprint is fed to
                                                         # EGO so it weaves around the FUTURE smoothly (one trajectory,
                                                         # no late braking) instead of reacting to the present
@@ -854,14 +859,30 @@ def ego_maneuver_replan(p_d, v_d, a_d, cur_wp, t_sim):
                 return False
         return True
 
-    def static_clear():                                   # CURRENTLY-held EGO B-spline vs KNOWN static (gate)
+    def flown_samples():
+        """The path the REAL drone will actually FLY: forward-simulate a COPY of the quad tracking the committed
+        B-spline over [0, TAU]. The planned point-path hides the tracking OVERSHOOT (inertia / tilt-to-accelerate);
+        gating this predicted-flown tube is how we account for the real drone's dynamics, not just its radius."""
         d = ego.duration()
-        if d <= 1e-3 or not len(loc_static):
+        if args.pointmass:                                # diagnostic: flown == planned
+            return np.array([ego.eval(s)[0] for s in np.linspace(0, min(d, EGO_TAU_TRUST), 16)])
+        q = copy.deepcopy(quad)                           # current REAL state + params
+        n = max(1, int(min(d, EGO_TAU_TRUST) / DT)); pts = [q.p.copy()]
+        for k in range(1, n + 1):
+            r = ego.eval(min(k * DT, d - 1e-3))
+            if r is None:
+                break
+            sp, sv, sa = (np.asarray(x, float) for x in r)
+            yr = float(np.arctan2(sv[1], sv[0])) if np.linalg.norm(sv[:2]) > 1e-3 else q.yaw
+            q.step(sp, sv, sa, DT, yaw_ref=yr)
+            pts.append(q.p.copy())
+        return np.array(pts)
+
+    def static_clear():                                   # PREDICTED-FLOWN path vs KNOWN static (drone body + buffer)
+        if ego.duration() <= 1e-3 or not len(loc_static):
             return True
-        samp = np.array([ego.eval(s)[0] for s in np.linspace(0, min(d, EGO_TAU_TRUST), 16)])
-        # min 3-D distance from every committed sample to the local static cloud
-        for q in samp:
-            dd = loc_static - q
+        for qp in flown_samples():
+            dd = loc_static - qp
             if float(np.min(np.einsum('ij,ij->i', dd, dd))) < MAN_STATIC_MARGIN ** 2:
                 return False
         return True
@@ -1298,7 +1319,15 @@ while not quit_now:
                         sp_pos[2] = MIN_FLY_Z
                         if sp_vel[2] < 0: sp_vel = sp_vel.copy(); sp_vel[2] = 0.0
                     next_goal_pos = sp_pos.copy()
-                    quad.step(sp_pos, sp_vel, sp_acc, DT, yaw_ref=yaw_ref)   # quad tracks the EGO B-spline (slowed)
+                    if args.pointmass:                                       # DIAGNOSTIC: flown == planned (teleport)
+                        quad.p = np.asarray(sp_pos, float).copy(); quad.v = np.asarray(sp_vel, float).copy()
+                        quad.a = np.asarray(sp_acc, float).copy(); quad.yaw = float(yaw_ref)
+                    else:
+                        quad.step(sp_pos, sp_vel, sp_acc, DT, yaw_ref=yaw_ref)   # quad tracks the EGO B-spline (slowed)
+                    if _TRACKH:   # HCT-D harvest: tracking error + hodograph covariates of THIS planned set-point
+                        nv = float(np.linalg.norm(sp_vel)); na = float(np.linalg.norm(sp_acc))
+                        lat = float(np.linalg.norm(np.cross(sp_vel, sp_acc))) / max(nv, 1e-3)   # centripetal = kappa*v^2
+                        _track_rows.append((int(iters), float(np.linalg.norm(quad.p - sp_pos)), nv, na, lat))
                 elif ego_stuck < 3:
                     quad.step(quad.p, np.zeros(3), np.zeros(3), DT, yaw_ref=yaw_ref)   # transient miss -> hover
                 else:
@@ -1426,6 +1455,10 @@ while not quit_now:
           + (f"  maneuver[switches={man_switches} " + " ".join(f"{k}:{v}" for k, v in sorted(man_counts.items())) + "]"
              if args.maneuver else "")
           + (f"  egosafe[cert={ego_n_cert} brake={ego_n_slow} hold={ego_n_hold}]" if (args.ego and args.ego_safe) else ""), flush=True)
+    if _TRACKH and _track_rows:   # HCT-D harvest: dump (window, delta, ||v||, ||a||, lateral_accel) for calibration
+        _td = os.path.join(_HERE, "out", "conformal", "track"); os.makedirs(_td, exist_ok=True)
+        np.save(os.path.join(_td, f"track_s{args.seed}.npy"), np.asarray(_track_rows, float))
+        print(f"[3dv] track-harvest: {len(_track_rows)} rows -> out/conformal/track/track_s{args.seed}.npy", flush=True)
     # --serve and live+loop_scene keep flying laps forever; everything else stops after one lap
     if not (args.serve or (args.live and args.loop_scene)):
         break
