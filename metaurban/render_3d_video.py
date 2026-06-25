@@ -74,6 +74,7 @@ ap.add_argument("--maneuver", action="store_true", help="NO-HOLD CYLINDER maneuv
 ap.add_argument("--slip", action="store_true", help="SLIP (space-time speed-warp): plan ONE tight near-native EGO path, then fly it at the FASTEST scalar speed-warp s whose RE-TIMED flight the continuous-time cert proves clears every KF-predicted moving object (s>1 slip-AHEAD = faster than EGO, s<1 slip-BEHIND a crosser). KF relative velocity optimizes the acceleration; no re-route, no climb. Needs --ego")
 ap.add_argument("--clear_spawn", action="store_true", help="re-roll the route until the drone's START is genuinely clear of static obstacles (full field incl. trees), so it never spawns inside foliage. Deterministic per seed, so A/B stays controlled")
 ap.add_argument("--mp4", action="store_true", help="also write out/drone_3d.mp4")
+ap.add_argument("--headless", action="store_true", help="run the SAME MetaUrban sim + planner + safety layer + real-quad dynamics but SKIP all 3-D rendering (no grab_views/compose/path overlays) -> fast headless-on-MetaUrban; the lap-done reach/collision/clearance numbers are byte-identical to the rendered run (same scenario, just no pixels). Incompatible with --d435i (which needs the depth camera), --mp4/--live/--serve.")
 ap.add_argument("--loop_scene", action="store_true", help="restart the fly-through forever for continuous live viewing")
 args = ap.parse_args()
 if args.maneuver:
@@ -115,8 +116,9 @@ def p3(xy, z): return np.array([float(xy[0]), float(xy[1]), float(z)], float)
 
 env_cfg = dict(
     crswalk_density=1, object_density=0.9, walk_on_all_regions=False,   # DENSE scene -> the avoider has real work
-    use_render=False, image_observation=True,
-    sensors=(dict(rgb_camera=(RGBCamera, args.w, args.h), d435i_depth=(DepthCamera, 160, 106)) if args.d435i
+    use_render=False, image_observation=(not args.headless),   # --headless: no camera -> no GL, faster startup
+    sensors=(dict() if args.headless
+             else dict(rgb_camera=(RGBCamera, args.w, args.h), d435i_depth=(DepthCamera, 160, 106)) if args.d435i
              else dict(rgb_camera=(RGBCamera, args.w, args.h))),
     interface_panel=[], manual_control=False, map='X', daytime="12:00",
     default_expert=False, drivable_area_extension=55, height_scale=1,
@@ -144,7 +146,7 @@ _NUM_SCENARIOS = 20
 env.reset(seed=args.seed % _NUM_SCENARIOS)
 for _ in range(8): env.step([0.0, 0.0])
 eng = env.engine; agent_ego = env.agent
-cam = eng.get_sensor("rgb_camera")
+cam = None if args.headless else eng.get_sensor("rgb_camera")
 
 
 def native_objects():
@@ -1329,26 +1331,29 @@ while not quit_now:
             gpath = ego_traj_pts                       # <- the ACTUAL EGO B-spline trajectory (sampled)
         else:
             gpath = [p_d] + [np.array([w[0], w[1], CRUISE_Z], float) for w in wp[wp_i:]]
-        draw_path(gpath, next_goal_pos, p_d)   # <- the path the drone just chose
-        if args.maneuver or args.slip:
-            draw_predictions()                 # <- the LIVE Kalman forecast every mover is routed around
+        if not args.headless:
+            draw_path(gpath, next_goal_pos, p_d)   # <- the path the drone just chose
+            if args.maneuver or args.slip:
+                draw_predictions()                 # <- the LIVE Kalman forecast every mover is routed around
         step_env()
         c, per = clearance(p_d, fed); mclr = min(mclr, c)
         for k, val in per.items(): per_all[k] = min(per_all.get(k, np.inf), val)
-        views = grab_views()
-        status = (sando.get_drone_status() if sando is not None
-                  else native.get_drone_status() if native is not None
-                  else ("REACHED" if reached else
-                        (man_kind.upper() if (args.maneuver and man_kind) else "EGO")))
-        seam_hud = ({"on": bool(args.seam), "bias": float(np.linalg.norm(sando.get_seam_bias()))}
-                    if sando is not None else None)
-        if seam_hud is not None: seam_bias_max = max(seam_bias_max, seam_hud["bias"])
-        ego_hud = ({"hold": ego_cert_hold, "g": ego_speed_g, "cls": ego_hold_class,
-                    "n_cert": ego_n_cert, "n_slow": ego_n_slow, "n_hold": ego_n_hold}
-                   if (ego is not None and args.ego_safe) else None)
-        frame = compose(views, t, p_d[2], mclr, per, status, seam=seam_hud, ego_info=ego_hud)
-        if writer is not None: writer.append_data(frame[..., ::-1])   # BGR->RGB for imageio
-        if args.serve: publish(frame)                                  # push to the live MJPEG stream
+        frame = None
+        if not args.headless:   # --headless skips ALL 3-D rendering: same sim/planner/safety, no pixels (fast)
+            views = grab_views()
+            status = (sando.get_drone_status() if sando is not None
+                      else native.get_drone_status() if native is not None
+                      else ("REACHED" if reached else
+                            (man_kind.upper() if (args.maneuver and man_kind) else "EGO")))
+            seam_hud = ({"on": bool(args.seam), "bias": float(np.linalg.norm(sando.get_seam_bias()))}
+                        if sando is not None else None)
+            if seam_hud is not None: seam_bias_max = max(seam_bias_max, seam_hud["bias"])
+            ego_hud = ({"hold": ego_cert_hold, "g": ego_speed_g, "cls": ego_hold_class,
+                        "n_cert": ego_n_cert, "n_slow": ego_n_slow, "n_hold": ego_n_hold}
+                       if (ego is not None and args.ego_safe) else None)
+            frame = compose(views, t, p_d[2], mclr, per, status, seam=seam_hud, ego_info=ego_hud)
+            if writer is not None: writer.append_data(frame[..., ::-1])   # BGR->RGB for imageio
+            if args.serve: publish(frame)                                  # push to the live MJPEG stream
         if args.frame_only:
             iters += 1
             if iters >= 16:   # fly a few seconds so a real path + motion is on screen, then dump
