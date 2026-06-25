@@ -20,6 +20,7 @@ sys.path.insert(0, HERE)
 from ego_bridge import EGOPlanner
 from kf_tracker import MoverTracker
 from quadrotor import Quadrotor   # real multicopter dynamics (the SAME model the renderer/PX4 seam flies)
+import safety_layer as SL          # the ONE shared certified-maneuver decision (render + headless call this)
 
 OUTDIR = os.path.join(os.path.dirname(HERE), "out", "conformal")
 
@@ -300,76 +301,36 @@ def run_replay(movers, ep, mode="ours", calib=None, predict=True, max_vel=3.0, m
                 cloud += _cyl_cloud(xy, movers.m[i]["r"], 0.3, movers.m[i]["h"])
             ego.update_cloud(np.asarray(cloud, float) if cloud else np.zeros((0, 3)), p_d)
 
-            # cylinder params per present mover (predicted polynomial + conformal per-class keep-out)
-            cyl = []
-            ztop = CRUISE_Z
+            # SHARED safety layer (same code the renderer calls): conformal per-class keep-out + tournament + evade.
+            mlist = []
             for i in near:
-                cls = movers.m[i]["cls"]; q, veff = calib.get(cls, calib["_all"])
                 c0, vv, aa = trackers[i].state()
                 if PRED_MODEL == "cv":
                     aa = np.zeros(3)                     # CV deployment: cert polynomial matches the CV-calibrated tube
-                if not predict:
-                    vv, aa = np.zeros(3), np.zeros(3)
-                R = movers.m[i]["r"] + R_DRONE + D_SAFE_H + q
-                zc = movers.m[i]["h"] + REACH_PAD + R_DRONE + D_SAFE_V + q
-                cyl.append((c0, vv, aa, R, zc, veff))
-                ztop = max(ztop, zc + 0.2)
-            ztop = min(Z_CEIL, ztop)
-
-            def cert_clear():
-                for (c0, vv, aa, R, zc, veff) in cyl:
-                    if cont_cert:
-                        hp, _ = ego.certify_horizontal(obs_c0=c0, R=R, obs_vel=vv, obs_acc=aa, t_hi=TAU, v_eff=veff, delta=DELTA)
-                        hc, _ = ego.certify_horizontal(obs_c0=c0, R=R, obs_vel=(0, 0, 0), t_hi=TAU, v_eff=veff, delta=DELTA)
-                        vo, _ = ego.certify_above(z_clear=zc, t_hi=TAU, v_eff_z=0.0, delta=DELTA)
-                        if not ((hp and hc) or vo):
-                            return False
-                    else:
-                        # discrete-sampling gate (ablation): check only n_sample points of the committed B-spline
-                        dur = ego.duration()
-                        ok = True
+                mlist.append((c0, vv, aa, movers.m[i]["r"], movers.m[i]["h"], movers.m[i]["cls"]))
+            cyl, ztop = SL.build_cylinders(mlist, calib, predict=predict)
+            if cont_cert:
+                clear_fn = lambda: SL.cert_clear(ego, cyl, tau=TAU, delta=DELTA)
+            else:
+                def clear_fn():                          # discrete-sampling gate (ablation): n_sample points only
+                    dur = ego.duration()
+                    for (c0, vv, aa, R, zc, veff) in cyl:
                         for s in np.linspace(0.0, min(TAU, dur), max(2, n_sample)):
                             r = ego.eval(s)
                             if r is None:
                                 continue
-                            pp = r[0]
-                            cc = c0 + vv * s + 0.5 * aa * s * s
-                            rho = R + veff * (s + DELTA)
-                            horiz = math.hypot(pp[0] - cc[0], pp[1] - cc[1])
-                            if not (horiz >= rho or pp[2] >= zc):
-                                ok = False; break
-                        if not ok:
-                            return False
-                return True
-
-            def sl():
+                            pp = r[0]; cc = c0 + vv * s + 0.5 * aa * s * s; rho = R + veff * (s + DELTA)
+                            if not (math.hypot(pp[0] - cc[0], pp[1] - cc[1]) >= rho or pp[2] >= zc):
+                                return False
+                    return True
+            kind = SL.maneuver_decide(ego, p_d, v_d, a_d, goal, ztop, clear_fn, cruise_z=CRUISE_Z, horizon=HORIZON)
+            if kind != "evade":
                 rr = ego.eval(min(DT, max(ego.duration() - 1e-3, 0.0)))
-                return tuple(np.asarray(x, float) for x in rr) if rr is not None else None
-
-            L = min(HORIZON, max(dist, 1.0)); chosen = None
-            for gk, gsub in (("straight", np.array([goal[0], goal[1], CRUISE_Z])),
-                             ("around_l", np.array([*(p_d[:2] + L * _rot(gdir, PHI)), CRUISE_Z])),
-                             ("around_r", np.array([*(p_d[:2] + L * _rot(gdir, -PHI)), CRUISE_Z])),
-                             ("around_l", np.array([*(p_d[:2] + L * _rot(gdir, 2 * PHI)), CRUISE_Z])),
-                             ("around_r", np.array([*(p_d[:2] + L * _rot(gdir, -2 * PHI)), CRUISE_Z]))):
-                if ego.replan(p_d, v_d, a_d, gsub) and ego.duration() > 1e-3 and cert_clear():
-                    kind = gk; chosen = sl(); break
-            if kind is None:
-                if ego.replan(p_d, v_d, a_d, np.array([goal[0], goal[1], ztop])) and ego.duration() > 1e-3 and cert_clear():
-                    kind = "over"; chosen = sl()
-                elif ego.replan(p_d, v_d, a_d, np.array([p_d[0], p_d[1], ztop])) and ego.duration() > 1e-3:
-                    kind = "climb"; chosen = sl()
-                else:
-                    kind = "evade"; chosen = None
-            if chosen is not None:
-                p_ref, v_ref, a_ref = chosen
+                if rr is not None:
+                    p_ref, v_ref, a_ref = (np.asarray(x, float) for x in rr)
             elif idx:
-                nn_i = min(idx, key=lambda i: np.linalg.norm(dets[i][:2] - p_d[:2]))
-                away = p_d[:2] - dets[nn_i][:2]; nn = np.linalg.norm(away)
-                away = away / nn if nn > 1e-6 else gdir
-                p_ref = p_d + np.array([away[0] * 0.6 * max_vel * DT, away[1] * 0.6 * max_vel * DT,
-                                        min(0.4 * max_vel * DT, max(0.0, ztop - p_d[2]))])
-                v_ref = np.array([away[0] * max_vel, away[1] * max_vel, 0.0]); a_ref = np.zeros(3)
+                pos, vel = SL.evade_setpoint(p_d, [dets[i] for i in idx], max_vel, DT, ztop, gdir)
+                p_ref, v_ref, a_ref = pos, vel, np.zeros(3)
             counts[kind] = counts.get(kind, 0) + 1
 
         # apply the set-point: real PX4 SITL (flier) > local quadrotor model (dynamics) > teleport (optimistic)
