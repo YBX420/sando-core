@@ -741,7 +741,8 @@ PHI_MAN = np.radians(25.0)   # ground around-L/R deflection angle for the maneuv
 # features ||v||,||a||,lateral-accel) so a split-conformal tracking tube kappa*g can be calibrated off-line.
 _TRACKH = os.environ.get("TRACK_HARVEST") == "1"
 _track_rows = []
-MAN_STATIC_MARGIN = float(os.environ.get("EGO_STATICM", 0.35))  # reject a candidate whose PREDICTED-FLOWN path
+_min_static = [np.inf, None, None]   # [clearance, box_size, drone_pos] of the closest static approach (TREE_DBG)
+MAN_STATIC_MARGIN = float(os.environ.get("EGO_STATICM", 0.55))  # reject a candidate whose PREDICTED-FLOWN path
 #   comes within this of KNOWN static. Because the gate now forward-sims the real quad (overshoot included), this is
 #   just the drone BODY radius + a small buffer -- the tracking tube is in the flown path, not the margin.
 MAN_PLANHI = float(os.environ.get("EGO_PLANHI", 0.7))   # how far ahead the KF-predicted SWEPT footprint is fed to
@@ -1002,6 +1003,8 @@ def clearance(p, fed):
         outside = np.maximum(np.abs(d) - halfb, 0.0)
         sd = (np.linalg.norm(outside) if np.any(outside > 0) else -np.min(halfb - np.abs(d))) - r
         gmin = min(gmin, sd); per[cls] = min(per.get(cls, np.inf), sd)
+        if cls == "static" and sd < _min_static[0]:
+            _min_static[0] = sd; _min_static[1] = np.asarray(size, float).copy(); _min_static[2] = np.asarray(p, float).copy()
     return gmin, per
 
 
@@ -1153,6 +1156,18 @@ print(f"[3dv] {'SERVE http://localhost:%d' % args.port if args.serve else ('LIVE
 
 STATIC_CLOUD, STATIC_XY, STATIC_OBJS, STATIC_FED = build_static_field()
 print(f"[3dv] static field: {len(STATIC_CLOUD)} voxels / {len(STATIC_OBJS)} objects (full-3D up to {Z_CEIL:.1f}m)", flush=True)
+if os.environ.get("TREE_DBG") == "1":   # diagnostic: do the static collision boxes (W,L,H) match the visual canopy?
+    from collections import Counter
+    cnt = Counter(); szs = {}
+    for oid, o in eng.get_objects().items():
+        if classify(o) == "static":
+            tn = type(o).__name__; cnt[tn] += 1
+            w, l, h = obj_size(o)
+            szs.setdefault(tn, []).append((w, l, h))
+    print("[treedbg] static object types + median collision box (W,L,H):", flush=True)
+    for tn, n in cnt.most_common():
+        a = np.asarray(szs[tn]); m = np.median(a, axis=0)
+        print(f"[treedbg]   {tn}: n={n}  box W={m[0]:.2f} L={m[1]:.2f} H={m[2]:.2f}  (Wmax={a[:,0].max():.2f})", flush=True)
 
 lap_idx = 0
 quit_now = False
@@ -1455,6 +1470,10 @@ while not quit_now:
           + (f"  maneuver[switches={man_switches} " + " ".join(f"{k}:{v}" for k, v in sorted(man_counts.items())) + "]"
              if args.maneuver else "")
           + (f"  egosafe[cert={ego_n_cert} brake={ego_n_slow} hold={ego_n_hold}]" if (args.ego and args.ego_safe) else ""), flush=True)
+    if os.environ.get("TREE_DBG") == "1" and _min_static[1] is not None:
+        print(f"[treedbg] closest static approach: clearance={_min_static[0]:.3f}m to a box "
+              f"W={_min_static[1][0]:.2f} L={_min_static[1][1]:.2f} H={_min_static[1][2]:.2f} "
+              f"at drone z={_min_static[2][2]:.2f}m", flush=True)
     if _TRACKH and _track_rows:   # HCT-D harvest: dump (window, delta, ||v||, ||a||, lateral_accel) for calibration
         _td = os.path.join(_HERE, "out", "conformal", "track"); os.makedirs(_td, exist_ok=True)
         np.save(os.path.join(_td, f"track_s{args.seed}.npy"), np.asarray(_track_rows, float))
