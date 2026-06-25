@@ -60,6 +60,36 @@ def monomial_to_bseg(coeffs, durs):
     return ctrl, t0s, durs
 
 
+def minco_descending_to_bseg(coeff_mats, durs):
+    """GCOPTER/MINCO Trajectory<D>: coeff_mats[(n_seg)] each 3 x (D+1) MONOMIAL in DESCENDING power (col 0 = tau^D),
+    real time tau in [0,dur]. Reverse columns + dur^j rescale -> ascending normalized coeffs, then monomial_to_bseg.
+    (The exact GCOPTER adapter: a_j = C[:, D-j] * dur^j.)"""
+    coeff_mats = [np.asarray(c, float) for c in coeff_mats]; durs = np.asarray(durs, float)
+    n_seg = len(coeff_mats); D = coeff_mats[0].shape[1] - 1
+    coeffs = np.zeros((n_seg, D + 1, 3))
+    for i in range(n_seg):
+        C = coeff_mats[i]                               # (3, D+1) descending power, real time
+        for j in range(D + 1):
+            coeffs[i, j] = C[:, D - j]                  # ascending power index j  (real-time coeff a_j' for tau^j)
+    return monomial_to_bseg(coeffs, durs)               # monomial_to_bseg applies the dur^j rescale + C2B
+
+
+def bspline_to_bseg(ctrl, durs):
+    """Uniform CUBIC B-spline (Fast-Planner / EGO style): control points ctrl (n_ctrl, 3) -> per-segment cubic
+    Bezier via the standard uniform-cubic B-spline->Bezier conversion. n_seg = n_ctrl - 3 segments; durs (n_seg,)."""
+    ctrl = np.asarray(ctrl, float); durs = np.asarray(durs, float)
+    n_seg = ctrl.shape[0] - 3
+    bez = np.empty((n_seg, 4, 3))
+    for i in range(n_seg):
+        P0, P1, P2, P3 = ctrl[i], ctrl[i + 1], ctrl[i + 2], ctrl[i + 3]
+        bez[i, 0] = (P0 + 4 * P1 + P2) / 6.0
+        bez[i, 1] = (2 * P1 + P2) / 3.0
+        bez[i, 2] = (P1 + 2 * P2) / 3.0
+        bez[i, 3] = (P1 + 4 * P2 + P3) / 6.0
+    t0s = np.concatenate([[0.0], np.cumsum(durs)[:-1]])
+    return bez, t0s, durs
+
+
 def native_bezier_to_bseg(ctrl_pts, durs):
     """ctrl_pts already Bernstein/Bezier control points (n_seg, deg+1, 3) -> passthrough + cumulative t0s."""
     ctrl_pts = np.asarray(ctrl_pts, float); durs = np.asarray(durs, float)
