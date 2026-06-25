@@ -28,9 +28,10 @@ import numpy as np
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import replay_core as RC
-from cert_bridge import Certifier, monomial_to_bseg, bspline_to_bseg, _bezier_eval
+from cert_bridge import Certifier, monomial_to_bseg, bspline_to_bseg, minco_descending_to_bseg, _bezier_eval
 from graft_demo import rapidquad_quintic, minsnap_septic
 from ego_bridge import EGOPlanner
+from gcopter_bridge import gcopter_plan          # de-ROS'd ZJU GCOPTER (MINCO + FIRI SFC), header-only core
 from kf_tracker import MoverTracker
 from quadrotor import Quadrotor
 
@@ -128,8 +129,50 @@ class BSplineP:
         return Certifier.certify_above(self._bez, self._t0, self._du, z_clear, t_hi=t_hi, v_eff_z=0.0, delta=delta)
 
 
+class GcopterP:
+    """ZJU GCOPTER (de-ROS'd): point cloud -> voxel map -> A* guide -> FIRI convex SFC -> MINCO optimize. Like EGO
+    it has its OWN obstacle avoidance (the SFC routes around the cloud); we certify its committed MINCO trajectory."""
+    name = "gcopter"
+    def __init__(self, max_vel, _max_acc=None):
+        self.max_vel = max_vel; self._cloud = np.zeros((0, 3)); self._coeffs = None; self._durs = None
+        self._bseg = None; self._T = 0.0
+    def reset(self): self._bseg = None
+    def update_cloud(self, cloud, p): self._cloud = np.asarray(cloud, float).reshape(-1, 3)
+    def plan(self, p, v, a, goal):
+        p = np.asarray(p, float); goal = np.asarray(goal, float)
+        if float(np.linalg.norm(goal[:2] - p[:2])) < 1.0:    # near-zero/vertical (e.g. climb) -> GCOPTER degenerates
+            self._bseg = None; self._T = 0.0; return False
+        mid = 0.5 * (p[:2] + goal[:2]); half = max(float(np.linalg.norm(goal[:2] - p[:2])), 8.0) + 4.0
+        mb = [mid[0] - half, mid[0] + half, mid[1] - half, mid[1] + half, 0.0, max(goal[2], p[2], 3.0) + 1.5]
+        # NOTE: GCOPTER's FIRI convex-cover can segfault (Eigen negative-dim) on some harvested dynamic-obstacle
+        # clouds; it is vendored + works standalone + is cert-able, but is NOT in the default headless matrix.
+        r = gcopter_plan(self._cloud, p, goal, mb, voxel_width=0.3, dilate=0.4, vmax=self.max_vel, weight_t=20.0)
+        if r is None:
+            self._bseg = None; self._T = 0.0; return False
+        self._coeffs, self._durs = r; self._T = float(self._durs.sum())
+        self._bseg = minco_descending_to_bseg(list(self._coeffs), list(self._durs))
+        return self._T > 1e-3
+    def duration(self): return self._T
+    def eval(self, t):
+        t = min(max(float(t), 0.0), self._T); i = 0
+        while i < len(self._durs) - 1 and t > self._durs[i]: t -= self._durs[i]; i += 1
+        C6 = self._coeffs[i]
+        pos = C6 @ np.array([t**5, t**4, t**3, t**2, t, 1.0])
+        vel = C6 @ np.array([5*t**4, 4*t**3, 3*t**2, 2*t, 1.0, 0.0])
+        acc = C6 @ np.array([20*t**3, 12*t**2, 6*t, 2.0, 0.0, 0.0])
+        return pos, vel, acc
+    def cert_h(self, c0, R, vel, acc, t_hi, v_eff, delta):
+        cp, t0, du = self._bseg
+        return Certifier.certify_horizontal(cp, t0, du, [c0[0], c0[1], c0[2]], R, vel=vel, acc=acc,
+                                            t_hi=t_hi, v_eff=v_eff, delta=delta, n_axes=2)
+    def cert_a(self, z_clear, t_hi, delta):
+        cp, t0, du = self._bseg
+        return Certifier.certify_above(cp, t0, du, z_clear, t_hi=t_hi, v_eff_z=0.0, delta=delta)
+
+
 def make_planner(name, max_vel, max_acc):
     if name == "ego": return EgoP(max_vel, max_acc)
+    if name == "gcopter": return GcopterP(max_vel)
     if name == "quintic": return PolyP("quintic", max_vel, "quintic")
     if name == "septic": return PolyP("septic", max_vel, "septic")
     if name == "bspline": return BSplineP(max_vel)
@@ -268,7 +311,7 @@ def parse_seeds(s):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--planner", required=True, choices=["ego", "quintic", "septic", "bspline"])
+    ap.add_argument("--planner", required=True, choices=["ego", "gcopter", "quintic", "septic", "bspline"])
     ap.add_argument("--safety", required=True, choices=["on", "off"])
     ap.add_argument("--seeds", default="0-9")
     ap.add_argument("--n_ep", type=int, default=6)
