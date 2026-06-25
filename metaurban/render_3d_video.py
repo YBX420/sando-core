@@ -696,8 +696,9 @@ def _man_cloud(p_d, heading, t_sim, movers):
     for fly-OVER). The d_safe inflation makes EGO's own 2-D route already clear the certificate margin, so the
     cert passes ground routes (fly fast) instead of rejecting them and forcing a constant climb."""
     pts = [ground_patch(p_d, radius=EGO_HOR + 4.0)]
-    # static voxels only (drop the raw mover boxes; we re-add movers inflated + predicted below)
-    stat = np.asarray(fov_cloud(p_d, heading, t_sim), float)
+    # static perception: real D435i depth (occlusion+range limited) when --d435i, else the GT fov_cloud.
+    # (movers are re-added below as KF-predicted inflated cylinders, so static-only here.)
+    stat = np.asarray(d435i_cloud(p_d) if args.d435i else fov_cloud(p_d, heading, t_sim), float)
     if len(stat):
         pts.append(stat)
     v_nom = np.array([np.cos(heading), np.sin(heading)]) * MAN_VCRUISE   # drone's nominal motion
