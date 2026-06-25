@@ -480,9 +480,15 @@ def build_static_field():
     for oid, cls, pos, vel, size in native_objects():
         if cls != "static": continue
         w, l, h = float(size[0]), float(size[1]), float(size[2])
+        # SQUARE footprint at max(W,L): the declared WLH under-counts the W direction (e.g. 0.90 vs the real mesh
+        # 1.17 from getTightBounds) and is rectangular while trees/poles are ROUND. Using a max(W,L) square
+        # conservatively covers the true round canopy from ANY approach angle, in BOTH the clearance metric and the
+        # voxelised safety field (getTightBounds is render-only, so this is the headless-safe accurate model).
+        s = max(w, l); w = l = s
+        size = np.array([s, s, h], float)
         tid = abs(hash(oid)) % 1000 + 200
-        objs.append((tid, np.asarray(pos, float), np.asarray(size, float)))
-        fed.append(("static", p3(pos, h * 0.5), np.asarray(size, float)))   # full-height bbox for clearance
+        objs.append((tid, np.asarray(pos, float), size.copy()))
+        fed.append(("static", p3(pos, h * 0.5), size.copy()))   # full-height square footprint for clearance
         ztop = min(h, Z_CEIL)
         # GAP-FREE voxel spacing: must be <= EGO's inflation coverage (~0.4m) so the inflated voxels overlap into
         # a SOLID wall — otherwise wide objects (tree canopies) get sparse voxels with holes the drone slips
@@ -490,10 +496,13 @@ def build_static_field():
         VS = 0.5
         nx = max(1, min(20, int(np.ceil(w / VS)))); ny = max(1, min(20, int(np.ceil(l / VS))))
         nz = max(1, min(20, int(np.ceil(ztop / VS))))
-        for ix in range(nx + 1):
+        R2 = (0.5 * s) ** 2                                # voxelise a CYLINDER (drop the box corners) -> matches the
+        for ix in range(nx + 1):                          # round mesh; the drone may safely use the corner gaps
             fx = pos[0] + (ix / nx - 0.5) * w
             for iy in range(ny + 1):
                 fy = pos[1] + (iy / ny - 0.5) * l
+                if (fx - pos[0]) ** 2 + (fy - pos[1]) ** 2 > R2:
+                    continue
                 for iz in range(nz + 1):
                     pts.append((fx, fy, 0.1 + (iz / nz) * ztop))
     cloud = np.asarray(pts, float) if pts else np.zeros((0, 3))
@@ -999,9 +1008,16 @@ def feed_native(t_sim, p_drone):
 def clearance(p, fed):
     r = float(par.drone_radius); gmin = np.inf; per = {}
     for cls, c3, size in fed:
-        d = p - c3; halfb = 0.5 * np.asarray(size, float)
-        outside = np.maximum(np.abs(d) - halfb, 0.0)
-        sd = (np.linalg.norm(outside) if np.any(outside > 0) else -np.min(halfb - np.abs(d))) - r
+        d = p - c3; sz = np.asarray(size, float)
+        if cls == "static":   # round trees/poles -> VERTICAL CYLINDER (radius = half the square footprint), not a box:
+            R = 0.5 * sz[0]; hh = 0.5 * sz[2]              # matches the real round mesh; no over-conservative corners
+            dh = float(np.hypot(d[0], d[1])); dz = abs(d[2])
+            dr_out = max(dh - R, 0.0); dz_out = max(dz - hh, 0.0)
+            sd = ((np.hypot(dr_out, dz_out)) if (dr_out > 0 or dz_out > 0) else -min(R - dh, hh - dz)) - r
+        else:
+            halfb = 0.5 * sz
+            outside = np.maximum(np.abs(d) - halfb, 0.0)
+            sd = (np.linalg.norm(outside) if np.any(outside > 0) else -np.min(halfb - np.abs(d))) - r
         gmin = min(gmin, sd); per[cls] = min(per.get(cls, np.inf), sd)
         if cls == "static" and sd < _min_static[0]:
             _min_static[0] = sd; _min_static[1] = np.asarray(size, float).copy(); _min_static[2] = np.asarray(p, float).copy()
@@ -1156,18 +1172,28 @@ print(f"[3dv] {'SERVE http://localhost:%d' % args.port if args.serve else ('LIVE
 
 STATIC_CLOUD, STATIC_XY, STATIC_OBJS, STATIC_FED = build_static_field()
 print(f"[3dv] static field: {len(STATIC_CLOUD)} voxels / {len(STATIC_OBJS)} objects (full-3D up to {Z_CEIL:.1f}m)", flush=True)
-if os.environ.get("TREE_DBG") == "1":   # diagnostic: do the static collision boxes (W,L,H) match the visual canopy?
+if os.environ.get("TREE_DBG") == "1":   # diagnostic: does WLH match the real mesh extent (getTightBounds)?
     from collections import Counter
-    cnt = Counter(); szs = {}
+    cnt = Counter(); szs = {}; tight = {}
     for oid, o in eng.get_objects().items():
         if classify(o) == "static":
             tn = type(o).__name__; cnt[tn] += 1
             w, l, h = obj_size(o)
             szs.setdefault(tn, []).append((w, l, h))
-    print("[treedbg] static object types + median collision box (W,L,H):", flush=True)
+            for getter in (lambda: o.origin.getTightBounds(), lambda: o.origin.node().getBounds()):
+                try:
+                    bb = getter()
+                    if bb is not None and hasattr(bb, "__getitem__"):
+                        lo, hi = bb; ext = (hi[0]-lo[0], hi[1]-lo[1], hi[2]-lo[2])
+                        if ext[0] > 0: tight.setdefault(tn, []).append(ext); break
+                except Exception:
+                    pass
+    print("[treedbg] static types: WLH collision box vs real mesh getTightBounds:", flush=True)
     for tn, n in cnt.most_common():
         a = np.asarray(szs[tn]); m = np.median(a, axis=0)
-        print(f"[treedbg]   {tn}: n={n}  box W={m[0]:.2f} L={m[1]:.2f} H={m[2]:.2f}  (Wmax={a[:,0].max():.2f})", flush=True)
+        tt = (f"  tight W={np.median([t[0] for t in tight[tn]]):.2f} L={np.median([t[1] for t in tight[tn]]):.2f} "
+              f"H={np.median([t[2] for t in tight[tn]]):.2f}") if tn in tight else "  (no tight bounds)"
+        print(f"[treedbg]   {tn}: n={n}  WLH W={m[0]:.2f} L={m[1]:.2f} H={m[2]:.2f}{tt}", flush=True)
 
 lap_idx = 0
 quit_now = False
