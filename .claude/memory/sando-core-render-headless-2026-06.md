@@ -30,10 +30,21 @@ consistency by construction**, and it inherently runs the real quad dynamics the
 - of ours's 26 collisions only 1 is A*-blocked (astar>500); the other 25 ours PLANS fine yet still collides
   (maneuver flies into static / doesn't clear) -> a real algorithmic gap, NOT just A* timeout.
 
+**STATIC FIX (the ours-loses solve, big win):** ALL 12 ours-loses collided with STATIC (the cert guards only
+movers; `fov_cloud` was FOV-CONE-limited so it hid buildings beside/behind the drone). Fix in
+`ego_maneuver_replan` (render_3d_video.py): (1) feed EGO the full 360-degree local static map (STATIC_CLOUD within
+EGO_HOR+4, not the cone — static is a KNOWN map, a real drone has it; only movers stay perception-limited);
+(2) add around-L/R +-25/50 ground-weave candidates (the render's tournament was only straight/over/climb);
+(3) a STATIC CLEARANCE GATE: reject any candidate whose committed B-spline comes within MAN_STATIC_MARGIN=0.55
+(drone radius + tracking standoff) of the local static cloud (16 samples over [0,TAU], min 3-D dist).
+**Result on the same 100 MetaUrban scenarios: ours reach 70->95, collide 26->10; native unchanged 98/29;
+head-to-head ours-wins 15->24, ours-loses 12->5.** So ours now CLEARLY beats native EGO (10 vs 29 collisions,
+95 vs 98 reach). The 5 residual losses [15,33,46,50,83] are mostly SHALLOW static grazes (-0.004 to -0.14, only
+33 is -0.37) = quad TRACKING OVERSHOOT past the planned clearance; a larger margin or flown-path gate would catch
+them but risks reach. Commit after the b3b85ed honest baseline.
+
 **Key takeaway / honesty correction:** the earlier harvested-GT-harness "ours 0 collisions" (planner_safety_matrix,
-compare3) was OPTIMISTIC — no static scene. On the realistic MetaUrban scenario ours collides ~26%. The
-"navigable set" framing (select seeds where ours reached+0-collision -> trivially 0) is SELECTION BIAS; the fair
-head-to-head is 15 win / 12 lose. Next real work: the 12 ours-loses seeds [9,10,15,21,29,43,48,50,52,59,78,97]
-(ours plans but collides static — same family as the d435i evade-into-building regression). Tools:
-`render_screen.py` (ThreadPool concurrency cap; bash wait/jobs/xargs left un-killable orphans in nohup).
-Related: [[sando-core-d435i-fix-2026-06]] [[sando-core-planner-safety-matrix-2026-06]] [[sando-core-win-ego-2026-06]].
+compare3) was OPTIMISTIC — no static scene. On the realistic MetaUrban scenario ours started at 26% collisions; the
+static gate brought it to 10% and a clear win over native. Tools: `render_screen.py` (ThreadPool concurrency cap;
+bash wait/jobs/xargs left un-killable orphans in nohup; the driver itself needs python on PATH -> activate conda
+BEFORE nohup). Related: [[sando-core-d435i-fix-2026-06]] [[sando-core-planner-safety-matrix-2026-06]] [[sando-core-win-ego-2026-06]].
