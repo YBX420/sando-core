@@ -1237,7 +1237,7 @@ while not quit_now:
     else:
         p_d = quad.p.copy(); v_d = np.zeros(3)
     a_d = np.zeros(3)
-    t = 0.0; last_rt = 0.0; reached = False; mclr = np.inf; per_all = {}; iters = 0; seam_bias_max = 0.0
+    t = 0.0; last_rt = 0.0; reached = False; crashed = False; mclr = np.inf; per_all = {}; iters = 0; seam_bias_max = 0.0
     ego_n_cert = 0; ego_n_hold = 0; ego_n_slow = 0; ego_cert_hold = False; ego_hold_class = None
     ego_speed_g = 1.0; ego_g_prev = 1.0   # --ego_safe graded anticipatory-brake speed scale [0,1] (+ release LPF)
     next_goal_pos = None; _last_wall = time.perf_counter()
@@ -1445,6 +1445,8 @@ while not quit_now:
         step_env()
         c, per = clearance(p_d, fed); mclr = min(mclr, c)
         for k, val in per.items(): per_all[k] = min(per_all.get(k, np.inf), val)
+        if c < -1e-6 and os.environ.get("NO_STOP_ON_CRASH") != "1":
+            crashed = True; break       # a COLLISION is a crash: stop here, NOT a reach (realistic; same for both)
         frame = None
         if not args.headless:   # --headless skips ALL 3-D rendering: same sim/planner/safety, no pixels (fast)
             views = grab_views()
