@@ -735,6 +735,10 @@ MAN_TRACK = float(os.environ.get("EGO_TRACK", 0.0))    # extra keep-out for plan
 # to race the real EGO (which flies at ~0.3 and grazes); the cert still guarantees this clearance so ours never
 # collides where EGO does. Tune via EGO_MANDSAFE.
 MAN_DSAFE = float(os.environ.get("EGO_MANDSAFE", 0.45))
+PHI_MAN = np.radians(25.0)   # ground around-L/R deflection angle for the maneuver tournament
+MAN_STATIC_MARGIN = float(os.environ.get("EGO_STATICM", 0.55))  # reject a candidate whose committed B-spline comes
+#   within this of KNOWN static (drone radius + tracking standoff): the cert guards MOVERS, but every ours-loses
+#   seed collided with STATIC -> EGO's own avoidance + quad tracking error isn't enough, so we GATE static too.
 MAN_PLANHI = float(os.environ.get("EGO_PLANHI", 0.7))   # how far ahead the KF-predicted SWEPT footprint is fed to
                                                         # EGO so it weaves around the FUTURE smoothly (one trajectory,
                                                         # no late braking) instead of reacting to the present
@@ -772,8 +776,17 @@ def _man_cloud(p_d, heading, t_sim, movers):
         # and over-densifies -> on seed 5 it walled the drone in (froze, climb x31). Default OFF = the validated
         # single-frame path. Fixing memory (decay + mover-track removal) is future work; see occ_remember().
         stat = np.asarray(occ_remember(_raw, p_d, movers) if os.environ.get("OCC_MEM") == "1" else _raw, float)
+    elif len(STATIC_CLOUD):
+        # static is a KNOWN MAP (it does not move) -> feed EGO the full 360-degree local static structure, NOT the
+        # forward FOV cone. The cone-limited fov_cloud hid static beside/behind the drone, so the maneuver (around /
+        # lateral) and even straight flight clipped buildings it never "saw" -> EVERY ours-loses seed collided with
+        # STATIC. A real drone has the static map (or a downward/omni sensor); only MOVERS stay perception-limited
+        # (they are added below as KF cylinders, so this static-only feed also drops fov_cloud's double-added boxes).
+        dxy = STATIC_CLOUD[:, :2] - p_d[:2]
+        stat = STATIC_CLOUD[np.einsum('ij,ij->i', dxy, dxy) <= (EGO_HOR + 4.0) ** 2]
     else:
-        stat = np.asarray(fov_cloud(p_d, heading, t_sim), float)
+        stat = np.zeros((0, 3))
+    stat = np.asarray(stat, float)
     if len(stat):
         pts.append(stat)
     v_nom = np.array([np.cos(heading), np.sin(heading)]) * MAN_VCRUISE   # drone's nominal motion
@@ -823,6 +836,13 @@ def ego_maneuver_replan(p_d, v_d, a_d, cur_wp, t_sim):
     def rot(v, ang):
         c, s = np.cos(ang), np.sin(ang); return np.array([c * v[0] - s * v[1], s * v[0] + c * v[1]])
 
+    # local KNOWN static (360-degree, radius-limited) for the static clearance gate
+    if len(STATIC_CLOUD):
+        _dxy = STATIC_CLOUD[:, :2] - p_d[:2]
+        loc_static = STATIC_CLOUD[np.einsum('ij,ij->i', _dxy, _dxy) <= (EGO_HOR + 4.0) ** 2]
+    else:
+        loc_static = np.zeros((0, 3))
+
     def cert_clear():                                      # CURRENTLY-held EGO B-spline vs every mover
         for (_oid, c3, vel, r_obs, d_safe) in movers:
             R = r_obs + MAN_DSAFE + MAN_QCONF + MAN_TRACK   # +tracking margin so the cert covers the FLOWN path
@@ -834,16 +854,33 @@ def ego_maneuver_replan(p_d, v_d, a_d, cur_wp, t_sim):
                 return False
         return True
 
-    # Tournament: straight (clipped to the receding horizon) -> fly OVER -> climb. NB: the headless harness's blind
-    # EVADE fallback (flee nearest mover) is NOT used here -- the render has a dense 3-D static scene and fleeing
-    # drives the drone INTO buildings (seed 3 regressed to -3 m static when evade was ported). Climb is the
-    # static-safe no-freeze escape. The cert keep-out / q / v_eff DO match headless (safety_layer constants).
-    chosen = "straight"
-    lg2 = p_d[:2] + gdir * L
-    ego.replan(p_d, v_d, a_d, np.array([lg2[0], lg2[1], CRUISE_Z]))
-    if ego.duration() <= 1e-3 or not cert_clear():
-        if ego.replan(p_d, v_d, a_d, np.array([lg2[0], lg2[1], z_top])) and ego.duration() > 1e-3 and cert_clear():
-            chosen = "over"                                   # ground blocked -> fly OVER (certified)
+    def static_clear():                                   # CURRENTLY-held EGO B-spline vs KNOWN static (gate)
+        d = ego.duration()
+        if d <= 1e-3 or not len(loc_static):
+            return True
+        samp = np.array([ego.eval(s)[0] for s in np.linspace(0, min(d, EGO_TAU_TRUST), 16)])
+        # min 3-D distance from every committed sample to the local static cloud
+        for q in samp:
+            dd = loc_static - q
+            if float(np.min(np.einsum('ij,ij->i', dd, dd))) < MAN_STATIC_MARGIN ** 2:
+                return False
+        return True
+
+    # Tournament: straight -> around +-25/50 (ground weave) -> fly OVER -> climb. EACH candidate must clear BOTH the
+    # mover cert AND the static gate. NB: the headless harness's blind EVADE fallback is NOT used (the dense 3-D
+    # static scene makes fleeing drive INTO buildings; climb is the static-safe no-freeze escape).
+    chosen = None
+    for gk, gsub in (("straight", np.array([p_d[0] + gdir[0] * L, p_d[1] + gdir[1] * L, CRUISE_Z])),
+                     ("around_l", np.array([*(p_d[:2] + L * rot(gdir, PHI_MAN)), CRUISE_Z])),
+                     ("around_r", np.array([*(p_d[:2] + L * rot(gdir, -PHI_MAN)), CRUISE_Z])),
+                     ("around_l", np.array([*(p_d[:2] + L * rot(gdir, 2 * PHI_MAN)), CRUISE_Z])),
+                     ("around_r", np.array([*(p_d[:2] + L * rot(gdir, -2 * PHI_MAN)), CRUISE_Z]))):
+        if ego.replan(p_d, v_d, a_d, gsub) and ego.duration() > 1e-3 and cert_clear() and static_clear():
+            chosen = gk; break
+    if chosen is None:
+        if (ego.replan(p_d, v_d, a_d, np.array([gdir[0] * L + p_d[0], gdir[1] * L + p_d[1], z_top]))
+                and ego.duration() > 1e-3 and cert_clear() and static_clear()):
+            chosen = "over"                                   # ground blocked -> fly OVER (certified + static-clear)
         else:
             ego.replan(p_d, v_d, a_d, np.array([p_d[0], p_d[1], z_top])); chosen = "climb"   # boxed -> climb up
     _MAN_STATE["kind"] = chosen
