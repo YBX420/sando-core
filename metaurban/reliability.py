@@ -7,7 +7,7 @@ reports the trend + the conformal guarantee backing it. Tighter eps -> wider kee
 
 Run:  python metaurban/reliability.py --eps 0.01 --seeds 0-19 --n_ep 60
 """
-import os, sys, glob, json, argparse, contextlib
+import os, sys, glob, json, csv, argparse, contextlib
 import numpy as np
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -37,8 +37,18 @@ def main():
     ap.add_argument("--n_ep", type=int, default=60)
     ap.add_argument("--speedup", type=float, default=1.33)
     ap.add_argument("--max_vel", type=float, default=3.0)
+    ap.add_argument("--csv", default="", help="append each episode row here (resumable full data; survives a "
+                    "fresh-process-per-chunk run that sidesteps the EGOPlanner C++ grid memory growth)")
     args = ap.parse_args()
     calib = R.load_calib(args.eps)
+
+    cw = None
+    if args.csv:
+        new = (not os.path.exists(args.csv)) or os.path.getsize(args.csv) == 0
+        cf = open(args.csv, "a", newline="")
+        cw = csv.writer(cf)
+        if new:
+            cw.writerow(["seed", "ep", "eps", "reached", "collided", "min_clr", "time_s"])
 
     n = coll = reach = 0
     min_clr = 1e18
@@ -57,8 +67,14 @@ def main():
                 coll += 1; fail.append((sd, k, r["min_clr"]))
             if r["min_clr"] is not None:
                 min_clr = min(min_clr, r["min_clr"])
+            if cw is not None:
+                cw.writerow([sd, k, args.eps, int(r["reached"]), int(r["collided"]),
+                             round(r["min_clr"], 3) if r["min_clr"] is not None else "", round(r["time_s"], 1)])
+                cf.flush()
             if n % 50 == 0:
                 print(f"[rel] {n} episodes: collisions={coll} reach={reach} min_clr={min_clr:.3f}", flush=True)
+    if cw is not None:
+        cf.close()
 
     rate = coll / n if n else float("nan")
     ub = 3.0 / n if (coll == 0 and n) else None   # rule of three (95% CI) when 0 collisions
