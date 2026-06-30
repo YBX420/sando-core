@@ -1,0 +1,168 @@
+{
+  "speeds": [
+    3.0,
+    4.0,
+    5.0,
+    6.0,
+    7.0,
+    8.0
+  ],
+  "summary": {
+    "3.0": {
+      "ours": {
+        "reach_rate": 1.0,
+        "collisions": 0,
+        "n": 120,
+        "min_clr": 0.628,
+        "median_clr": 1.476,
+        "median_t": 5.4
+      },
+      "ego": {
+        "reach_rate": 0.975,
+        "collisions": 19,
+        "n": 120,
+        "min_clr": -0.344,
+        "median_clr": 0.493,
+        "median_t": 6.3
+      },
+      "sando": {
+        "reach_rate": 0.0,
+        "collisions": 4,
+        "n": 120,
+        "min_clr": -0.542,
+        "median_clr": 2.186,
+        "median_t": null
+      }
+    },
+    "4.0": {
+      "ours": {
+        "reach_rate": 1.0,
+        "collisions": 0,
+        "n": 120,
+        "min_clr": 0.634,
+        "median_clr": 1.474,
+        "median_t": 4.7
+      },
+      "ego": {
+        "reach_rate": 0.992,
+        "collisions": 27,
+        "n": 120,
+        "min_clr": -0.286,
+        "median_clr": 0.366,
+        "median_t": 5.7
+      },
+      "sando": {
+        "reach_rate": 0.0,
+        "collisions": 5,
+        "n": 120,
+        "min_clr": -0.542,
+        "median_clr": 2.091,
+        "median_t": null
+      }
+    },
+    "5.0": {
+      "ours": {
+        "reach_rate": 1.0,
+        "collisions": 0,
+        "n": 120,
+        "min_clr": 0.92,
+        "median_clr": 1.519,
+        "median_t": 3.9
+      },
+      "ego": {
+        "reach_rate": 0.992,
+        "collisions": 11,
+        "n": 120,
+        "min_clr": -0.412,
+        "median_clr": 0.994,
+        "median_t": 3.3
+      },
+      "sando": {
+        "reach_rate": 0.0,
+        "collisions": 5,
+        "n": 120,
+        "min_clr": -0.542,
+        "median_clr": 1.942,
+        "median_t": null
+      }
+    },
+    "6.0": {
+      "ours": {
+        "reach_rate": 1.0,
+        "collisions": 0,
+        "n": 120,
+        "min_clr": 0.918,
+        "median_clr": 1.447,
+        "median_t": 3.8
+      },
+      "ego": {
+        "reach_rate": 1.0,
+        "collisions": 8,
+        "n": 120,
+        "min_clr": -0.281,
+        "median_clr": 1.006,
+        "median_t": 3.3
+      },
+      "sando": {
+        "reach_rate": 0.0,
+        "collisions": 4,
+        "n": 120,
+        "min_clr": -0.542,
+        "median_clr": 1.855,
+        "median_t": null
+      }
+    },
+    "7.0": {
+      "ours": {
+        "reach_rate": 1.0,
+        "collisions": 0,
+        "n": 120,
+        "min_clr": 1.015,
+        "median_clr": 1.677,
+        "median_t": 3.9
+      },
+      "ego": {
+        "reach_rate": 0.975,
+        "collisions": 9,
+        "n": 120,
+        "min_clr": -0.386,
+        "median_clr": 1.144,
+        "median_t": 3.3
+      },
+      "sando": {
+        "reach_rate": 0.0,
+        "collisions": 5,
+        "n": 120,
+        "min_clr": -0.542,
+        "median_clr": 1.98,
+        "median_t": null
+      }
+    },
+    "8.0": {
+      "ours": {
+        "reach_rate": 1.0,
+        "collisions": 0,
+        "n": 120,
+        "min_clr": 0.9,
+        "median_clr": 1.469,
+        "median_t": 4.5
+      },
+      "ego": {
+        "reach_rate": 0.95,
+        "collisions": 14,
+        "n": 120,
+        "min_clr": -0.363,
+        "median_clr": 0.857,
+        "median_t": 5.4
+      },
+      "sando": {
+        "reach_rate": 0.0,
+        "collisions": 6,
+        "n": 120,
+        "min_clr": -0.542,
+        "median_clr": 1.98,
+        "median_t": null
+      }
+    }
+  }
+}

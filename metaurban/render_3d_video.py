@@ -425,7 +425,11 @@ EGO_SLIP_DSAFE = float(os.environ.get("EGO_SLIPDSAFE", 0.2))   # SLIP standoff: 
                                                               # it, so never collides). User-tunable; only no-collision matters.
 if args.ego:
     ego = EGOPlanner(map_origin=(-200, -200, -1), map_size=(400, 400, 8), res=0.2, inflation=0.3)
-    ego.set_params(max_vel=float(PLN.get("v_max", 6.0)), max_acc=float(PLN.get("a_max", 10.0)),
+    # EGO_VMAX env override: lower v_max so the drone does not OUTRUN its forward cone (8m cone / 8 m/s = ~1s lookahead
+    # -> fast-flight-into-late-detected-obstacle collisions). A reaction-feasible cap is the stable global half of the
+    # speed-FOV coupling (the per-tick _path_free_dist warp is the dynamic half).
+    ego.set_params(max_vel=float(os.environ.get("EGO_VMAX", PLN.get("v_max", 6.0))),
+                   max_acc=float(PLN.get("a_max", 10.0)),
                    ctrl_pt_dist=0.5, horizon=EGO_HOR,
                    l_collision=0.8, dist0=max(0.4, float(par.drone_radius) + 0.2))
     print(f"[3dv] --ego: EGO-Planner core active (depth-FOV: range {args.fov_range}m, +-{args.fov_deg}deg cone)", flush=True)
@@ -568,19 +572,97 @@ def ego_safety_obstacles(p_d, t_sim):
     return out
 
 
-def kf_movers(p_d, t_sim):
+# --- SAME forward-cone sensor model native's fov_cloud uses (range args.fov_range, +-args.fov_deg about a heading) ---
+# Ours and native MUST perceive through the identical cone so the only A/B variable is the safety layer, not the FOV.
+def _cone_mask(pts_xy, p_d, heading):
+    R = float(args.fov_range); cmax = float(np.cos(np.radians(args.fov_deg)))
+    fwd = np.array([np.cos(heading), np.sin(heading)])
+    d = np.asarray(pts_xy, float) - p_d[:2]; dist = np.linalg.norm(d, axis=1)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        cang = (d @ fwd) / np.maximum(dist, 1e-6)
+    return (dist <= R) & (cang >= cmax)
+
+
+def _cone_static(p_d, heading):
+    """Static points inside the forward depth cone (NOT the 360-degree omniscient map)."""
+    return STATIC_CLOUD[_cone_mask(STATIC_CLOUD[:, :2], p_d, heading)] if len(STATIC_CLOUD) else np.zeros((0, 3))
+
+
+def _local_static(p_d):
+    """Static within EGO_HOR+4 radius (360-degree local KNOWN map). A real drone in a known environment HAS the static
+    map (SLAM/prior/floorplan) and does NOT forget walls it flew past -- forward-cone-only static makes side-blind
+    grazes physically unavoidable. Movers stay forward-cone (the dynamic unknown)."""
+    if not len(STATIC_CLOUD):
+        return np.zeros((0, 3))
+    dxy = STATIC_CLOUD[:, :2] - p_d[:2]
+    return STATIC_CLOUD[np.einsum('ij,ij->i', dxy, dxy) <= (EGO_HOR + 4.0) ** 2]
+
+
+# EGO_STATIC_MAP=1: BOTH ours and native perceive static as the local KNOWN map (fair + realistic); movers stay
+# forward-cone for both. =0: forward-cone static (the strict single-depth-cam setup). The only A/B variable stays the
+# safety layer either way.
+STATIC_MAP = os.environ.get("EGO_STATIC_MAP", "1") == "1"   # default ON: known static map (both ours+native, fair+real)
+
+
+def _percept_static(p_d, heading):
+    return _local_static(p_d) if STATIC_MAP else _cone_static(p_d, heading)
+
+
+def _in_cone(c3, p_d, heading):
+    R = float(args.fov_range); cmax = float(np.cos(np.radians(args.fov_deg)))
+    fwd = np.array([np.cos(heading), np.sin(heading)])
+    dd = np.asarray(c3, float)[:2] - p_d[:2]; r = float(np.linalg.norm(dd))
+    return r <= R and (float(dd @ fwd) / max(r, 1e-6)) >= cmax
+
+
+# --- SPEED-FOV COUPLING ("don't outrun the sensor"): cap flown speed by the free distance the forward cone sees ---
+FOV_ABRAKE = float(os.environ.get("EGO_FOV_ABRAKE", 4.0))    # m/s^2 brake decel assumed for the stopping-distance cap
+FOV_DMARGIN = float(os.environ.get("EGO_FOV_DMARGIN", 1.2))  # m: must stop this far short of a perceived obstacle surface
+FOV_GMIN = float(os.environ.get("EGO_FOV_GMIN", 0.15))       # floor on the speed-warp (keep crawling, never dead-stop here)
+
+
+def _path_free_dist(p_d, heading, t_sim):
+    """Arc-length along the committed B-spline before it first comes within FOV_DMARGIN of any perceived (forward-cone)
+    obstacle surface = the distance the drone may fly before it MUST already have avoided. inf if the committed path
+    stays clear through the lookahead (then no slow-down). This is the 'don't outrun the sensor' distance: cap the
+    flown speed so the braking distance fits inside it. Uses the SAME forward cone (fov_cloud) the planner perceives."""
+    dur = ego.duration()
+    if dur <= 1e-3:
+        return np.inf
+    fc = fov_cloud(p_d, heading, t_sim)
+    if not len(fc):
+        return np.inf
+    obs = fc[:, :2]
+    acc = 0.0; prev = np.asarray(ego.eval(0.0)[0], float)[:2]
+    for s in np.linspace(0.0, min(dur, EGO_TAU_TRUST + 0.5), 12)[1:]:
+        p = np.asarray(ego.eval(s)[0], float)[:2]
+        acc += float(np.linalg.norm(p - prev)); prev = p
+        if float(np.min(np.linalg.norm(obs - p, axis=1))) < FOV_DMARGIN:
+            return acc
+    return np.inf
+
+
+# A/B ablation knob: EGO_PREDICT=0 makes ours REACTIVE (no KF forecast) -- each mover is certified as STATIC at its
+# current KF-smoothed centre, isolating the contribution of PREDICTION itself (same cone, noise, planner, everything else).
+EGO_PREDICT = os.environ.get("EGO_PREDICT", "1") == "1"
+
+
+def kf_movers(p_d, t_sim, cam_heading=None):
     """Like ego_safety_obstacles, but each mover's centre + velocity come from a LIVE per-mover CA-Kalman filter
     fed NOISY detections of the GT position (this is what proves the KF is in the loop, not GT omniscience). Also
-    stashes each filter's PREDICTED future trajectory into _KF_PRED for draw_predictions. Returns
-    [(oid, c3_kf, vel_kf, r_obs, d_safe)]."""
+    stashes each filter's PREDICTED future trajectory into _KF_PRED for draw_predictions. When cam_heading is given,
+    a mover is only DETECTED if it falls in the forward depth cone (same sensor as native's fov_cloud) -> ours and
+    native track the SAME movers; the KF prediction on top is the safety layer. Returns [(oid,c3,vel,r_obs,d_safe)]."""
     global _KF_PRED
     _KF_PRED = []
     raw = []
+    seen = (lambda c3: _in_cone(c3, p_d, cam_heading)) if cam_heading is not None \
+        else (lambda c3: np.linalg.norm(c3[:2] - p_d[:2]) <= SENSE_R)
     for oid, cls, pos, vel, size in native_objects():
         if cls == "static":
             continue
         c3 = p3(pos, size[2] * 0.5)
-        if np.linalg.norm(c3[:2] - p_d[:2]) > SENSE_R:
+        if not seen(c3):
             continue
         d = EGO_PERCLASS_DSAFE.get(cls)
         if d is not None:
@@ -588,23 +670,46 @@ def kf_movers(p_d, t_sim):
     for a in animals:
         pos = a.p0 + a.vel * t_sim
         c3 = p3(pos, a.size[2] * 0.5)
-        if np.linalg.norm(c3[:2] - p_d[:2]) <= SENSE_R:
+        if seen(c3):
             raw.append((getattr(a, "id", id(a)), c3, 0.5 * float(max(a.size[0], a.size[1])), EGO_PERCLASS_DSAFE["animal"]))
     out = []
+    fresh = set()                                                          # oids DETECTED in-cone this tick
     for (oid, c3, r, d) in raw:
+        fresh.add(oid)
         det = np.asarray(c3, float) + _KF_RNG.normal(0, KF_MEAS_NOISE, 3)   # NOISY detection -> the filter's input
         trk = _KF.get(oid)
-        if trk is None:
-            trk = _KF[oid] = MoverTracker(dt=REPLAN_DT, meas_noise=KF_MEAS_NOISE)
+        if trk is None or trk.miss > MAN_MEM_TICKS:                         # new, or re-acquired after memory expired:
+            trk = _KF[oid] = MoverTracker(dt=REPLAN_DT, meas_noise=KF_MEAS_NOISE)   # re-init fresh (no stale long-gap state)
         trk.update(det)
+        trk.r_obs, trk.d_safe = r, d                                       # stash so out-of-cone memory needs no GT read
         if trk.ready:
             kc0, kv, _ka = trk.state()                                      # KF-smoothed centre + velocity
             pred = trk.predict(np.linspace(0.0, EGO_TAU_TRUST, 6))          # KF-PREDICTED future trajectory
         else:
             kc0, kv = np.asarray(c3, float), np.zeros(3)
             pred = np.asarray([kc0, kc0])
+        if not EGO_PREDICT:                                                # A/B ablation: reactive, no forecast
+            kv = np.zeros(3); pred = np.asarray([kc0, kc0])                # certify the mover as STATIC at its current KF centre
         out.append((oid, kc0, (float(kv[0]), float(kv[1]), 0.0), r, d))
         _KF_PRED.append((det[:2].copy(), kc0[:2].copy(), [(float(p[0]), float(p[1])) for p in pred], float(c3[2])))
+    # ---- TRACK MEMORY: movers that just LEFT the cone are COASTED (extrapolated + covariance grown) and kept in the
+    # cert/occupancy set for MAN_MEM_TICKS so 'straight' cannot instantly re-certify behind a mover still on a collision
+    # course (forget-after-pass). Extrapolate-only: the centre/vel come from the coasted KF, never a fresh GT read.
+    # Gated to the real cone path (cam_heading set) so the omniscient re-query (COLLDBG) and slip paths are unchanged.
+    if MAN_MEM and cam_heading is not None:
+        for oid, trk in list(_KF.items()):
+            if oid in fresh:
+                continue                                                   # detected this tick -> already emitted above
+            trk.coast()                                                    # advance one dt, GROW covariance, miss += 1
+            if trk.miss > MAN_MEM_TICKS:
+                del _KF[oid]; continue                                     # forgotten -> drop (re-entry re-inits fresh)
+            if not trk.ready:
+                continue
+            kc0, kv, _ka = trk.state()
+            r_mem = trk.r_obs + MAN_MEM_K * trk.pos_sigma                  # covariance growth -> bigger keep-out tube
+            out.append((oid, kc0, (float(kv[0]), float(kv[1]), 0.0), r_mem, trk.d_safe))
+            pred = trk.predict(np.linspace(0.0, EGO_TAU_TRUST, 6))
+            _KF_PRED.append((kc0[:2].copy(), kc0[:2].copy(), [(float(p[0]), float(p[1])) for p in pred], float(kc0[2])))
     return out
 
 
@@ -736,24 +841,60 @@ def ego_slip_feasible(p_d, v_d, t_sim, s):
 
 MAN_REACH_PAD = 0.3   # posture/arm reach added to a mover's head-top for the fly-OVER vertical clearance
 MAN_DSAFE_V = 0.5     # vertical standoff above the head
-MAN_QCONF = float(os.environ.get("EGO_QCONF", 0.125))  # CONFORMAL-CALIBRATED q_conformal (pedestrian, CV, eps=0.05)
-MAN_VEFF = float(os.environ.get("EGO_VEFF", 0.61))     # CONFORMAL-CALIBRATED tube growth (pedestrian, CV, eps=0.05)
-MAN_TRACK = float(os.environ.get("EGO_TRACK", 0.0))    # extra keep-out for plan->flown TRACKING error (render only;
-#   headless is a perfect-tracking point mass, the renderer flies real quadrotor dynamics that LAG the certified plan
-#   -> set >0 so the cert covers what FLIES, not just what was planned. Calibrate like q_conformal, see results doc.
+MAN_QCONF = float(os.environ.get("EGO_QCONF", 0.125))  # fallback q_conformal (pedestrian, CV, eps=0.05) if no per-class
+MAN_VEFF = float(os.environ.get("EGO_MAN_VEFF", 0.61)) # fallback tube growth; OWN env (was aliased to EGO_VEFF, which the
+#                                                        SLIP path also reads -> setting one silently changed the other)
+MAN_EPS = float(os.environ.get("EGO_EPS", 0.05))       # conformal risk level for the per-class mover keep-out
+
+
+def _load_perclass_conf(eps):
+    """Per-class (q_conformal, v_eff) from out/conformal/calib.json, keyed by the mover's per-class d_safe so cert_clear
+    can use the VEHICLE / ANIMAL tube instead of the pedestrian scalar (code-review 2026-06-27 HIGH: ped tube was applied
+    to all classes -> vehicles/animals under-/mis-covered). pedestrian/vehicle are measured; animal -> the pooled 'all'."""
+    for cand in (os.path.join(os.path.dirname(_HERE), "out", "conformal", "calib.json"),
+                 os.path.join(_HERE, "out", "conformal", "calib.json")):
+        try:
+            cj = json.load(open(cand)); g = cj["groups"]; k = str(eps)
+            lv = lambda grp: (float(g[grp]["levels"][k]["q_conformal"]), float(g[grp]["levels"][k]["v_eff"]))
+            return {0.8: lv("pedestrian"), 0.6: lv("vehicle"), 0.7: lv("all")}   # keyed by EGO_PERCLASS_DSAFE values
+        except Exception:
+            continue
+    return {}
+
+
+PERCLASS_CONF = _load_perclass_conf(MAN_EPS)   # {d_safe: (q_conformal, v_eff)}; empty -> fall back to MAN_QCONF/MAN_VEFF
+MAN_TRACK = float(os.environ.get("EGO_TRACK", 0.45))   # HCT-D plan->flown TRACKING margin, split-conformal CALIBRATED
+#   on the PER-FLIGHT (episode) unit -- the correct exchangeable unit for a per-flight collision-freedom guarantee
+#   (windows within one flight are autocorrelated, NOT exchangeable -- the old per-window 0.29 m gave only marginal
+#   coverage and ~30% of FLIGHTS breached it; code-review 2026-06-27 critical fix). delta_track = (1-eps) quantile of
+#   per-EPISODE-max ||p_flown - p_planned|| over 100 harvested real-quad episodes: eps0.05 -> 0.264 m, max observed
+#   0.473 m; 0.45 covers ~all observed flights. This was only ~0.4 m (not the 2.9 m the broken thrash implied) BECAUSE
+#   the maneuver-switch THRASH that caused the heavy tail is fixed (commit hysteresis): per-episode-max delta p95
+#   collapsed 1.72 -> 0.27 m. delta ~ ||a||/curvature, NOT speed. track_calib.json / track_conformal.py. EGO_TRACK=0 off.
 # horizontal standoff ours holds from a mover (overrides the per-class 0.8). LOWER = ours flies tighter/faster
 # to race the real EGO (which flies at ~0.3 and grazes); the cert still guarantees this clearance so ours never
 # collides where EGO does. Tune via EGO_MANDSAFE.
 MAN_DSAFE = float(os.environ.get("EGO_MANDSAFE", 0.45))
 PHI_MAN = np.radians(25.0)   # ground around-L/R deflection angle for the maneuver tournament
+# CCF EMPIRICALLY RETIRED (2026-06-30, default OFF): net-negative -- froze 2/5 natural seeds (over-commit can't release in
+# clutter), and the L/R-flip it targets is only ~0.7/episode (a non-problem; real churn is functional straight<->around +
+# vertical over/climb/hold, which CCF doesn't touch). Kept gated for reference. See .claude/memory/sando-core-fov-novelty-2026-06.md.
+EGO_CCF = os.environ.get("EGO_CCF", "0") == "1"                 # Certified Commitment Function: hold the committed detour
+EGO_CCF_WARP = os.environ.get("EGO_CCF_WARP", "1") == "1"       # the YIELD-behind speed-warp restoration (the novelty half);
+EGO_MAN_RELEASE = int(os.environ.get("EGO_MAN_RELEASE", "5"))  # ticks 'straight' must stay certified before releasing a commit
 # HCT-D tracking-tube HARVEST: TRACK_HARVEST=1 logs per sub-step (window, delta=||flown-planned||, hodograph
 # features ||v||,||a||,lateral-accel) so a split-conformal tracking tube kappa*g can be calibrated off-line.
 _TRACKH = os.environ.get("TRACK_HARVEST") == "1"
 _track_rows = []
 _min_static = [np.inf, None, None]   # [clearance, box_size, drone_pos] of the closest static approach (TREE_DBG)
-MAN_STATIC_MARGIN = float(os.environ.get("EGO_STATICM", 0.55))  # reject a candidate whose PREDICTED-FLOWN path
+MAN_STATIC_MARGIN = float(os.environ.get("EGO_STATICM", 0.70))  # reject a candidate whose PREDICTED-FLOWN path
 #   comes within this of KNOWN static. Because the gate now forward-sims the real quad (overshoot included), this is
 #   just the drone BODY radius + a small buffer -- the tracking tube is in the flown path, not the margin.
+MAN_STATIC_BUF = float(os.environ.get("EGO_STATIC_BUF", 0.45))  # static gate keep-out = drone_radius + this buffer
+#   (the gate now uses the cylinder-SDF, same model as GT clearance(); rmarg ~= 0.70 m matches the swept margin).
+MAN_STATIC_HZ = float(os.environ.get("EGO_STATIC_HZ", 1.20))   # forward-sim LOOKAHEAD (s) for the static gate. Longer =
+#   the drone starts avoiding static sooner so its inertia doesn't carry it into a building it only reacts to late
+#   (the 2026-06-27 diagnosis: most ours collisions are MODERATE-speed static grazes the short-horizon gate missed).
 MAN_PLANHI = float(os.environ.get("EGO_PLANHI", 0.7))   # how far ahead the KF-predicted SWEPT footprint is fed to
                                                         # EGO so it weaves around the FUTURE smoothly (one trajectory,
                                                         # no late braking) instead of reacting to the present
@@ -769,11 +910,20 @@ _KF = {}                                                    # mover id -> MoverT
 _KF_RNG = np.random.default_rng(int(args.seed) * 7 + 1)
 KF_MEAS_NOISE = float(os.environ.get("EGO_MEASNOISE", 0.10))   # detection noise (m) the filter must see through
 _KF_PRED = []                                               # latest [(now_xy, [predicted xy over horizon])] for drawing
+# ---- OUT-OF-CONE MOVER TRACK MEMORY (extrapolate-only; NO GT read for unseen movers, so still fair vs native) ----
+# A mover that leaves the +-fov_deg/fov_range cone used to vanish from the cert + occupancy the SAME tick (forget-
+# after-pass) while its KF froze (no predict, no covariance growth). Instead we KEEP a recently-seen mover for a few
+# ticks, COAST its filter forward (growing covariance), and inflate its keep-out by the covariance growth. The state
+# comes purely from the last in-cone KF estimate -- we never re-read native_objects() for an out-of-cone mover.
+MAN_MEM = os.environ.get("EGO_MEM", "1") == "1"             # master switch for out-of-cone mover track memory
+MAN_MEM_TICKS = int(os.environ.get("EGO_MEM_TICKS", 8))    # remember an out-of-cone mover this many replan ticks (~0.8s @10Hz)
+MAN_MEM_K = float(os.environ.get("EGO_MEM_K", 2.0))        # keep-out inflation = this many KF position-sigmas (covariance growth)
 MAN_PHI = np.radians(25.0)
 MAN_DEADBAND = 0.5    # hysteresis: keep the CURRENT maneuver unless another certified one beats its goal-ward
                       # speed by >this (m/s). Stops the around-L/R/over flicker that brakes-and-reaccelerates
                       # (the "hesitation") every time a mover twitches; straight resumes the moment it re-certifies.
 _MAN_STATE = {"kind": None}
+_SPAWNDBG = [0]   # MAN_SPAWNDBG=1: dump the spawn occupancy (360 static vs native forward cone) for the first calls
 
 
 def _man_cloud(p_d, heading, t_sim, movers):
@@ -792,13 +942,10 @@ def _man_cloud(p_d, heading, t_sim, movers):
         # single-frame path. Fixing memory (decay + mover-track removal) is future work; see occ_remember().
         stat = np.asarray(occ_remember(_raw, p_d, movers) if os.environ.get("OCC_MEM") == "1" else _raw, float)
     elif len(STATIC_CLOUD):
-        # static is a KNOWN MAP (it does not move) -> feed EGO the full 360-degree local static structure, NOT the
-        # forward FOV cone. The cone-limited fov_cloud hid static beside/behind the drone, so the maneuver (around /
-        # lateral) and even straight flight clipped buildings it never "saw" -> EVERY ours-loses seed collided with
-        # STATIC. A real drone has the static map (or a downward/omni sensor); only MOVERS stay perception-limited
-        # (they are added below as KF cylinders, so this static-only feed also drops fov_cloud's double-added boxes).
-        dxy = STATIC_CLOUD[:, :2] - p_d[:2]
-        stat = STATIC_CLOUD[np.einsum('ij,ij->i', dxy, dxy) <= (EGO_HOR + 4.0) ** 2]
+        # FAIR-COMPARISON perception: static comes through the SAME forward depth cone native's fov_cloud uses (heading
+        # == cam yaw), NOT a 360-degree omniscient map. Both planners therefore see the identical static, so the only
+        # A/B variable is the safety layer. (Movers are re-added below as KF cylinders, which IS the safety layer.)
+        stat = _percept_static(p_d, heading)
     else:
         stat = np.zeros((0, 3))
     stat = np.asarray(stat, float)
@@ -840,30 +987,48 @@ def ego_maneuver_replan(p_d, v_d, a_d, cur_wp, t_sim):
     # forward obstacles EGO must route around are actually in view.
     fdir = np.asarray(cur_wp, float)[:2] - p_d[:2]
     heading = float(np.arctan2(fdir[1], fdir[0])) if np.linalg.norm(fdir) > 1e-3 else 0.0
-    movers = kf_movers(p_d, t_sim)                         # (oid, KF-centre3, KF-vel3, r_obs, d_safe) — LIVE Kalman
-    ego.update_cloud(_man_cloud(p_d, heading, t_sim, movers), p_d)
+    # PERCEPTION heading = body-mounted depth cam (quad.yaw), IDENTICAL to native's fov_cloud(p_d, quad.yaw): ours and
+    # native must see through the same forward cone (static AND mover detection) so the only A/B variable is the cert.
+    cam_heading = float(quad.yaw)
+    movers = kf_movers(p_d, t_sim, cam_heading)            # cone-DETECTED movers + their KF prediction (the safety layer)
+    ego.update_cloud(_man_cloud(p_d, cam_heading, t_sim, movers), p_d)
+    if os.environ.get("MAN_SPAWNDBG") == "1" and _SPAWNDBG[0] < 4:
+        _SPAWNDBG[0] += 1
+        n360 = int(len(STATIC_CLOUD)) if len(STATIC_CLOUD) else 0
+        _os = _cone_static(p_d, cam_heading)                       # what OURS now feeds (cone)
+        n1 = int(len(_os)); s_near = float(np.linalg.norm(_os[:, :2] - p_d[:2], axis=1).min()) if len(_os) else 9.9
+        _fc = fov_cloud(p_d, cam_heading, t_sim)                   # what NATIVE feeds (same cone+heading)
+        if len(_fc):
+            _fdd = np.linalg.norm(_fc[:, :2] - p_d[:2], axis=1); ncone = len(_fc); c_near = float(_fdd.min())
+        else:
+            ncone = 0; c_near = 9.9
+        mv_near = min((float(np.hypot(*(np.asarray(c3)[:2] - p_d[:2]))) - r for (_o, c3, _v, r, _d) in movers), default=9.9)
+        print(f"[SPAWNDBG] call{_SPAWNDBG[0]} p_d={np.round(p_d,2)} goal={np.round(np.asarray(cur_wp,float)[:2],1)}  "
+              f"ours-cone-static: n={n1} nearest={s_near:.2f}m (full map={n360}) | "
+              f"native-cone: n={ncone} nearest={c_near:.2f}m | mover_nearest_edge={mv_near:.2f}m", flush=True)
     gxy = np.asarray(cur_wp, float)[:2] - p_d[:2]; dist = float(np.linalg.norm(gxy))
     gdir = gxy / dist if dist > 1e-6 else np.array([1.0, 0.0])
     L = min(EGO_HOR, max(dist, 1.0))
-    zc = [2.0 * c3[2] + MAN_REACH_PAD + MAN_DSAFE_V for (_oid, c3, _, _, _) in movers]
+    zc = [2.0 * c3[2] + MAN_REACH_PAD + MAN_DSAFE_V + MAN_QCONF + MAN_TRACK for (_oid, c3, _, _, _) in movers]
     z_top = min(Z_CEIL, (max(zc) if zc else CRUISE_Z + 1.0) + 0.2)
 
     def rot(v, ang):
         c, s = np.cos(ang), np.sin(ang); return np.array([c * v[0] - s * v[1], s * v[0] + c * v[1]])
 
-    # local KNOWN static (360-degree, radius-limited) for the static clearance gate
-    if len(STATIC_CLOUD):
-        _dxy = STATIC_CLOUD[:, :2] - p_d[:2]
-        loc_static = STATIC_CLOUD[np.einsum('ij,ij->i', _dxy, _dxy) <= (EGO_HOR + 4.0) ** 2]
-    else:
-        loc_static = np.zeros((0, 3))
+    # static clearance gate sees the SAME forward-cone static the planner does (no 360-degree omniscience) -> the gate
+    # cannot reject against buildings the drone could not perceive, keeping ours' perception identical to native's.
+    loc_static = _percept_static(p_d, cam_heading)
 
     def cert_clear():                                      # CURRENTLY-held EGO B-spline vs every mover
+        # NOTE: MAN_DSAFE (0.45) is the body+standoff (> drone_radius 0.25), so it already keeps the BODY out; adding
+        # drone_radius again double-counts and over-inflates -> reverted (A+B 2026-06-27 made aggregate worse: more
+        # mover-conservatism -> path churn -> MORE static grazes 9->13, reach 88->84). Per-class tube also reverted to
+        # the pedestrian scalar (documented limitation); the dominant problem is the STATIC gate, not the mover cert.
         for (_oid, c3, vel, r_obs, d_safe) in movers:
             R = r_obs + MAN_DSAFE + MAN_QCONF + MAN_TRACK   # +tracking margin so the cert covers the FLOWN path
             hp, _ = ego.certify_horizontal(obs_c0=c3, R=R, obs_vel=vel, t_hi=EGO_TAU_TRUST, v_eff=MAN_VEFF, delta=REPLAN_DT)
             hc, _ = ego.certify_horizontal(obs_c0=c3, R=R, obs_vel=(0, 0, 0), t_hi=EGO_TAU_TRUST, v_eff=MAN_VEFF, delta=REPLAN_DT)
-            vo, _ = ego.certify_above(z_clear=2.0 * c3[2] + MAN_REACH_PAD + MAN_DSAFE_V + MAN_QCONF,
+            vo, _ = ego.certify_above(z_clear=2.0 * c3[2] + MAN_REACH_PAD + MAN_DSAFE_V + MAN_QCONF + MAN_TRACK,
                                       t_hi=EGO_TAU_TRUST, delta=REPLAN_DT)
             if not ((hp and hc) or vo):
                 return False
@@ -874,10 +1039,11 @@ def ego_maneuver_replan(p_d, v_d, a_d, cur_wp, t_sim):
         B-spline over [0, TAU]. The planned point-path hides the tracking OVERSHOOT (inertia / tilt-to-accelerate);
         gating this predicted-flown tube is how we account for the real drone's dynamics, not just its radius."""
         d = ego.duration()
+        hz = min(d, MAN_STATIC_HZ)                         # static-gate forward-sim lookahead (>= the flown-per-tick dist)
         if args.pointmass:                                # diagnostic: flown == planned
-            return np.array([ego.eval(s)[0] for s in np.linspace(0, min(d, EGO_TAU_TRUST), 16)])
+            return np.array([ego.eval(s)[0] for s in np.linspace(0, hz, 16)])
         q = copy.deepcopy(quad)                           # current REAL state + params
-        n = max(1, int(min(d, EGO_TAU_TRUST) / DT)); pts = [q.p.copy()]
+        n = max(1, int(hz / DT)); pts = [q.p.copy()]
         for k in range(1, n + 1):
             r = ego.eval(min(k * DT, d - 1e-3))
             if r is None:
@@ -888,36 +1054,127 @@ def ego_maneuver_replan(p_d, v_d, a_d, cur_wp, t_sim):
             pts.append(q.p.copy())
         return np.array(pts)
 
-    def static_clear():                                   # PREDICTED-FLOWN path vs KNOWN static (drone body + buffer)
-        if ego.duration() <= 1e-3 or not len(loc_static):
+    # PRECISE static gate: gate the PREDICTED-FLOWN path against the static obstacle CYLINDERS (same SDF as the GT
+    # clearance() metric) instead of sparse cloud points -> catches grazes of large buildings the cloud-point gate
+    # missed (a 40m building hugged at its curved face). Reject = drone BODY within (drone_r + buffer) of any cylinder
+    # surface; the maneuver then detours or HOLDs rather than grazing known static. loc_obs = local static cylinders.
+    # filter by SURFACE distance (center_dist - radius), NOT center distance: a huge building's centre can be 20 m away
+    # while its wall is right beside the drone -- a center-distance filter would wrongly drop it (seed 55 graze bug).
+    loc_obs = [(np.asarray(c3, float), 0.5 * float(sz[0]), 0.5 * float(sz[2]))
+               for (_c, c3, sz) in STATIC_FED
+               if float(np.hypot(*(np.asarray(c3)[:2] - p_d[:2]))) - 0.5 * float(sz[0]) <= EGO_HOR + 6.0]
+    _ST_RMARG = float(par.drone_radius) + MAN_STATIC_BUF   # body radius + buffer, matches GT clearance() drone radius
+
+    def static_clear():
+        if ego.duration() <= 1e-3 or not loc_obs:
             return True
         for qp in flown_samples():
-            dd = loc_static - qp
-            if float(np.min(np.einsum('ij,ij->i', dd, dd))) < MAN_STATIC_MARGIN ** 2:
-                return False
+            for (c3, R, hh) in loc_obs:
+                d = qp - c3
+                dr_out = max(float(np.hypot(d[0], d[1])) - R, 0.0); dz_out = max(abs(float(d[2])) - hh, 0.0)
+                sd = np.hypot(dr_out, dz_out) if (dr_out > 0 or dz_out > 0) else -min(R - float(np.hypot(d[0], d[1])), hh - abs(float(d[2])))
+                if sd < _ST_RMARG:                          # flown body within margin of this cylinder surface
+                    return False
         return True
 
-    # Tournament: straight -> around +-25/50 (ground weave) -> fly OVER -> climb. EACH candidate must clear BOTH the
-    # mover cert AND the static gate. NB: the headless harness's blind EVADE fallback is NOT used (the dense 3-D
-    # static scene makes fleeing drive INTO buildings; climb is the static-safe no-freeze escape).
-    chosen = None
-    for gk, gsub in (("straight", np.array([p_d[0] + gdir[0] * L, p_d[1] + gdir[1] * L, CRUISE_Z])),
-                     ("around_l", np.array([*(p_d[:2] + L * rot(gdir, PHI_MAN)), CRUISE_Z])),
-                     ("around_r", np.array([*(p_d[:2] + L * rot(gdir, -PHI_MAN)), CRUISE_Z])),
-                     ("around_l", np.array([*(p_d[:2] + L * rot(gdir, 2 * PHI_MAN)), CRUISE_Z])),
-                     ("around_r", np.array([*(p_d[:2] + L * rot(gdir, -2 * PHI_MAN)), CRUISE_Z]))):
-        if ego.replan(p_d, v_d, a_d, gsub) and ego.duration() > 1e-3 and cert_clear() and static_clear():
-            chosen = gk; break
+    def mover_clear_flown():
+        """Forward-sim FLOWN-path gate vs the KF-PREDICTED mover cylinders (the analytic cert_clear has NO forward-sim,
+        so a fast climb-over / tracking overshoot can graze a tall mover's roof -- e.g. the seed-56 van -- while the
+        planned path certified). Cylinder disjunction per mover: clear iff horizontally outside r_obs+keep-out OR the
+        flown body is above the mover top. Predicted mover pos = KF centre + vel*t at each flown sample time."""
+        if ego.duration() <= 1e-3 or not movers:
+            return True
+        fs = flown_samples()
+        for k, qp in enumerate(fs):
+            tk = k * DT
+            for (_oid, c3, vel, r_obs, d_safe) in movers:
+                mc = np.asarray(c3, float) + np.array([float(vel[0]), float(vel[1]), 0.0]) * tk
+                dh = float(np.hypot(qp[0] - mc[0], qp[1] - mc[1]))
+                R = r_obs + MAN_DSAFE + MAN_QCONF           # tracking already in the flown path; q covers KF pred error
+                ztop = 2.0 * float(c3[2]) + MAN_REACH_PAD + MAN_DSAFE_V + MAN_QCONF
+                if dh < R and float(qp[2]) < ztop:          # inside the cylinder horizontally AND not above its top
+                    return False
+        return True
+
+    # ---- CCF: Certified Commitment Function (anti-thrash) --------------------------------------------------------
+    # The stateless tournament re-picks a winner every tick (straight first), so a crosser that briefly clears/blocks
+    # flips straight<->around_l<->around_r each tick (the measured switches~100 thrash). CCF COMMITS to a detour homotopy
+    # and holds it -- restoring certified margin by the SLIP speed-warp (YIELD behind the crosser) before EVER switching
+    # sides -- and re-opens the tournament only when the committed side is INFEASIBLE at every speed. It returns to
+    # goal-direct only after 'straight' has certified for EGO_MAN_RELEASE consecutive ticks (debounce kills the
+    # straight<->around flip). Switch trigger = the hard certificate's feasibility, NOT a goal-ward speed deadband.
+    def _committed_warp():
+        """Fastest re-timing s in [EGO_S_MIN,1] for which the COMMITTED (already-replanned) B-spline certifies vs every
+        predicted mover (sound substitution obs_vel=v/s, t_hi=s*TAU, v_eff=VEFF/s, delta=DT*s; the re-timed predicted
+        cert is the slip-behind-sound one -- no frozen-at-current variant, which would forbid every yield). 0.0 if none."""
+        s = 1.0
+        while s >= EGO_S_MIN - 1e-9:
+            ok = True
+            for (_oid, c3, vel, r_obs, d_safe) in movers:
+                R = r_obs + MAN_DSAFE + MAN_QCONF + MAN_TRACK
+                hp, _ = ego.certify_horizontal(obs_c0=c3, R=R, obs_vel=tuple(np.asarray(vel, float) / s),
+                                               t_hi=s * EGO_TAU_TRUST, v_eff=MAN_VEFF / s, delta=REPLAN_DT * s)
+                vo, _ = ego.certify_above(z_clear=2.0 * c3[2] + MAN_REACH_PAD + MAN_DSAFE_V + MAN_QCONF + MAN_TRACK,
+                                          t_hi=s * EGO_TAU_TRUST, delta=REPLAN_DT * s)
+                if not (hp or vo):
+                    ok = False; break
+            if ok:
+                return s
+            s -= EGO_S_STEP
+        return 0.0
+
+    def _straight_clear():
+        return (ego.replan(p_d, v_d, a_d, np.array([p_d[0] + gdir[0] * L, p_d[1] + gdir[1] * L, CRUISE_Z]))
+                and ego.duration() > 1e-3 and cert_clear() and static_clear() and mover_clear_flown())
+
+    chosen = None; man_g = 1.0
+    _cknd = _MAN_STATE.get("kind"); _csub = _MAN_STATE.get("sub")
+    if EGO_CCF and _cknd in ("around_l", "around_r") and _csub is not None:
+        gsub_c = np.array([*(p_d[:2] + L * rot(gdir, _csub)), CRUISE_Z])     # SAME angular detour, re-anchored to now
+        if ego.replan(p_d, v_d, a_d, gsub_c) and ego.duration() > 1e-3 and static_clear():
+            if cert_clear() and mover_clear_flown():
+                chosen = _cknd; man_g = 1.0                                  # committed side still clears at full speed
+            elif EGO_CCF_WARP:
+                _s = _committed_warp()                                       # try to YIELD behind the crosser, don't flip
+                if _s >= EGO_S_MIN - 1e-9:
+                    chosen = _cknd; man_g = float(_s)
+            if chosen is not None:
+                _strk = (_MAN_STATE.get("streak", 0) + 1) if _straight_clear() else 0   # NB: _straight_clear replans straight
+                _MAN_STATE["streak"] = _strk
+                if _strk >= EGO_MAN_RELEASE:
+                    chosen = None; _MAN_STATE["streak"] = 0                  # straight safe long enough -> release the commit
+                else:
+                    ego.replan(p_d, v_d, a_d, gsub_c)                       # restore committed plan (straight probe clobbered ego)
     if chosen is None:
-        if (ego.replan(p_d, v_d, a_d, np.array([gdir[0] * L + p_d[0], gdir[1] * L + p_d[1], z_top]))
-                and ego.duration() > 1e-3 and cert_clear() and static_clear()):
-            chosen = "over"                                   # ground blocked -> fly OVER (certified + static-clear)
-        else:
-            ego.replan(p_d, v_d, a_d, np.array([p_d[0], p_d[1], z_top])); chosen = "climb"   # boxed -> climb up
+        # Tournament: straight -> SAME-side detour -> mirror -> wider; then fly OVER -> climb -> HOLD. EACH candidate must
+        # clear the mover cert AND the static gate. (blind EVADE not used: dense static -> fleeing drives into buildings.)
+        cands = [("straight", 0.0), ("around_l", PHI_MAN), ("around_r", -PHI_MAN),
+                 ("around_l", 2.0 * PHI_MAN), ("around_r", -2.0 * PHI_MAN)]
+        _pri = lambda c: 0 if c[0] == "straight" else (1 if (_csub is not None and c[1] * _csub > 0) else 2)
+        cands.sort(key=_pri)                                                 # stick to the previously-committed SIDE
+        _ang = 0.0
+        for gk, ang in cands:
+            gsub = np.array([*(p_d[:2] + L * rot(gdir, ang)), CRUISE_Z])
+            if (ego.replan(p_d, v_d, a_d, gsub) and ego.duration() > 1e-3
+                    and cert_clear() and static_clear() and mover_clear_flown()):
+                chosen = gk; _ang = ang; break
+        if chosen is None:
+            # ground blocked -> fly OVER if certified; else a CERTIFIED vertical climb-escape; else HOLD (brake/hover; NEVER
+            # fly uncertified -- that was the seed-56 soundness hole where a labelled-certified lap could collide).
+            if (ego.replan(p_d, v_d, a_d, np.array([gdir[0] * L + p_d[0], gdir[1] * L + p_d[1], z_top]))
+                    and ego.duration() > 1e-3 and cert_clear() and static_clear() and mover_clear_flown()):
+                chosen = "over"
+            elif (ego.replan(p_d, v_d, a_d, np.array([p_d[0], p_d[1], z_top]))
+                    and ego.duration() > 1e-3 and cert_clear() and static_clear() and mover_clear_flown()):
+                chosen = "climb"                                  # certified vertical escape
+            else:
+                chosen = "hold"                                   # uncertifiable -> brake/hover, do NOT fly uncertified
+        _MAN_STATE["sub"] = _ang if chosen in ("around_l", "around_r") else None
+        _MAN_STATE["streak"] = 0
     _MAN_STATE["kind"] = chosen
     dur = ego.duration()
     pts = [ego.eval(s)[0] for s in np.linspace(0, dur, 24)] if dur > 1e-3 else None
-    return chosen, pts
+    return chosen, pts, man_g
 
 
 def _voxel_box(pos, size, t_sim=0.0, vel=(0, 0)):
@@ -938,11 +1195,10 @@ def fov_cloud(p_drone, heading, t_sim):
     R = float(args.fov_range); cmax = float(np.cos(np.radians(args.fov_deg)))
     fwd = np.array([np.cos(heading), np.sin(heading)])
     chunks = []
-    if len(STATIC_CLOUD):
-        d = STATIC_CLOUD[:, :2] - p_drone[:2]; dist = np.linalg.norm(d, axis=1)
-        with np.errstate(invalid="ignore", divide="ignore"):
-            cang = (d @ fwd) / np.maximum(dist, 1e-6)
-        chunks.append(STATIC_CLOUD[(dist <= R) & (cang >= cmax)])
+    # STATIC: local KNOWN map when EGO_STATIC_MAP=1 (native gets the same realistic static both ours does), else cone.
+    _st = _percept_static(p_drone, heading)
+    if len(_st):
+        chunks.append(_st)
 
     def _seen(c):
         dd = c[:2] - p_drone[:2]; r = float(np.linalg.norm(dd))
@@ -1227,7 +1483,18 @@ while not quit_now:
         drone.set_position([float(START[0]), float(START[1]), CRUISE_Z]); drone.set_heading_theta(hdg0)
         lap_start = START
     _mid = 0.5 * (START[:2] + GOAL[:2])
-    _cow.place(_mid + left * 6.0, -left * 1.0)        # cow crosses near mid-route
+    if os.environ.get("EGO_ADV_CROSSER") == "1":
+        # ADVERSARIAL side-crosser: a fast mover timed to reach the drone's path midpoint EXACTLY as the drone does,
+        # entering from ~90 deg (OUTSIDE the +-fov_deg forward cone) so it is detected only when already close -- the
+        # "see-too-late" stress that gives the FOV failure a non-zero collision denominator (default scene = 0 collisions).
+        # Deterministic: speed + lateral offset are derived from the drone's expected arrival time at _mid (no random/Date).
+        _vcru = float(os.environ.get("EGO_ADV_CROSS_VCRU", 3.0))                  # REALISTIC avg drone speed (not v_max:
+        _t_mid = float(np.linalg.norm(_mid - START[:2])) / max(_vcru, 0.5)        # the cert weaves+brakes ~2.7 m/s) -> ETA at _mid
+        _vx = float(os.environ.get("EGO_ADV_CROSS_SPEED", 2.5))                   # crosser speed (m/s; brisk run)
+        _side = 1.0 if os.environ.get("EGO_ADV_CROSS_SIDE", "L") == "L" else -1.0
+        _cow.place(_mid + left * _side * (_vx * _t_mid), -left * _side * _vx)     # reaches _mid at t=_t_mid, perpendicular
+    else:
+        _cow.place(_mid + left * 6.0, -left * 1.0)        # cow crosses near mid-route
     sando = make_sando(lap_start, wp[0]) if (ego is None and native is None) else None; _cache = {}
     if native is not None: native.set_terminal_goal(wp[0])
     quad.reset(np.asarray(lap_start, float), yaw=hdg0)
@@ -1245,6 +1512,8 @@ while not quit_now:
           f"start {np.round(START[:2],1)}", flush=True)
     ego_dur = 0.0; t_ego = 0.0; ego_stuck = 0; ego_traj_pts = None; man_kind = None
     man_switches = 0; man_counts = {}; _prev_mk = None; _MAN_STATE["kind"] = None   # reset hysteresis per lap
+    _sw_lr = 0; _sw_sa = 0; _sw_oth = 0; _sp_hist = []   # thrash instrumentation: classify switches + speed-history cost
+    _KF.clear()                                          # fresh mover trackers per lap (no stale cross-lap KF state)
     while t < T_MAX and not reached:
         cur_wp = wp[wp_i]
         if ego is not None:
@@ -1257,10 +1526,10 @@ while not quit_now:
             if args.slip:                                              # route EGO around movers at the cert margin
                 cloud = np.concatenate([cloud, _slip_mover_cloud(p_d, t)], axis=0)
             ego.update_cloud(cloud, p_d)
-            man_kind = None
+            man_kind = None; man_g = 1.0
             if args.maneuver:
                 # NO-HOLD cylinder fastest-safe tournament (fly over / around / climb); leaves EGO holding the winner
-                t0 = time.perf_counter(); man_kind, ego_traj_pts2 = ego_maneuver_replan(p_d, v_d, a_d, cur_wp, t)
+                t0 = time.perf_counter(); man_kind, ego_traj_pts2, man_g = ego_maneuver_replan(p_d, v_d, a_d, cur_wp, t)
                 last_rt = time.perf_counter() - t0
                 ego_dur = ego.duration(); ego_ok = ego_dur > 1e-3
             else:
@@ -1313,6 +1582,38 @@ while not quit_now:
                     ego_n_cert += 1                          # slip-ahead / clear -> at or above EGO's planned speed
                 else:
                     ego_hold_class = "yield"; ego_n_slow += 1   # slip-behind a crosser
+            elif args.maneuver and man_kind == "hold":
+                # NOTHING certified (boxed) -> safe RTA backstop: hover/brake in place (executor s=None holds position).
+                # NO uncertified flight -> restores 'flown == certified' (was the climb-fallback soundness hole, e.g. seed 56).
+                ego_cert_hold = True; ego_hold_class = "boxed"; ego_n_hold += 1
+            elif args.maneuver and ego_dur > 1e-3 and os.environ.get("EGO_FOVCAP", "0") == "1":
+                # SPEED-FOV COUPLING (default OFF): the per-tick time-warp THRASHES the maneuver tournament (re-plan +
+                # slow near clutter -> L/R candidate flip -> switches~80-100, reach collapses). The stable half of the
+                # speed-FOV idea is the GLOBAL EGO_VMAX cap (don't outrun the 8m cone). This dynamic warp is kept for
+                # future anti-thrash work (commit hysteresis). Enable with EGO_FOVCAP=1.
+                # within the free distance the forward cone perceives along the path. Closes the fast-flight-into-late-
+                # detected-obstacle residual (drone outrunning its 8 m cone at ~9 m/s) WITHOUT adding any perception.
+                d_free = _path_free_dist(p_d, float(quad.yaw), t)
+                v_allow = (2.0 * FOV_ABRAKE * max(d_free - FOV_DMARGIN, 0.0)) ** 0.5
+                vpk = max((float(np.linalg.norm(ego.eval(s)[1]))
+                           for s in np.linspace(0.0, min(ego_dur, EGO_TAU_TRUST), 6)), default=1e-3)
+                g_raw = float(np.clip(v_allow / max(vpk, 1e-3), FOV_GMIN, 1.0))
+                ego_speed_g = g_raw if g_raw < ego_g_prev else min(g_raw, ego_g_prev + EGO_G_RELEASE)  # brake fast, release slow
+                ego_g_prev = ego_speed_g
+                if ego_speed_g >= 0.999:
+                    ego_n_cert += 1
+                else:
+                    ego_n_slow += 1                          # slowing to stay inside the perceived free distance
+            elif args.maneuver and ego_dur > 1e-3:
+                # CCF yield-behind warp: ego_maneuver_replan returns the fastest certified speed on the COMMITTED side
+                # (1.0 unless it is slowing behind a crosser to HOLD the side instead of switching). Brake fast, release slow.
+                g_raw = float(man_g)
+                ego_speed_g = g_raw if g_raw < ego_g_prev else min(g_raw, ego_g_prev + EGO_G_RELEASE)
+                ego_g_prev = ego_speed_g
+                if ego_speed_g >= 0.999:
+                    ego_n_cert += 1
+                else:
+                    ego_hold_class = "yield"; ego_n_slow += 1
         elif native is not None:
             # NATIVE MIT-ACL SANDO: feed state + depth-FOV occupancy + analytic DynTraj, then replan
             # (heat-A* global -> DecompUtil safe-flight-corridor -> GUROBI local).
@@ -1422,7 +1723,15 @@ while not quit_now:
             man_counts[man_kind] = man_counts.get(man_kind, 0) + 1
             if _prev_mk is not None and man_kind != _prev_mk:
                 man_switches += 1                           # maneuver-kind change = a brake/re-accel (the "flicker")
+                _ar = ("around_l", "around_r")
+                if _prev_mk in _ar and man_kind in _ar:
+                    _sw_lr += 1                              # L<->R flip = the WASTEFUL thrash CCF targets
+                elif ("straight" in (_prev_mk, man_kind)) and (_prev_mk in _ar or man_kind in _ar):
+                    _sw_sa += 1                              # straight<->around = FUNCTIONAL (return-to-goal progress)
+                else:
+                    _sw_oth += 1                             # involves over/climb/hold
             _prev_mk = man_kind
+        _sp_hist.append(float(np.hypot(quad.v[0], quad.v[1])))   # flown horizontal speed (thrash cost: jerk + reversals)
         for a in animals: a.update(t)
         # advance through the random waypoints (don't stop at intermediate ones)
         if wp_i < len(wp) - 1 and np.linalg.norm(p_d[:2] - wp[wp_i][:2]) < 3.5:
@@ -1451,7 +1760,10 @@ while not quit_now:
             off = min(((cl, c3, sz) for (cl, c3, sz) in fed if cl == hit_cls),
                       key=lambda e: (np.linalg.norm((p_d - e[1])[:2]) - 0.5 * max(e[2][0], e[2][1])))
             ocls, oc3, osz = off
-            mv = next(((oid, mc3, mvel, r_obs, ds) for (oid, mc3, mvel, r_obs, ds) in kf_movers(p_d, t)
+            # attribute against the SAME forward cone the planner/cert actually used (cam_heading=quad.yaw), NOT the
+            # omniscient 30 m SENSE_R gate -- otherwise an out-of-cone offender still shows up here and gets mislabeled
+            # as a benign small-KF-error instead of the true "never seen / outran the cone" cause (colldbg-masks-cone-blindness).
+            mv = next(((oid, mc3, mvel, r_obs, ds) for (oid, mc3, mvel, r_obs, ds) in kf_movers(p_d, t, cam_heading=float(quad.yaw))
                        if np.linalg.norm((np.asarray(mc3)[:2] - np.asarray(oc3)[:2])) < 1.5), None)
             print(f"\n[COLLDBG] t={t:.2f}s class={hit_cls} clr={per[hit_cls]:+.3f}m", flush=True)
             print(f"[COLLDBG] drone p={np.round(p_d,2)} v=({v_d[0]:.2f},{v_d[1]:.2f},{v_d[2]:.2f}) |v|={np.linalg.norm(v_d):.2f}", flush=True)
@@ -1514,10 +1826,16 @@ while not quit_now:
         if final_close and (sando is None or sando.get_drone_status() == GOAL_REACHED):
             reached = True
     t_goal = t if reached else float("inf")
+    _sp = np.asarray(_sp_hist, float)                                                        # thrash COST metrics:
+    _rms_jerk = float(np.sqrt(np.mean(np.square(np.diff(_sp, 2))))) / (REPLAN_DT ** 2) if len(_sp) > 2 else 0.0
+    _dv = np.diff(_sp) if len(_sp) > 1 else np.zeros(1)
+    _revs = int(np.count_nonzero(np.diff(np.sign(_dv)))) if len(_dv) > 1 else 0             # decel<->accel reversals
+    _spvar = float(np.sum(np.abs(_dv)))                                                      # total speed churn (energy proxy)
     print(f"[3dv] lap done. reached={reached} t_goal={t_goal:.1f}s collided={mclr < 0} min_clr={mclr:.3f}m  "
           + "  ".join(f"{k}:{v:.2f}" for k, v in sorted(per_all.items()))
           + (f"  seam_bias_max={seam_bias_max:.3f}m" if args.seam else "")
-          + (f"  maneuver[switches={man_switches} " + " ".join(f"{k}:{v}" for k, v in sorted(man_counts.items())) + "]"
+          + (f"  maneuver[switches={man_switches}(lr{_sw_lr}/sa{_sw_sa}/oth{_sw_oth}) jerk={_rms_jerk:.2f} revs={_revs} "
+             f"spchurn={_spvar:.1f} " + " ".join(f"{k}:{v}" for k, v in sorted(man_counts.items())) + "]"
              if args.maneuver else "")
           + (f"  egosafe[cert={ego_n_cert} brake={ego_n_slow} hold={ego_n_hold}]" if (args.ego and args.ego_safe) else ""), flush=True)
     if os.environ.get("TREE_DBG") == "1" and _min_static[1] is not None:

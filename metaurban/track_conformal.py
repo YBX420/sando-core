@@ -22,7 +22,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 # render_3d_video.py writes the harvest under metaurban/out/ (_HERE-relative); keep the calib alongside it.
 TRACKDIR = os.path.join(HERE, "out", "conformal", "track")
 OUT = os.path.join(HERE, "out", "conformal", "track_calib.json")
-EPS_LIST = [0.20, 0.10, 0.05]
+EPS_LIST = [0.20, 0.10, 0.05, 0.01]
 RNG = np.random.default_rng(7)
 
 
@@ -88,19 +88,43 @@ def main():
     cal_scores = np.array([episode_score(eps_data[i]) for i in cal_i])
     test_scores = np.array([episode_score(eps_data[i]) for i in test_i]) if len(test_i) else cal_scores
 
+    # --- DEPLOYABLE margin delta_track. The CORRECT exchangeable unit for a PER-FLIGHT collision-freedom guarantee is
+    # the EPISODE, not the commit-window: windows within one flight share the same quad + maneuver, so they are strongly
+    # autocorrelated, NOT exchangeable. delta_track_flight(eps) = (1-eps) split-conformal quantile of the per-EPISODE-MAX
+    # raw tracking error |flown - planned| over the cal episodes (n~99), validated on held-out episodes. This is the
+    # number wired into the cert keep-out. (The per-WINDOW quantile -- shown for reference as delta_track_window_m -- is
+    # ~10x smaller because the window pool inflates effective n ~100x; it gives only marginal-over-windows coverage and
+    # at deploy ~30% of FLIGHTS breach it, so it is NOT a valid per-flight margin. Code-review 2026-06-27 critical fix.)
+    def episode_maxes(idxs):
+        return np.array([float(eps_data[i][:, 1].max()) for i in idxs])
+
+    def window_maxes(idxs):
+        out_w = []
+        for i in idxs:
+            d = eps_data[i]; w, de = d[:, 0], d[:, 1]
+            out_w += [float(de[w == ww].max()) for ww in np.unique(w)]
+        return np.array(out_w)
+    cal_em, test_em = episode_maxes(cal_i), (episode_maxes(test_i) if len(test_i) else episode_maxes(cal_i))
+    cal_wm, test_wm = window_maxes(cal_i), (window_maxes(test_i) if len(test_i) else window_maxes(cal_i))
+
     out = {"shape": {"c0": float(c[0]), "c1": float(c[1]), "c2": float(c[2])},
-           "a_env": A_ENV, "clamp_rate": clamp_rate,
-           "n_episodes": n, "n_substeps": int(len(allrows)), "levels": {}}
-    print(f"\n{'eps':>5} {'kappa':>8} {'tube_med(m)':>12} {'test_cov':>9}")
+           "a_env": A_ENV, "clamp_rate": clamp_rate, "unit": "episode (per-flight; exchangeable)",
+           "n_episodes": n, "n_episodes_cal": int(len(cal_em)), "n_episodes_test": int(len(test_em)),
+           "n_substeps": int(len(allrows)), "n_windows_cal": int(len(cal_wm)), "levels": {}}
+    print(f"\n{'eps':>5} | {'delta_track(FLIGHT)':>19} {'flight_cov':>10} | {'delta_window':>12} {'win_cov':>8}")
     for eps in EPS_LIST:
-        m = len(cal_scores); rank = int(np.ceil((m + 1) * (1 - eps)))
-        kappa = float(np.sort(cal_scores)[min(rank, m) - 1]) if rank <= m else float("inf")
-        cov = float(np.mean(test_scores <= kappa)) if np.isfinite(kappa) else 1.0
-        # representative tube size = kappa * median g over all sub-steps
-        tube_med = kappa * float(np.median(g_of(na, lat)))
-        out["levels"][str(eps)] = {"kappa": kappa, "tube_med_m": tube_med, "test_coverage": cov,
-                                   "target": 1 - eps, "rank": rank, "n_cal": m}
-        print(f"{eps:>5} {kappa:>8.3f} {tube_med:>12.3f} {cov:>9.3f}")
+        # PER-FLIGHT (episode) conformal quantile with finite-sample (m+1) correction -> the deployed margin
+        me = len(cal_em); rke = min(int(np.ceil((me + 1) * (1 - eps))), me)
+        delta_flight = float(np.sort(cal_em)[rke - 1])
+        flight_cov = float(np.mean(test_em <= delta_flight))
+        # per-window (reference only; NOT per-flight valid)
+        mw = len(cal_wm); rkw = min(int(np.ceil((mw + 1) * (1 - eps))), mw)
+        delta_window = float(np.sort(cal_wm)[rkw - 1])
+        win_cov = float(np.mean(test_wm <= delta_window))
+        out["levels"][str(eps)] = {"delta_track_m": delta_flight, "flight_coverage": flight_cov,
+                                   "delta_track_window_m": delta_window, "window_coverage": win_cov,
+                                   "target": 1 - eps, "n_cal_episodes": me}
+        print(f"{eps:>5} | {delta_flight:>19.3f} {flight_cov:>10.3f} | {delta_window:>12.3f} {win_cov:>8.3f}")
 
     json.dump(out, open(OUT, "w"), indent=2)
     print(f"\n[track] wrote {OUT}")

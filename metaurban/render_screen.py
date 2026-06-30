@@ -55,7 +55,11 @@ def run_one(seed, mode, tmax):
     pc = {c: float(m.group(1)) for c in ("pedestrian", "vehicle", "animal", "static")
           for m in [re.search(rf"{c}:(-?[0-9.]+)", line)] if m}
     hit = lambda c: bool(c in pc and pc[c] < -1e-6)
-    return dict(seed=seed, mode=mode, reached=reached, collided=coll, min_clr=clr, astar_fail=af, t_goal=tg,
+    # DNF = no lap-done line at all (subprocess timed out / crashed mid-run, e.g. astar-spam stuck). Report it
+    # EXPLICITLY as a failure rather than silently folding it into 'non-reach' -> the safe-completion denominator
+    # stays the full attempted set and a stuck/timed-out run is never miscounted as a safe outcome.
+    dnf = (line == "")
+    return dict(seed=seed, mode=mode, reached=reached, collided=coll, min_clr=clr, astar_fail=af, t_goal=tg, dnf=dnf,
                 hit_ped=hit("pedestrian"), hit_veh=hit("vehicle"), hit_animal=hit("animal"), hit_static=hit("static"),
                 ped_clr=("" if "pedestrian" not in pc else f"{pc['pedestrian']:.3f}"),
                 veh_clr=("" if "vehicle" not in pc else f"{pc['vehicle']:.3f}"),
@@ -80,7 +84,7 @@ def main():
             print(f"[screen] {i}/{len(jobs)}  seed={r['seed']} {r['mode']:5} "
                   f"reach={r['reached']} coll={r['collided']} clr={r['min_clr']} astar={r['astar_fail']}", flush=True)
 
-    fields = ["seed", "mode", "reached", "collided", "hit_ped", "hit_veh", "hit_animal", "hit_static",
+    fields = ["seed", "mode", "reached", "collided", "dnf", "hit_ped", "hit_veh", "hit_animal", "hit_static",
               "min_clr", "ped_clr", "veh_clr", "animal_clr", "static_clr", "astar_fail", "t_goal"]
     rows.sort(key=lambda r: (r["seed"], r["mode"]))
     with open(CSV, "w", newline="") as f:
@@ -92,13 +96,16 @@ def main():
         by[r["seed"]][r["mode"]] = r
     tf = lambda x: str(x).strip().lower() == "true"
     n = sum(1 for d in by.values() if "ours" in d and "ego" in d)
-    print(f"[screen] {n} seeds (crash=stop semantics). 碰撞按类型拆开:撞人/撞车/撞动物(mover)+ 坠机(static):")
-    print(f"           {'':6} {'安全到达':>8} {'撞人':>5} {'撞车':>5} {'撞动物':>6} {'坠机':>6}")
+    print(f"[screen] {n} seeds (crash=stop). 安全到达 = reached & not collided & not DNF; DNF = no lap-done (stuck/timeout):")
+    print(f"           {'':6} {'安全到达':>8} {'撞人':>5} {'撞车':>5} {'撞动物':>6} {'坠机':>6} {'DNF':>5}")
     for who in ("ours", "ego"):
         col = lambda k: sum(tf(by[s][who].get(k, "")) for s in by if who in by[s])
-        re_ = sum(tf(by[s][who]["reached"]) for s in by if who in by[s])
-        print(f"           {who:6} {re_:>5}/{n:<3} {col('hit_ped'):>5} {col('hit_veh'):>5} "
-              f"{col('hit_animal'):>6} {col('hit_static'):>6}")
+        dnf = sum(1 for s in by if who in by[s] and tf(by[s][who].get("dnf", "")))
+        # safe-completion: reached AND not collided AND not DNF -> a stuck/timed-out run is never counted safe
+        safe = sum(1 for s in by if who in by[s] and tf(by[s][who]["reached"])
+                   and not tf(by[s][who]["collided"]) and not tf(by[s][who].get("dnf", "")))
+        print(f"           {who:6} {safe:>5}/{n:<3} {col('hit_ped'):>5} {col('hit_veh'):>5} "
+              f"{col('hit_animal'):>6} {col('hit_static'):>6} {dnf:>5}")
     print("[screen] done", flush=True)
 
 

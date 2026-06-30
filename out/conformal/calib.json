@@ -710,5 +710,152 @@
         }
       }
     }
+  },
+  "age_eps": 0.05,
+  "age_buckets": [
+    [
+      0,
+      3
+    ],
+    [
+      4,
+      6
+    ],
+    [
+      7,
+      12
+    ],
+    [
+      13,
+      null
+    ]
+  ],
+  "age_coverage": {
+    "all": [
+      {
+        "age_lo": 0,
+        "age_hi": 3,
+        "n_test": 11136,
+        "cov_global_q": 0.8322,
+        "q_global": 0.1114,
+        "cov_per_age_q": 0.9671,
+        "q_per_age": -0.314,
+        "v_per_age": 2.3689
+      },
+      {
+        "age_lo": 4,
+        "age_hi": 6,
+        "n_test": 16704,
+        "cov_global_q": 0.8778,
+        "q_global": 0.1114,
+        "cov_per_age_q": 0.9638,
+        "q_per_age": -0.107,
+        "v_per_age": 1.5064
+      },
+      {
+        "age_lo": 7,
+        "age_hi": 12,
+        "n_test": 33408,
+        "cov_global_q": 0.9433,
+        "q_global": 0.1114,
+        "cov_per_age_q": 0.9561,
+        "q_per_age": 0.0832,
+        "v_per_age": 0.7708
+      },
+      {
+        "age_lo": 13,
+        "age_hi": null,
+        "n_test": 946452,
+        "cov_global_q": 0.9567,
+        "q_global": 0.1114,
+        "cov_per_age_q": 0.9538,
+        "q_per_age": 0.1146,
+        "v_per_age": 0.6531
+      }
+    ],
+    "pedestrian": [
+      {
+        "age_lo": 0,
+        "age_hi": 3,
+        "n_test": 9324,
+        "cov_global_q": 0.9233,
+        "q_global": 0.1251,
+        "cov_per_age_q": 0.9438,
+        "q_per_age": 0.1319,
+        "v_per_age": 0.6569
+      },
+      {
+        "age_lo": 4,
+        "age_hi": 6,
+        "n_test": 13986,
+        "cov_global_q": 0.9344,
+        "q_global": 0.1251,
+        "cov_per_age_q": 0.9557,
+        "q_per_age": 0.1325,
+        "v_per_age": 0.659
+      },
+      {
+        "age_lo": 7,
+        "age_hi": 12,
+        "n_test": 27972,
+        "cov_global_q": 0.9516,
+        "q_global": 0.1251,
+        "cov_per_age_q": 0.9433,
+        "q_per_age": 0.127,
+        "v_per_age": 0.5873
+      },
+      {
+        "age_lo": 13,
+        "age_hi": null,
+        "n_test": 867132,
+        "cov_global_q": 0.9531,
+        "q_global": 0.1251,
+        "cov_per_age_q": 0.9526,
+        "q_per_age": 0.1249,
+        "v_per_age": 0.6114
+      }
+    ],
+    "vehicle": [
+      {
+        "age_lo": 0,
+        "age_hi": 3,
+        "n_test": 1812,
+        "cov_global_q": 0.5276,
+        "q_global": -0.1184,
+        "cov_per_age_q": 0.9834,
+        "q_per_age": -0.305,
+        "v_per_age": 2.9156
+      },
+      {
+        "age_lo": 4,
+        "age_hi": 6,
+        "n_test": 2718,
+        "cov_global_q": 0.8547,
+        "q_global": -0.1184,
+        "cov_per_age_q": 0.9684,
+        "q_per_age": -0.2471,
+        "v_per_age": 2.1945
+      },
+      {
+        "age_lo": 7,
+        "age_hi": 12,
+        "n_test": 5436,
+        "cov_global_q": 0.9682,
+        "q_global": -0.1184,
+        "cov_per_age_q": 0.9566,
+        "q_per_age": -0.0378,
+        "v_per_age": 1.356
+      },
+      {
+        "age_lo": 13,
+        "age_hi": null,
+        "n_test": 79320,
+        "cov_global_q": 0.9776,
+        "q_global": -0.1184,
+        "cov_per_age_q": 0.9634,
+        "q_per_age": -0.0168,
+        "v_per_age": 1.199
+      }
+    ]
   }
 }

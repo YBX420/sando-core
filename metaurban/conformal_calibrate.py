@@ -40,6 +40,8 @@ DELTA = DT_CTRL          # perception->commit latency already accrued at tau=0
 DELTAS = np.array([0.30, 0.45, 0.60, 0.75, 0.90, 1.05])
 EPS_LEVELS = [0.20, 0.10, 0.05, 0.01]
 CAL_FRAC = 0.6           # fraction of tracks used for calibration (rest = test)
+AGE_BUCKETS = [(0, 3), (4, 6), (7, 12), (13, 10**9)]   # KF-update-count buckets for AGE-CONDITIONAL coverage
+AGE_EPS = 0.05                                          # headline eps for the age-conditional under-coverage analysis
 # deployed motion model for the predicted centre (predictor_compare.py: CV roughly HALVES the pedestrian
 # keep-out vs CA at the same coverage, because CA's noisy accel extrapolation overshoots jerky pedestrians).
 PRED_MODEL = os.environ.get("PRED_MODEL", "cv")
@@ -56,7 +58,8 @@ def _interp_xy(t_track, xy_track, t_query):
 
 
 def residuals_for_track(mover, rng):
-    """Run the deployed KF on noisy detections at DT_CTRL cadence; return list of (Delta, residual) pairs."""
+    """Run the deployed KF on noisy detections at DT_CTRL cadence; return list of (Delta, residual, age) triples
+    where age = trk.n (KF updates since acquisition, at the time of the prediction) -> age-conditional coverage."""
     t_tr = np.asarray(mover["t"], float)
     xy_tr = np.asarray(mover["xy"], float)
     t0, t1 = float(t_tr[0]), float(t_tr[-1])
@@ -75,7 +78,7 @@ def residuals_for_track(mover, rng):
             if true_future is None:
                 continue
             pred = trk.predict([d], model=PRED_MODEL)[0, :2]
-            out.append((float(d), float(np.linalg.norm(true_future - pred))))
+            out.append((float(d), float(np.linalg.norm(true_future - pred)), int(trk.n)))
     return out
 
 
@@ -131,6 +134,38 @@ def calibrate(cal, test, deltas):
     return levels
 
 
+def age_coverage(data, deltas, glob_q0, glob_slope, eps):
+    """data = list of (Delta, residual, age, is_cal). Per AGE bucket, report TEST coverage under (a) the GLOBAL tube
+    (glob_q0 + glob_slope*Delta) -- which exposes the conditional UNDER-coverage of young tracks -- and (b) a tube
+    RE-CALIBRATED within that age bucket (the age-decaying q_late fix that restores >= 1-eps). Split BY TRACK upstream,
+    so cal/test stay exchangeable inside each bucket."""
+    rows = []
+    for (lo, hi) in AGE_BUCKETS:
+        cal_b = {float(d): [] for d in deltas}; test_b = {float(d): [] for d in deltas}
+        for (d, e, age, is_cal) in data:
+            if lo <= age <= hi:
+                (cal_b if is_cal else test_b)[float(d)].append(e)
+
+        def _cov(q0, slope):
+            num = den = 0
+            for d in deltas:
+                sc = np.asarray(test_b[float(d)], float)
+                if not len(sc):
+                    continue
+                num += int(np.sum(sc <= (q0 + slope * float(d)) + 1e-12)); den += len(sc)
+            return (num / den, den) if den else (None, 0)
+
+        cov_g, n_test = _cov(glob_q0, glob_slope)
+        qhat = [conformal_quantile(cal_b[float(d)], eps) for d in deltas]
+        aq0, aslope = fit_affine_envelope(deltas, qhat)
+        cov_a, _ = _cov(aq0, aslope)
+        rows.append(dict(age_lo=lo, age_hi=(hi if hi < 10**8 else None), n_test=n_test,
+                         cov_global_q=(round(cov_g, 4) if cov_g is not None else None), q_global=round(glob_q0, 4),
+                         cov_per_age_q=(round(cov_a, 4) if cov_a is not None else None),
+                         q_per_age=round(aq0, 4), v_per_age=round(aslope, 4)))
+    return rows
+
+
 def main():
     files = sorted(glob.glob(os.path.join(OUTDIR, "traj_seed*.npz")))
     if not files:
@@ -156,13 +191,16 @@ def main():
 
     rng = np.random.default_rng(2026)
     n_inst = {"all": [0, 0]}
+    age_data = {}   # group -> list of (Delta, residual, age, is_cal) for the age-conditional coverage analysis
     for i, m in enumerate(tracks):
         is_cal = i in cal_idx
         cls = str(m["cls"])
         pairs = residuals_for_track(m, rng)
-        for d, e in pairs:
+        for d, e, age in pairs:
             _bucket("all", d, e, is_cal)
             _bucket(cls, d, e, is_cal)
+            age_data.setdefault("all", []).append((d, e, age, is_cal))
+            age_data.setdefault(cls, []).append((d, e, age, is_cal))
         n_inst["all"][0 if is_cal else 1] += len(pairs)
         n_inst.setdefault(cls, [0, 0])[0 if is_cal else 1] += len(pairs)
 
@@ -187,6 +225,27 @@ def main():
             lv = report["groups"][group]["levels"][str(eps)]
             print(f"[calib]   eps={eps:.2f} (target {1-eps:.2f}): q_conformal={lv['q_conformal']:+.3f} m  "
                   f"v_eff={lv['v_eff']:.3f} m/s  -> TEST coverage={lv['test_marginal_coverage']:.4f}", flush=True)
+
+    # AGE-CONDITIONAL coverage: split-conformal guarantees only MARGINAL coverage. Conditioned on KF track-age, the
+    # single global tube UNDER-covers YOUNG tracks (worst velocity estimate just after acquisition) -> the cert's
+    # "P(collision) <= eps" is NOT actually true for fresh tracks today. Show the gap, and that re-calibrating q
+    # WITHIN each age bucket (an age-decaying q_late) restores >= 1-eps coverage at every age.
+    report["age_eps"] = AGE_EPS
+    report["age_buckets"] = [[lo, (hi if hi < 10**8 else None)] for (lo, hi) in AGE_BUCKETS]
+    report["age_coverage"] = {}
+    for group in [g for g in ("all", "pedestrian", "vehicle") if g in age_data]:
+        glv = report["groups"][group]["levels"][str(AGE_EPS)]
+        rows = age_coverage(age_data[group], DELTAS, glv["q_conformal"], glv["v_eff"], AGE_EPS)
+        report["age_coverage"][group] = rows
+        print(f"[calib] === AGE-CONDITIONAL coverage  group '{group}'  (target {1-AGE_EPS:.2f}, eps={AGE_EPS}) ===", flush=True)
+        print(f"[calib]   age(KF upd)   n_test   cov@GLOBAL-q   cov@PER-AGE-q    q_global -> q_per_age", flush=True)
+        for r in rows:
+            hi = "+" if r["age_hi"] is None else str(r["age_hi"])
+            cg = f"{r['cov_global_q']:.4f}" if r["cov_global_q"] is not None else "   -   "
+            ca = f"{r['cov_per_age_q']:.4f}" if r["cov_per_age_q"] is not None else "   -   "
+            flag = " <-- UNDER" if (r["cov_global_q"] is not None and r["cov_global_q"] < 1 - AGE_EPS - 1e-9) else ""
+            print(f"[calib]   {r['age_lo']:>2}-{hi:<3}       {r['n_test']:>6}     {cg}       {ca}      "
+                  f"{r['q_global']:.3f} -> {r['q_per_age']:.3f}{flag}", flush=True)
 
     os.makedirs(OUTDIR, exist_ok=True)
     with open(os.path.join(OUTDIR, "calib.json"), "w") as f:

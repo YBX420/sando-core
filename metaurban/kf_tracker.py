@@ -38,6 +38,15 @@ class _AxisCAKalman:
         K = (P @ self.H) / S                                            # gain
         self.x = x + K * y; self.P = (np.eye(3) - np.outer(K, self.H)) @ P
 
+    def coast(self):
+        """Pure time-update (NO measurement): advance the state and GROW the covariance. Used when the mover is
+        OUT of the FOV cone so the filter keeps extrapolating with rising uncertainty instead of FREEZING at the
+        last detection. Exactly one coast-or-update per tick keeps the dt bookkeeping correct, so on re-acquisition
+        the innovation is small (no stale single-dt jump after k missed ticks)."""
+        if self.x is None:
+            return
+        self.x = self.F @ self.x; self.P = self.F @ self.P @ self.F.T + self.Q
+
 
 class MoverTracker:
     """One CA-Kalman track for a single mover. Feed noisy detections; read back the certificate's
@@ -49,10 +58,27 @@ class MoverTracker:
         self.z = None                                        # z held constant (people don't fly)
         self.a_max = float(a_max)                            # clamp filtered accel (KF a is noisy at long t)
         self.n = 0
+        self.miss = 0                                        # consecutive ticks COASTED with no detection (out of FOV)
+        self.r_obs = 0.0                                     # last-seen body radius (stashed so out-of-cone memory needs no GT)
+        self.d_safe = 0.0                                    # last-seen per-class standoff (ditto)
 
     def update(self, det_xyz):
         det = np.asarray(det_xyz, float)
         self.fx.update(det[0]); self.fy.update(det[1]); self.z = float(det[2]); self.n += 1
+        self.miss = 0                                        # detected this tick -> reset the out-of-FOV miss counter
+
+    def coast(self):
+        """Out-of-FOV time update: extrapolate both ground-plane axes one dt and GROW covariance; count the miss.
+        Centre + velocity keep moving along the last CA estimate, P inflates -> the cert's memory keep-out grows."""
+        self.fx.coast(); self.fy.coast(); self.miss += 1
+
+    @property
+    def pos_sigma(self):
+        """1-sigma horizontal position uncertainty (m) from the filter covariance: ~0 just after a detection, grows
+        while coasting -> drives the growing keep-out tube for a remembered (out-of-cone) mover."""
+        px = float(self.fx.P[0, 0]) if self.fx.P is not None else 0.0
+        py = float(self.fy.P[0, 0]) if self.fy.P is not None else 0.0
+        return float(np.sqrt(max(px, 0.0) + max(py, 0.0)))
 
     @property
     def ready(self):

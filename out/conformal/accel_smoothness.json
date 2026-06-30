@@ -1,0 +1,11 @@
+{
+  "n": 117,
+  "max_vel": 3.0,
+  "ours_speedup": 1.0,
+  "rms_jerk_ours": 11.581255106936402,
+  "rms_jerk_native": 8.15602235629871,
+  "ours_smoother_frac": 0.15384615384615385,
+  "peak_a_ours": 8.883572649572653,
+  "peak_a_native": 6.72708717948718,
+  "jerk_ratio_median": 1.3530004752082647
+}

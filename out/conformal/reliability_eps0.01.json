@@ -1,0 +1,11 @@
+{
+  "eps": 0.01,
+  "n": 50,
+  "collisions": 0,
+  "reach": 50,
+  "collision_rate": 0.0,
+  "success_rate": 1.0,
+  "ci95_upper": 0.06,
+  "min_clr": 0.9754899444216059,
+  "failures": []
+}
