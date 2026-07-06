@@ -97,21 +97,22 @@ class Track:
         self.miss = 0
         self.trk.update([det["xy"][0], det["xy"][1], 1.5])
 
-    def predicted_xy(self):
+    def predicted_xy(self, dt=None):
         c0, v, _ = self.trk.state()
-        return np.array([c0[0] + v[0] * self.trk.fx.dt, c0[1] + v[1] * self.trk.fy.dt])
+        step = float(dt) if dt is not None else self.trk.fx.dt
+        return np.array([c0[0] + v[0] * step, c0[1] + v[1] * step])
 
-    def update(self, det):
+    def update(self, det, dt=None):
         self.cls = det["cls"]; self.r = det["r"]; self.h = det["h"]
         self.xy = np.asarray(det["xy"], float)
         self.miss = 0
-        self.trk.update([det["xy"][0], det["xy"][1], 1.5])
+        self.trk.update([det["xy"][0], det["xy"][1], 1.5], dt)
 
-    def coast(self):
+    def coast(self, dt=None):
         if self.cls == "static":                       # mapped static: frozen, no covariance growth
             self.miss += 1
             return
-        self.trk.coast(); self.miss += 1
+        self.trk.coast(dt); self.miss += 1
         c0, _, _ = self.trk.state()
         self.xy = np.asarray(c0[:2], float)
 
@@ -195,27 +196,31 @@ class PerceptionFrontEnd:
         return out
 
     # ---- track management ---------------------------------------------------
-    def step(self, p_xy, heading_xy, cylinders):
-        """One perception tick: observe + associate + update/coast/kill. Returns live tracks."""
+    def step(self, p_xy, heading_xy, cylinders, dt=None):
+        """One perception tick: observe + associate + update/coast/kill. Returns live tracks.
+        dt: actual tick duration (None = nominal cfg.dt). Proximity-triggered cadence passes the
+        sub-tick duration here so KF propagation, association look-ahead and the birth gate all
+        use the TRUE elapsed time (re-anchoring without honest dt would fake-shrink the tube)."""
         dets = self.observe(p_xy, heading_xy, cylinders)
         unmatched = list(range(len(dets)))
         # greedy NN: repeatedly take the globally closest (track, det) pair inside the gate
-        pred = {tr.id: tr.predicted_xy() for tr in self.tracks}
+        pred = {tr.id: tr.predicted_xy(dt) for tr in self.tracks}
         pairs = sorted(((float(np.hypot(*(pred[tr.id] - dets[di]["xy"]))), ti, di)
                         for ti, tr in enumerate(self.tracks) for di in unmatched), key=lambda x: x[0])
         used_t, used_d = set(), set()
         for dist, ti, di in pairs:
             # ready tracks predict their motion -> tight gate; a 1-detection track has v=0 by construction,
             # so it gets the wide birth gate (covers birth_vmax*dt) or fast movers never re-associate.
-            gate = self.cfg.gate_m if self.tracks[ti].trk.ready else getattr(self.cfg, "birth_gate",
-                                                                             self.cfg.gate_m)
+            step_dt = float(dt) if dt is not None else self.cfg.dt
+            gate = self.cfg.gate_m if self.tracks[ti].trk.ready else \
+                (self.cfg.gate_m + self.cfg.birth_vmax * step_dt)   # birth gate covers TRUE unmodelled motion
             if dist > gate or ti in used_t or di in used_d:
                 continue
-            self.tracks[ti].update(dets[di])
+            self.tracks[ti].update(dets[di], dt)
             used_t.add(ti); used_d.add(di)
         for ti, tr in enumerate(self.tracks):
             if ti not in used_t:
-                tr.coast()
+                tr.coast(dt)
         for di in range(len(dets)):
             if di not in used_d:
                 self.tracks.append(Track(dets[di], self.cfg))

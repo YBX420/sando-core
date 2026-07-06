@@ -18,52 +18,64 @@ class _AxisCAKalman:
     """Per-axis constant-acceleration Kalman filter. State x=[p, v, a]; white-jerk process noise."""
 
     def __init__(self, dt, meas_noise, q_jerk=2.0, a_prior=2.0):
-        self.dt = float(dt)
+        self.dt = float(dt)                                  # NOMINAL cadence (default when no dt passed)
+        self.q_jerk = float(q_jerk)
         self.R = float(meas_noise) ** 2
-        self.F = np.array([[1, dt, dt * dt / 2.0],
-                           [0, 1, dt],
-                           [0, 0, 1.0]])
-        self.Q = q_jerk * np.array([[dt**5 / 20, dt**4 / 8, dt**3 / 6],
-                                    [dt**4 / 8,  dt**3 / 3, dt**2 / 2],
-                                    [dt**3 / 6,  dt**2 / 2, dt]])
+        self.F, self.Q = self._mats(self.dt)                 # cached nominal-dt matrices (back-compat)
         self.H = np.array([1.0, 0.0, 0.0])
         self.x = None
         self.P = None
         self._z0 = None          # first detection, kept for two-point differencing on the second
-        self._steps = 0          # coast/update ticks since first detection (dt_eff bookkeeping across misses)
+        self._gap = 0.0          # ELAPSED coast time since first detection (dt_eff bookkeeping across
+                                 # misses; replaces the old _steps*dt count so VARIABLE-dt ticks stay exact)
         self._a_var = float(a_prior) ** 2
         self.last_nis = None     # innovation^2/S of the latest measurement update (self-check instrument)
 
-    def update(self, z):
+    def _mats(self, dt):
+        """Exact CA discretization for an arbitrary step (white-jerk Q is the exact Van Loan integral,
+        so composing three 0.1 s steps == one 0.3 s step -- variable cadence stays consistent)."""
+        F = np.array([[1, dt, dt * dt / 2.0],
+                      [0, 1, dt],
+                      [0, 0, 1.0]])
+        Q = self.q_jerk * np.array([[dt**5 / 20, dt**4 / 8, dt**3 / 6],
+                                    [dt**4 / 8,  dt**3 / 3, dt**2 / 2],
+                                    [dt**3 / 6,  dt**2 / 2, dt]])
+        return F, Q
+
+    def update(self, z, dt=None):
+        step = self.dt if dt is None else float(dt)
         if self.x is None:                                   # first detection: position only; v/a still unknown.
             # x=[z,0,0] keeps state() usable for the not-ready fallback, but the WIDE v/a variance says "unknown",
             # not "v=0" -- the old P=diag([R,1,1]) asserted a confident zero velocity, so a fast target's second
             # update arrived with NIS ~ v^2*dt^2/ (R+1e-ish) (~56 for a vehicle): an absurd prior, not information.
             self.x = np.array([z, 0.0, 0.0]); self.P = np.diag([self.R, 100.0, self._a_var])
-            self._z0 = float(z); self._steps = 0; return
+            self._z0 = float(z); self._gap = 0.0; return
         if self._z0 is not None:                             # second detection: TWO-POINT DIFFERENCING re-init
-            dte = (self._steps + 1) * self.dt                # k coasts between the two detections -> dt_eff=(k+1)dt
+            dte = self._gap + step                           # coasted time + this update's interval = dt_eff
             v0 = (z - self._z0) / dte
             self.x = np.array([z, v0, 0.0])
             self.P = np.array([[self.R,       self.R / dte,          0.0],
                                [self.R / dte, 2.0 * self.R / dte**2, 0.0],
                                [0.0,          0.0,                   self._a_var]])
             self._z0 = None; self.last_nis = None; return    # exact re-init: no meaningful innovation this tick
-        x = self.F @ self.x; P = self.F @ self.P @ self.F.T + self.Q      # predict
+        F, Q = (self.F, self.Q) if step == self.dt else self._mats(step)
+        x = F @ self.x; P = F @ self.P @ F.T + Q                          # predict
         y = z - self.H @ x; S = self.H @ P @ self.H.T + self.R           # innovation
         self.last_nis = float(y * y / S)                                 # NIS self-check (should be ~chi2_1)
         K = (P @ self.H) / S                                            # gain
         self.x = x + K * y; self.P = (np.eye(3) - np.outer(K, self.H)) @ P
 
-    def coast(self):
+    def coast(self, dt=None):
         """Pure time-update (NO measurement): advance the state and GROW the covariance. Used when the mover is
         OUT of the FOV cone so the filter keeps extrapolating with rising uncertainty instead of FREEZING at the
         last detection. Exactly one coast-or-update per tick keeps the dt bookkeeping correct, so on re-acquisition
         the innovation is small (no stale single-dt jump after k missed ticks)."""
         if self.x is None:
             return
-        self._steps += 1
-        self.x = self.F @ self.x; self.P = self.F @ self.P @ self.F.T + self.Q
+        step = self.dt if dt is None else float(dt)
+        self._gap += step
+        F, Q = (self.F, self.Q) if step == self.dt else self._mats(step)
+        self.x = F @ self.x; self.P = F @ self.P @ F.T + Q
 
 
 class MoverTracker:
@@ -80,15 +92,15 @@ class MoverTracker:
         self.r_obs = 0.0                                     # last-seen body radius (stashed so out-of-cone memory needs no GT)
         self.d_safe = 0.0                                    # last-seen per-class standoff (ditto)
 
-    def update(self, det_xyz):
+    def update(self, det_xyz, dt=None):
         det = np.asarray(det_xyz, float)
-        self.fx.update(det[0]); self.fy.update(det[1]); self.z = float(det[2]); self.n += 1
+        self.fx.update(det[0], dt); self.fy.update(det[1], dt); self.z = float(det[2]); self.n += 1
         self.miss = 0                                        # detected this tick -> reset the out-of-FOV miss counter
 
-    def coast(self):
+    def coast(self, dt=None):
         """Out-of-FOV time update: extrapolate both ground-plane axes one dt and GROW covariance; count the miss.
         Centre + velocity keep moving along the last CA estimate, P inflates -> the cert's memory keep-out grows."""
-        self.fx.coast(); self.fy.coast(); self.miss += 1
+        self.fx.coast(dt); self.fy.coast(dt); self.miss += 1
 
     @property
     def pos_sigma(self):
@@ -160,3 +172,24 @@ if __name__ == "__main__":
     print(f"[kf] fast target: v recovered = {v2[0]:.2f} (truth 8.0)  NIS trail = {np.round(nises, 2)}")
     ok2 = abs(v2[0] - 8.0) < 1.0 and (max(nises) < 9.0 if nises else False)
     print("[kf] two-point init PASS" if ok2 else "[kf] two-point init FAIL")
+
+    # VARIABLE-dt regressions (proximity-triggered cadence support, 2026-07-06):
+    # (a) default-path invariance: update(z) == update(z, dt=nominal) bit-for-bit;
+    # (b) exact composition: three 0.1 s coasts == one 0.3 s coast (white-jerk Q is the exact
+    #     discretization, so subdividing a step must not change the state OR the covariance).
+    rng = np.random.default_rng(7)
+    ta, tb = MoverTracker(dt=0.30), MoverTracker(dt=0.30)
+    true = np.array([2.0, -1.0, 1.5]); vel = np.array([1.2, 0.6, 0.0])
+    for _ in range(4):
+        z = true + rng.normal(0, 0.07, 3)
+        ta.update(z); tb.update(z, dt=0.30)
+        true = true + vel * 0.30
+    ok3 = np.allclose(ta.fx.x, tb.fx.x, atol=0) and np.allclose(ta.fx.P, tb.fx.P, atol=0)
+    print("[kf] default-path invariance PASS" if ok3 else "[kf] default-path invariance FAIL")
+    import copy as _copy
+    tc = _copy.deepcopy(ta)
+    ta.coast()                                    # one 0.3 s coast
+    for _ in range(3):
+        tc.coast(dt=0.10)                         # three 0.1 s coasts
+    ok4 = np.allclose(ta.fx.x, tc.fx.x, atol=1e-12) and np.allclose(ta.fx.P, tc.fx.P, atol=1e-12)
+    print("[kf] 3x0.1s == 1x0.3s composition PASS" if ok4 else "[kf] composition FAIL")
