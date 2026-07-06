@@ -39,3 +39,8 @@ metaurban/out/
 # KEEP the small calibrated artifacts (calib.json, ab_summary*.json, *.png)
 out/conformal/*.npz
 logs/
+
+# 2026-07-06
+weights/
+.fuse_hidden*
+*_asan.so

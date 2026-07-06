@@ -65,4 +65,4 @@ cd /media/boxuan/Data2/projects/metaurban && env DISPLAY=:1 \
 ## Git 提交署名(强制)
 - **禁止** `Co-Authored-By:` 行,**禁止**把 Claude/任何 AI 列为 co-author。
 - **禁止** "Generated with Claude Code"、"🤖" 等 AI 署名。
-- 提交/推送**只在用户明确要求时**做。
+- **积极主动 commit**(2026-07-06 塔菲大人拍板,取代旧的"只在明确要求时"):每到一个有意义的节点(新功能跑通、实验出结果、修完一个 bug)就分主题 commit,别让工作裸奔在工作区——这台机器 CPU 会硬件崩。**推送(push)仍只在明确要求时**做。

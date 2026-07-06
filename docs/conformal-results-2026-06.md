@@ -195,3 +195,14 @@ python metaurban/predictor_compare.py
 - Iterative Active-Inactive Obstacle Classification for Time-Optimal Collision Avoidance, 2024 — arXiv:2403.13474。
 - Dynamic obstacle avoidance for quadrotors with event cameras, Falanga et al.(感知极限驱动避障)。
 - 本仓库 min-time survey:`sando_py/compass_artifact_*.md`(金句:时间最优 + conformal/认证安全在动态障碍上是空白)。
+
+---
+## ⚠️ 2026-07-03 增编:本文数字的时效声明(headline 对账)
+本文以上全部数字产生于**环境冻结前**(GT 稠密感知、FOV_R=14、δ_track=0.45、旧标定、旧静态语义),
+自 2026-07-03 冻结起 **仅作历史对照,不再是可引用 headline**。权威替代:
+- 标定:`metaurban/out/conformal/calib_realistic.json`(部署在环收割,36,649 残差/240ep;
+  vehicle 组已治愈:eps=0.05 q=0.345/v_eff=3.2)+ `B_BUCKET_REPORT.md`(episode-sup vs pooled 差距);
+- 评测:`metaurban/out/scenario_runs/BENCH_FULL_*.md`(28 场景×6 臂)+ `BENCH_SPEED_SWEEP.md`;
+- 协议:`metaurban/PROTOCOL.md`。
+历史遗留数字一律以新表为准,包括:行人 age 桶 0.944(旧标定条件产物)、native 29/31 到达
+(两 harness 差异)、各处「0/120」(冻结前条件)。凡引用必须注明产生条件(PERCEPT/FOV/标定版本)。
