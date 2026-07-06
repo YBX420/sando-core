@@ -172,7 +172,10 @@ def main():
         split="by EPISODE (exchangeable unit)", pred_model=RC.PRED_MODEL,
         percept=dict(fov_deg=45, fov_range=10, sigma0=0.05, sigma_k=0.01,
                      p_miss0=0.05, p_miss_k=0.15, occlusion=True)), groups={})
-    for cls in ("all", "pedestrian", "vehicle", "animal"):
+    for cls in ("all", "pedestrian", "vehicle", "animal", "static"):
+        # static added 2026-07-07: statics were riding the MOVER tube (q0~1.05 + v_eff~1.0 for
+        # things that do not move) -> certified keep-out walls -> ground-arm timeout stalls.
+        # Their residual law is measurement/association error only; harvest rows carry cls="static".
         rows_c = data if cls == "all" else data[data["cls"] == cls]
         cal_c = cal if cls == "all" else cal[cal["cls"] == cls]
         test_c = test if cls == "all" else test[test["cls"] == cls]
