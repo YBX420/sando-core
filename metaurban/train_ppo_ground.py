@@ -14,7 +14,7 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, _HERE)
 
 from stable_baselines3 import PPO
-from stable_baselines3.common.vec_env import DummyVecEnv, VecMonitor, VecFrameStack
+from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv, VecMonitor, VecFrameStack
 from stable_baselines3.common.callbacks import CheckpointCallback
 from stable_baselines3.common.logger import configure
 
@@ -43,8 +43,9 @@ if __name__ == "__main__":
     tag = f"ppo_{variant}"
     run = time.strftime(f"out/ppo_logs/{tag}_%Y%m%d_%H%M%S")
     logger = configure(run, ["stdout", "log", "csv", "tensorboard"])
-    venv = VecFrameStack(VecMonitor(DummyVecEnv(
-        [mk(i, no_shield=args.no_shield) for i in range(args.n_envs)])), 3)
+    fns = [mk(i, no_shield=args.no_shield) for i in range(args.n_envs)]
+    vec = SubprocVecEnv(fns) if args.n_envs > 1 else DummyVecEnv(fns)   # real cores when >1
+    venv = VecFrameStack(VecMonitor(vec), 3)
     cbs = [CheckpointCallback(save_freq=max(1, args.ckpt_freq // args.n_envs),
                               save_path=f"out/ppo_ckpt_{variant}", name_prefix=tag)]
     if args.resume:
