@@ -1,0 +1,518 @@
+<title>SANDO 场景工作台</title>
+<style>
+:root{
+  --bg:#14181f; --panel:#1a202a; --inset:#10141b; --line:#2b3442; --line2:#222a36;
+  --text:#dce3ec; --mut:#8b95a5; --acc:#4cc38a;
+  --ped:#3da6ff; --veh:#ff7f2a; --ani:#c85ade; --sta:#9aa3ad;
+  --k-straight:#4cc38a; --k-around:#58a6ff; --k-over:#e8c33d; --k-climb:#f28c3a; --k-evade:#ef5350;
+  --mono:ui-monospace,"SF Mono","Cascadia Code",Consolas,Menlo,monospace;
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:14px/1.45 system-ui,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+  display:flex;flex-direction:column;overflow:hidden}
+button,select,input,textarea{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--acc);outline-offset:1px}
+
+/* ---- top bar ---- */
+#top{display:flex;align-items:center;gap:14px;padding:8px 14px;background:var(--panel);
+  border-bottom:1px solid var(--line);flex:none}
+#top .brand{font-weight:700;letter-spacing:.4px}
+#top .brand em{color:var(--acc);font-style:normal}
+#scn-name{background:var(--inset);border:1px solid var(--line);border-radius:4px;padding:4px 8px;
+  width:200px;font-family:var(--mono)}
+#transport{display:flex;align-items:center;gap:8px;margin-left:auto}
+#t-play{width:34px;height:28px;border:1px solid var(--line);border-radius:4px;background:var(--inset);cursor:pointer}
+#t-play:hover{border-color:var(--acc)}
+#t-slider{width:260px;accent-color:var(--acc)}
+#t-read{font-family:var(--mono);font-variant-numeric:tabular-nums;color:var(--acc);min-width:72px;text-align:right}
+
+/* ---- main split ---- */
+#main{display:flex;flex:1;min-height:0}
+#rail{width:52px;flex:none;background:var(--panel);border-right:1px solid var(--line);
+  display:flex;flex-direction:column;gap:4px;padding:8px 6px}
+#rail button{height:40px;border:1px solid transparent;border-radius:6px;background:none;cursor:pointer;
+  font-family:var(--mono);font-size:12px;color:var(--mut)}
+#rail button:hover{border-color:var(--line);color:var(--text)}
+#rail button.on{background:var(--inset);border-color:var(--acc);color:var(--acc)}
+#rail hr{width:70%;border:none;border-top:1px solid var(--line2);margin:4px auto}
+
+#canvas-wrap{flex:1;position:relative;min-width:0}
+#cv{position:absolute;inset:0;width:100%;height:100%;cursor:crosshair}
+#hint{position:absolute;left:10px;bottom:8px;font:12px var(--mono);color:var(--mut);
+  background:color-mix(in srgb,var(--bg) 82%,transparent);padding:3px 8px;border-radius:4px;pointer-events:none}
+#legend{position:absolute;right:10px;top:8px;display:flex;flex-direction:column;gap:3px;
+  font:11px var(--mono);color:var(--mut);background:color-mix(in srgb,var(--bg) 82%,transparent);
+  padding:6px 9px;border-radius:5px;pointer-events:none}
+#legend b{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px;vertical-align:-1px}
+
+/* ---- inspector ---- */
+#side{width:322px;flex:none;background:var(--panel);border-left:1px solid var(--line);
+  display:flex;flex-direction:column;overflow-y:auto}
+#side section{padding:10px 14px;border-bottom:1px solid var(--line2)}
+#side h3{margin:0 0 8px;font-size:11px;letter-spacing:1.2px;text-transform:uppercase;color:var(--mut)}
+.row{display:flex;align-items:center;gap:8px;margin:5px 0}
+.row label{flex:none;width:74px;color:var(--mut);font-size:12px}
+.row input[type=number],.row input[type=text],.row select{flex:1;min-width:0;background:var(--inset);
+  border:1px solid var(--line);border-radius:4px;padding:3px 7px;font-family:var(--mono);font-size:12.5px}
+.row input[type=checkbox]{accent-color:var(--acc)}
+.btns{display:flex;gap:6px;flex-wrap:wrap}
+.btns button{border:1px solid var(--line);background:var(--inset);border-radius:4px;
+  padding:5px 10px;cursor:pointer;font-size:12.5px}
+.btns button:hover{border-color:var(--acc);color:var(--acc)}
+.btns button.warn:hover{border-color:var(--k-evade);color:var(--k-evade)}
+#mover-list{display:flex;flex-direction:column;gap:3px;max-height:150px;overflow-y:auto}
+#mover-list .mv{display:flex;gap:7px;align-items:center;padding:3px 7px;border-radius:4px;cursor:pointer;
+  font:12px var(--mono)}
+#mover-list .mv:hover{background:var(--inset)}
+#mover-list .mv.on{background:var(--inset);box-shadow:inset 0 0 0 1px var(--acc)}
+#mover-list .dot{width:9px;height:9px;border-radius:50%;flex:none}
+textarea{width:100%;height:110px;background:var(--inset);border:1px solid var(--line);border-radius:4px;
+  padding:6px;font:11.5px var(--mono);resize:vertical}
+#status{flex:none;padding:5px 14px;background:var(--panel);border-top:1px solid var(--line);
+  font:12px var(--mono);color:var(--mut);display:flex;gap:18px}
+#status .ok{color:var(--acc)} #status .err{color:var(--k-evade)}
+.small{font-size:11px;color:var(--mut)}
+</style>
+
+<div id="top">
+  <span class="brand">SANDO <em>场景工作台</em></span>
+  <input id="scn-name" title="场景名" value="untitled">
+  <span class="small">地图 seed3 · 8px/m</span>
+  <div id="transport">
+    <button id="t-play" title="播放/暂停 (空格)">▶</button>
+    <input id="t-slider" type="range" min="0" max="300" value="0">
+    <span id="t-read">0.0 s</span>
+  </div>
+</div>
+
+<div id="main">
+  <div id="rail">
+    <button data-mode="select" class="on" title="选择/拖动;选中 mover 后点击=加路点">SEL</button>
+    <button data-mode="start" title="放无人机起点">S</button>
+    <button data-mode="goal"  title="放无人机落点">G</button>
+    <button data-mode="dwp"   title="加无人机路径点">WP</button>
+    <hr>
+    <button data-mode="ped"     title="新行人" style="color:var(--ped)">PED</button>
+    <button data-mode="vehicle" title="新载具" style="color:var(--veh)">VEH</button>
+    <button data-mode="animal"  title="新动物" style="color:var(--ani)">ANI</button>
+    <button data-mode="static"  title="新静态障碍" style="color:var(--sta)">OBS</button>
+  </div>
+
+  <div id="canvas-wrap">
+    <canvas id="cv"></canvas>
+    <div id="legend">
+      <span><b style="background:var(--ped)"></b>行人 <b style="background:var(--veh);margin-left:8px"></b>载具
+            <b style="background:var(--ani);margin-left:8px"></b>动物 <b style="background:var(--sta);margin-left:8px"></b>静态</span>
+      <span><b style="background:var(--k-straight)"></b>straight <b style="background:var(--k-around);margin-left:8px"></b>around
+            <b style="background:var(--k-over);margin-left:8px"></b>over</span>
+      <span><b style="background:var(--k-climb)"></b>climb <b style="background:var(--k-evade);margin-left:8px"></b>evade</span>
+    </div>
+    <div id="hint">左键 放置/拖动 · 右键拖 平移 · 滚轮 缩放 · Delete 删点 · Esc 取消选中</div>
+  </div>
+
+  <div id="side">
+    <section>
+      <h3>无人机</h3>
+      <div class="row"><label>起点</label><input type="number" id="d-sx" step="0.5"><input type="number" id="d-sy" step="0.5"></div>
+      <div class="row"><label>落点</label><input type="number" id="d-gx" step="0.5"><input type="number" id="d-gy" step="0.5"></div>
+      <div class="row"><label>巡航高</label><input type="number" id="d-cz" step="0.1"><label style="width:52px">max_vel</label><input type="number" id="d-mv" step="0.5"></div>
+      <div class="row"><label>t_max</label><input type="number" id="d-tmax" step="1"><span class="small" id="d-wp-n"></span></div>
+    </section>
+
+    <section>
+      <h3>Movers</h3>
+      <div id="mover-list"></div>
+      <div id="mv-edit" style="display:none">
+        <div class="row"><label>类别</label><select id="m-cls"><option>pedestrian</option><option>vehicle</option><option>animal</option></select></div>
+        <div class="row"><label>asset</label><input type="text" id="m-asset" placeholder="(默认)"></div>
+        <div class="row"><label>出生 t</label><input type="number" id="m-spawn" step="0.2" min="0"></div>
+        <div class="row"><label>速度型</label><select id="m-sptype"><option value="const">恒速</option><option value="accel">加速 v0→v1@a</option></select></div>
+        <div class="row" id="m-row-v"><label>v</label><input type="number" id="m-v" step="0.2" min="0"></div>
+        <div class="row" id="m-row-prof" style="display:none">
+          <label>v0/v1/a</label>
+          <input type="number" id="m-v0" step="0.5" min="0"><input type="number" id="m-v1" step="0.5" min="0"><input type="number" id="m-a" step="0.2" min="0.1">
+        </div>
+        <div class="row"><label>到终点后</label><input type="checkbox" id="m-hold"><span class="small">停留(否则消失)</span></div>
+        <div class="btns"><button id="m-del-wp" class="warn">删末路点</button><button id="m-del" class="warn">删除 mover</button></div>
+      </div>
+      <div id="st-edit" style="display:none">
+        <div class="row"><label>半径 r</label><input type="number" id="s-r" step="0.05" min="0.1"></div>
+        <div class="row"><label>高 h</label><input type="number" id="s-h" step="0.2" min="0.5"></div>
+        <div class="btns"><button id="s-del" class="warn">删除障碍</button></div>
+      </div>
+    </section>
+
+    <section>
+      <h3>回放叠加</h3>
+      <div class="btns">
+        <button id="rp-load">导入 hist JSON</button>
+        <button id="rp-clear">清除</button>
+      </div>
+      <div class="small" id="rp-info" style="margin-top:6px">导入 out/scenario_runs/*_hist.json 后,实飞轨迹按决策着色叠加,拖时间轴联动。</div>
+      <input type="file" id="rp-file" accept=".json" hidden>
+    </section>
+
+    <section>
+      <h3>场景 JSON</h3>
+      <div class="btns">
+        <button id="io-export">下载</button>
+        <button id="io-import">导入文件</button>
+        <button id="io-apply">应用下方文本</button>
+      </div>
+      <input type="file" id="io-file" accept=".json" hidden>
+      <textarea id="io-text" spellcheck="false" placeholder='粘贴 sando-scenario-v1 JSON,点"应用下方文本"'></textarea>
+      <div class="small" style="margin-top:4px">评测:<code>python run_scenario.py scenarios/&lt;名&gt;.json</code> · 3D:<code>run_scenario_3d.py --live/--mp4</code></div>
+    </section>
+  </div>
+</div>
+
+<div id="status">
+  <span id="st-compile" class="ok">—</span>
+  <span id="st-sel">未选中</span>
+  <span id="st-cursor" style="margin-left:auto;font-variant-numeric:tabular-nums"></span>
+</div>
+
+<script>
+"use strict";
+/* ============ 数据模型(与 scenario_lib.py schema v1 完全一致) ============ */
+const DT = 0.1;
+const CLS_COLOR = {pedestrian:getCss('--ped'), vehicle:getCss('--veh'), animal:getCss('--ani'), static:getCss('--sta')};
+const KIND_COLOR = {straight:getCss('--k-straight'), around_l:getCss('--k-around'), around_r:getCss('--k-around'),
+                    over:getCss('--k-over'), climb:getCss('--k-climb'), evade:getCss('--k-evade'), hold:getCss('--k-evade')};
+function getCss(v){ return getComputedStyle(document.documentElement).getPropertyValue(v).trim(); }
+
+let scn = {
+  schema:"sando-scenario-v1", name:"untitled", description:"",
+  map:{seed:3},
+  drone:{start:[100,100,1.5], goal:[116,100,1.5], cruise_z:1.5, max_vel:3.0, max_acc:6.0},
+  statics:[], movers:[], params:{}, t_max:30.0
+};
+let sel = null;          // {kind:'mv'|'st'|'start'|'goal'|'dwp', i, j}
+let tracks = [];         // compiled
+let replay = null;       // hist array
+let simT = 0, playing = false;
+
+/* ============ 参数替换 + 编译(scenario_lib.compile_mover 的 JS 移植) ============ */
+function num(x, dflt=0){ if(typeof x==="string" && x[0]==="$"){ const p=scn.params[x.slice(1)]; return p?+p.value:dflt; } return x==null?dflt:+x; }
+function speedFun(sp){
+  if(sp && typeof sp==="object"){
+    const v0=num(sp.v0,0), v1=num(sp.v1,1), a=Math.max(1e-6,num(sp.a,1));
+    const tr=Math.abs(v1-v0)/a, sg=v1>=v0?1:-1;
+    return t => t<tr ? v0+sg*a*t : v1;
+  }
+  const v=num(sp,0); return _=>v;
+}
+function compileMover(m, tMax){
+  const path=m.path.map(p=>[+p[0],+p[1]]);
+  const spawn=num(m.spawn_t,0);
+  if(path.length===1){ return {t:[spawn,tMax], xy:[path[0],path[0]], cls:m.cls}; }
+  const cum=[0]; for(let k=1;k<path.length;k++){ cum.push(cum[k-1]+Math.hypot(path[k][0]-path[k-1][0], path[k][1]-path[k-1][1])); }
+  const total=cum[cum.length-1], vf=speedFun(m.speed), hold=m.hold_end!==false;
+  const ts=[0], ss=[0]; let t=0,s=0;
+  while(t<tMax-spawn && s<total){ s=Math.min(total, s+Math.max(0,vf(t))*DT); t+=DT; ts.push(t); ss.push(s); }
+  if(hold && t<tMax-spawn){ ts.push(tMax-spawn); ss.push(s); }
+  const xy=ss.map(sv=>{
+    let k=1; while(k<cum.length-1 && cum[k]<sv) k++;
+    const u=(cum[k]-cum[k-1])>1e-9 ? (sv-cum[k-1])/(cum[k]-cum[k-1]) : 0;
+    return [path[k-1][0]+u*(path[k][0]-path[k-1][0]), path[k-1][1]+u*(path[k][1]-path[k-1][1])];
+  });
+  return {t:ts.map(x=>x+spawn), xy, cls:m.cls};
+}
+function recompile(){
+  try{
+    const tMax=+scn.t_max||30;
+    tracks=scn.movers.map(m=>compileMover(m,tMax))
+      .concat(scn.statics.map(st=>({t:[0,tMax], xy:[st.c,st.c], cls:"static"})));
+    setStatus("st-compile", `已编译 ${tracks.length} 条轨迹 · t_max ${tMax}s`, true);
+  }catch(e){ tracks=[]; setStatus("st-compile","编译错误: "+e.message, false); }
+  slider.max = (+scn.t_max||30)*10;
+}
+function trackPos(tr, t){
+  if(t<tr.t[0] || t>tr.t[tr.t.length-1]) return null;
+  let k=1; while(k<tr.t.length-1 && tr.t[k]<t) k++;
+  const u=(tr.t[k]-tr.t[k-1])>1e-9 ? (t-tr.t[k-1])/(tr.t[k]-tr.t[k-1]) : 0;
+  return [tr.xy[k-1][0]+u*(tr.xy[k][0]-tr.xy[k-1][0]), tr.xy[k-1][1]+u*(tr.xy[k][1]-tr.xy[k-1][1])];
+}
+
+/* ============ 画布 ============ */
+const cv=document.getElementById("cv"), ctx=cv.getContext("2d");
+const view={cx:108, cy:100, z:14};      // px per metre
+const MAP={cx:112, cy:106, ppm:8, img:null};
+const mapImg=new Image(); mapImg.onload=()=>{MAP.img=mapImg; draw();};
+mapImg.src="__MAP_B64__";
+
+function w2s(x,y){ return [(x-view.cx)*view.z + cv.width/2, -(y-view.cy)*view.z + cv.height/2]; }
+function s2w(px,py){ return [(px-cv.width/2)/view.z + view.cx, -(py-cv.height/2)/view.z + view.cy]; }
+
+function draw(){
+  const W=cv.width=cv.clientWidth*devicePixelRatio, H=cv.height=cv.clientHeight*devicePixelRatio;
+  ctx.save(); ctx.scale(1,1);
+  ctx.fillStyle=getCss('--inset'); ctx.fillRect(0,0,W,H);
+  // map underlay
+  if(MAP.img){
+    const span=MAP.img.width/MAP.ppm;                    // metres covered by film
+    const tl=w2sD(MAP.cx-span/2, MAP.cy+span/2);
+    ctx.imageSmoothingEnabled=view.z<MAP.ppm;
+    ctx.drawImage(MAP.img, tl[0], tl[1], span*view.z, span*view.z);
+  }
+  // grid (5 m)
+  ctx.strokeStyle="rgba(120,140,170,.12)"; ctx.lineWidth=1;
+  const [x0,y1]=s2wD(0,0), [x1,y0]=s2wD(W,H);
+  for(let gx=Math.floor(x0/5)*5; gx<=x1; gx+=5){ const a=w2sD(gx,y0), b=w2sD(gx,y1); line(a,b); }
+  for(let gy=Math.floor(y0/5)*5; gy<=y1; gy+=5){ const a=w2sD(x0,gy), b=w2sD(x1,gy); line(a,b); }
+  // statics
+  scn.statics.forEach((st,i)=>{
+    const p=w2sD(st.c[0],st.c[1]), r=Math.max(3,(st.r||0.4)*view.z);
+    ctx.fillStyle=CLS_COLOR.static; ctx.globalAlpha=.75; disc(p,r); ctx.globalAlpha=1;
+    if(sel&&sel.kind==="st"&&sel.i===i) ring(p,r+3);
+  });
+  // movers: path + waypoints
+  scn.movers.forEach((m,i)=>{
+    const col=CLS_COLOR[m.cls]||"#ccc";
+    ctx.strokeStyle=col; ctx.lineWidth=2;
+    const pts=m.path.map(p=>w2sD(p[0],p[1]));
+    if(pts.length>1){ ctx.beginPath(); ctx.moveTo(...pts[0]); pts.slice(1).forEach(p=>ctx.lineTo(...p)); ctx.stroke(); }
+    pts.forEach((p,j)=>{
+      ctx.fillStyle=col; disc(p, j===0?5:3.5);
+      if(sel&&sel.kind==="mv"&&sel.i===i&&sel.j===j) ring(p,8);
+    });
+    if(pts.length){ ctx.fillStyle=col; ctx.font=`${11*devicePixelRatio}px ${getCss('--mono')}`;
+      ctx.fillText(mvLabel(m,i), pts[0][0]+8, pts[0][1]-8); }
+  });
+  // drone corridor
+  const d=scn.drone, wps=d.waypoints||[];
+  const route=[d.start, ...wps, d.goal].map(p=>w2sD(p[0],p[1]));
+  ctx.strokeStyle="rgba(150,160,180,.55)"; ctx.lineWidth=1.5;
+  ctx.setLineDash([6,5]); ctx.beginPath(); ctx.moveTo(...route[0]); route.slice(1).forEach(p=>ctx.lineTo(...p)); ctx.stroke(); ctx.setLineDash([]);
+  wps.forEach((p,j)=>{ const q=w2sD(p[0],p[1]); ctx.fillStyle="#7fd8e8"; disc(q,4);
+    if(sel&&sel.kind==="dwp"&&sel.i===j) ring(q,7); });
+  ctx.fillStyle=getCss('--acc'); disc(route[0],7);
+  ctx.fillStyle=getCss('--k-evade'); disc(route[route.length-1],7);
+  if(sel&&sel.kind==="start") ring(route[0],10);
+  if(sel&&sel.kind==="goal") ring(route[route.length-1],10);
+  // replay overlay
+  if(replay){
+    for(let k=1;k<replay.length;k++){
+      if(replay[k].t>simT) break;
+      ctx.strokeStyle=KIND_COLOR[replay[k].kind]||"#bbb"; ctx.lineWidth=2.5;
+      line(w2sD(replay[k-1].p[0],replay[k-1].p[1]), w2sD(replay[k].p[0],replay[k].p[1]));
+    }
+    const cur=replay.filter(h=>h.t<=simT).pop();
+    if(cur){ const p=w2sD(cur.p[0],cur.p[1]); ctx.fillStyle="#fff"; disc(p,5);
+      ctx.strokeStyle=KIND_COLOR[cur.kind]||"#bbb"; ring(p,8); }
+  }
+  // live mover positions at simT
+  tracks.forEach((tr,i)=>{
+    const p=trackPos(tr,simT); if(!p) return;
+    const col=CLS_COLOR[tr.cls]||"#ccc";
+    const rr=(i<scn.movers.length ? (scn.movers[i].r || {pedestrian:.3,vehicle:.6,animal:.4}[tr.cls] || .4)
+                                  : (scn.statics[i-scn.movers.length]?.r || .4));
+    ctx.fillStyle=col; ctx.globalAlpha=.9; disc(w2sD(p[0],p[1]), Math.max(4, rr*view.z)); ctx.globalAlpha=1;
+  });
+  ctx.restore();
+
+  function w2sD(x,y){ const s=w2s(x,y); return [s[0]*devicePixelRatio/1, s[1]*devicePixelRatio/1]; }
+  function s2wD(px,py){ return s2w(px/devicePixelRatio, py/devicePixelRatio); }
+  function line(a,b){ ctx.beginPath(); ctx.moveTo(...a); ctx.lineTo(...b); ctx.stroke(); }
+  function disc(p,r){ ctx.beginPath(); ctx.arc(p[0],p[1],r*devicePixelRatio/1,0,7); ctx.fill(); }
+  function ring(p,r){ ctx.strokeStyle="#ffe58a"; ctx.lineWidth=2; ctx.beginPath(); ctx.arc(p[0],p[1],r*devicePixelRatio/1,0,7); ctx.stroke(); }
+}
+function mvLabel(m,i){
+  const sp=m.speed && typeof m.speed==="object" ? `v${num(m.speed.v0,0)}→${num(m.speed.v1)}@a${num(m.speed.a,1)}` : `v${num(m.speed)}`;
+  return `${m.cls.slice(0,3)}${i} t${num(m.spawn_t,0).toFixed(1)} ${sp}`;
+}
+
+/* ============ 交互 ============ */
+let mode="select", drag=null, panning=false, lastMouse=null;
+document.querySelectorAll("#rail button").forEach(b=>b.addEventListener("click",()=>{
+  document.querySelectorAll("#rail button").forEach(x=>x.classList.remove("on"));
+  b.classList.add("on"); mode=b.dataset.mode;
+  if(!["select"].includes(mode)) sel=null;
+  syncPanel(); draw();
+}));
+cv.addEventListener("contextmenu",e=>e.preventDefault());
+cv.addEventListener("mousedown",e=>{
+  const r=cv.getBoundingClientRect(), mx=e.clientX-r.left, my=e.clientY-r.top;
+  if(e.button===2||e.button===1){ panning=true; lastMouse=[mx,my]; return; }
+  const [wx,wy]=s2w(mx,my);
+  const hit=pick(wx,wy);
+  if(mode==="select"){
+    if(hit){ sel=hit; drag=hit; }
+    else if(sel&&sel.kind==="mv"){ scn.movers[sel.i].path.push([rnd(wx),rnd(wy)]); sel={kind:"mv",i:sel.i,j:scn.movers[sel.i].path.length-1}; onEdit(); }
+    else sel=null;
+  }
+  else if(mode==="start"){ scn.drone.start=[rnd(wx),rnd(wy),scn.drone.start[2]??1.5]; onEdit(); }
+  else if(mode==="goal"){ scn.drone.goal=[rnd(wx),rnd(wy),scn.drone.goal[2]??1.5]; onEdit(); }
+  else if(mode==="dwp"){ (scn.drone.waypoints??=[]).push([rnd(wx),rnd(wy),+scn.drone.cruise_z||1.5]); onEdit(); }
+  else if(mode==="static"){ scn.statics.push({c:[rnd(wx),rnd(wy)],r:0.45,h:3.0}); sel={kind:"st",i:scn.statics.length-1}; setMode("select"); onEdit(); }
+  else { // ped / vehicle / animal
+    scn.movers.push({cls:mode==="ped"?"pedestrian":mode, spawn_t:0.0, path:[[rnd(wx),rnd(wy)]],
+                     speed: mode==="vehicle"?{v0:0,v1:6,a:2.5}:1.2, hold_end:true});
+    sel={kind:"mv",i:scn.movers.length-1,j:0}; setMode("select"); onEdit();
+  }
+  syncPanel(); draw();
+});
+cv.addEventListener("mousemove",e=>{
+  const r=cv.getBoundingClientRect(), mx=e.clientX-r.left, my=e.clientY-r.top;
+  const [wx,wy]=s2w(mx,my);
+  document.getElementById("st-cursor").textContent=`x ${wx.toFixed(1)}  y ${wy.toFixed(1)}  zoom ${view.z.toFixed(0)}`;
+  if(panning){ view.cx-=(mx-lastMouse[0])/view.z; view.cy+=(my-lastMouse[1])/view.z; lastMouse=[mx,my]; draw(); return; }
+  if(drag){ moveSel(drag, rnd(wx), rnd(wy)); draw(); }
+});
+addEventListener("mouseup",()=>{ if(drag){ onEdit(); } drag=null; panning=false; });
+cv.addEventListener("wheel",e=>{
+  e.preventDefault();
+  view.z=Math.min(80,Math.max(1.5, view.z*(e.deltaY<0?1.15:1/1.15))); draw();
+},{passive:false});
+addEventListener("keydown",e=>{
+  if(e.target.tagName==="INPUT"||e.target.tagName==="TEXTAREA"||e.target.tagName==="SELECT") return;
+  if(e.key===" "){ e.preventDefault(); togglePlay(); }
+  if(e.key==="Escape"){ sel=null; syncPanel(); draw(); }
+  if(e.key==="Delete"||e.key==="Backspace"){ delSelPoint(); }
+});
+function pick(wx,wy){
+  const tol=10/view.z;
+  for(let i=0;i<scn.movers.length;i++) for(let j=0;j<scn.movers[i].path.length;j++){
+    const p=scn.movers[i].path[j]; if(Math.hypot(p[0]-wx,p[1]-wy)<tol) return {kind:"mv",i,j};
+  }
+  for(let i=0;i<scn.statics.length;i++){ const p=scn.statics[i].c; if(Math.hypot(p[0]-wx,p[1]-wy)<tol) return {kind:"st",i}; }
+  const wps=scn.drone.waypoints||[];
+  for(let j=0;j<wps.length;j++){ if(Math.hypot(wps[j][0]-wx,wps[j][1]-wy)<tol) return {kind:"dwp",i:j}; }
+  if(Math.hypot(scn.drone.start[0]-wx,scn.drone.start[1]-wy)<tol) return {kind:"start"};
+  if(Math.hypot(scn.drone.goal[0]-wx,scn.drone.goal[1]-wy)<tol) return {kind:"goal"};
+  return null;
+}
+function moveSel(s,wx,wy){
+  if(s.kind==="mv") scn.movers[s.i].path[s.j]=[wx,wy];
+  else if(s.kind==="st") scn.statics[s.i].c=[wx,wy];
+  else if(s.kind==="dwp") scn.drone.waypoints[s.i]=[wx,wy,scn.drone.waypoints[s.i][2]];
+  else if(s.kind==="start") scn.drone.start=[wx,wy,scn.drone.start[2]];
+  else if(s.kind==="goal") scn.drone.goal=[wx,wy,scn.drone.goal[2]];
+}
+function delSelPoint(){
+  if(!sel) return;
+  if(sel.kind==="mv"){ const m=scn.movers[sel.i]; m.path.splice(sel.j,1);
+    if(!m.path.length){ scn.movers.splice(sel.i,1); sel=null; } else sel.j=Math.max(0,sel.j-1); }
+  else if(sel.kind==="st"){ scn.statics.splice(sel.i,1); sel=null; }
+  else if(sel.kind==="dwp"){ scn.drone.waypoints.splice(sel.i,1); sel=null; }
+  else return;
+  onEdit(); syncPanel(); draw();
+}
+function setMode(m){ document.querySelectorAll("#rail button").forEach(x=>x.classList.toggle("on",x.dataset.mode===m)); mode=m; }
+function rnd(x){ return Math.round(x*100)/100; }
+
+/* ============ 面板同步 ============ */
+const $=id=>document.getElementById(id);
+function syncPanel(){
+  $("scn-name").value=scn.name;
+  $("d-sx").value=scn.drone.start[0]; $("d-sy").value=scn.drone.start[1];
+  $("d-gx").value=scn.drone.goal[0]; $("d-gy").value=scn.drone.goal[1];
+  $("d-cz").value=scn.drone.cruise_z??1.5; $("d-mv").value=num(scn.drone.max_vel,3);
+  $("d-tmax").value=+scn.t_max||30;
+  $("d-wp-n").textContent=(scn.drone.waypoints||[]).length ? `路径点×${scn.drone.waypoints.length}(评测暂不消费)` : "";
+  const list=$("mover-list"); list.innerHTML="";
+  scn.movers.forEach((m,i)=>{
+    const el=document.createElement("div"); el.className="mv"+(sel&&sel.kind==="mv"&&sel.i===i?" on":"");
+    el.innerHTML=`<span class="dot" style="background:${CLS_COLOR[m.cls]}"></span>${mvLabel(m,i)} · ${m.path.length}pt`;
+    el.onclick=()=>{ sel={kind:"mv",i,j:m.path.length-1}; setMode("select"); syncPanel(); draw(); };
+    list.appendChild(el);
+  });
+  const mvSel = sel&&sel.kind==="mv" ? scn.movers[sel.i] : null;
+  $("mv-edit").style.display=mvSel?"":"none";
+  $("st-edit").style.display=(sel&&sel.kind==="st")?"":"none";
+  if(mvSel){
+    $("m-cls").value=mvSel.cls; $("m-asset").value=mvSel.asset||""; $("m-spawn").value=num(mvSel.spawn_t,0);
+    const prof=mvSel.speed&&typeof mvSel.speed==="object";
+    $("m-sptype").value=prof?"accel":"const";
+    $("m-row-v").style.display=prof?"none":""; $("m-row-prof").style.display=prof?"":"none";
+    if(prof){ $("m-v0").value=num(mvSel.speed.v0,0); $("m-v1").value=num(mvSel.speed.v1,1); $("m-a").value=num(mvSel.speed.a,1); }
+    else $("m-v").value=num(mvSel.speed,0);
+    $("m-hold").checked=mvSel.hold_end!==false;
+  }
+  if(sel&&sel.kind==="st"){ $("s-r").value=scn.statics[sel.i].r; $("s-h").value=scn.statics[sel.i].h; }
+  $("st-sel").textContent = sel ? (sel.kind==="mv"?`mover ${sel.i} · 路点 ${sel.j}`:
+    sel.kind==="st"?`障碍 ${sel.i}`: sel.kind==="dwp"?`无人机路点 ${sel.i}`: sel.kind) : "未选中";
+}
+function onEdit(){ recompile(); syncPanel(); draw(); }
+
+[["scn-name",v=>scn.name=v],["d-sx",v=>scn.drone.start[0]=+v],["d-sy",v=>scn.drone.start[1]=+v],
+ ["d-gx",v=>scn.drone.goal[0]=+v],["d-gy",v=>scn.drone.goal[1]=+v],
+ ["d-cz",v=>scn.drone.cruise_z=+v],["d-mv",v=>scn.drone.max_vel=+v],["d-tmax",v=>scn.t_max=+v]
+].forEach(([id,fn])=>$(id).addEventListener("change",e=>{fn(e.target.value); onEdit();}));
+
+[["m-cls",(m,v)=>m.cls=v],["m-asset",(m,v)=>{if(v)m.asset=v;else delete m.asset;}],
+ ["m-spawn",(m,v)=>m.spawn_t=+v],["m-v",(m,v)=>m.speed=+v],
+ ["m-v0",(m,v)=>m.speed.v0=+v],["m-v1",(m,v)=>m.speed.v1=+v],["m-a",(m,v)=>m.speed.a=+v],
+ ["m-hold",(m,v,el)=>m.hold_end=el.checked]
+].forEach(([id,fn])=>$(id).addEventListener("change",e=>{
+  if(!(sel&&sel.kind==="mv")) return; fn(scn.movers[sel.i], e.target.value, e.target); onEdit();
+}));
+$("m-sptype").addEventListener("change",e=>{
+  if(!(sel&&sel.kind==="mv")) return; const m=scn.movers[sel.i];
+  m.speed = e.target.value==="accel" ? {v0:0, v1:(typeof m.speed==="object"?num(m.speed.v1):num(m.speed))||3, a:2.0} : (num(m.speed?.v1 ?? m.speed) || 1.2);
+  onEdit();
+});
+$("m-del").addEventListener("click",()=>{ if(sel&&sel.kind==="mv"){ scn.movers.splice(sel.i,1); sel=null; onEdit(); }});
+$("m-del-wp").addEventListener("click",()=>{ if(sel&&sel.kind==="mv"){ sel.j=scn.movers[sel.i].path.length-1; delSelPoint(); }});
+[["s-r",(s,v)=>s.r=+v],["s-h",(s,v)=>s.h=+v]].forEach(([id,fn])=>$(id).addEventListener("change",e=>{
+  if(sel&&sel.kind==="st"){ fn(scn.statics[sel.i], e.target.value); onEdit(); }}));
+$("s-del").addEventListener("click",()=>{ if(sel&&sel.kind==="st"){ scn.statics.splice(sel.i,1); sel=null; onEdit(); }});
+
+/* ============ 播放 ============ */
+const slider=$("t-slider");
+function togglePlay(){ playing=!playing; $("t-play").textContent=playing?"⏸":"▶"; if(playing) tick(); }
+$("t-play").addEventListener("click",togglePlay);
+slider.addEventListener("input",()=>{ simT=slider.value/10; $("t-read").textContent=simT.toFixed(1)+" s"; draw(); });
+let lastFrame=0;
+function tick(ts){
+  if(!playing) return;
+  requestAnimationFrame(tick);
+  const now=performance.now();
+  if(now-lastFrame<50) return; // ~20fps
+  simT+=(now-lastFrame>500?50:now-lastFrame)/1000; lastFrame=now;
+  if(simT>(+scn.t_max||30)) simT=0;
+  slider.value=simT*10; $("t-read").textContent=simT.toFixed(1)+" s"; draw();
+}
+
+/* ============ 导入导出 ============ */
+$("io-export").addEventListener("click",()=>{
+  scn.name=$("scn-name").value||"untitled";
+  const blob=new Blob([JSON.stringify(scn,null,1)],{type:"application/json"});
+  const a=document.createElement("a"); a.href=URL.createObjectURL(blob); a.download=scn.name+".json"; a.click();
+});
+$("io-import").addEventListener("click",()=>$("io-file").click());
+$("io-file").addEventListener("change",e=>{
+  const f=e.target.files[0]; if(!f) return;
+  f.text().then(txt=>{ applyJson(txt); });
+});
+$("io-apply").addEventListener("click",()=>applyJson($("io-text").value));
+function applyJson(txt){
+  try{
+    const s=JSON.parse(txt);
+    if(s.schema!=="sando-scenario-v1") throw new Error("schema 不是 sando-scenario-v1");
+    scn=s; sel=null; simT=0;
+    const st=scn.drone.start; view.cx=(st[0]+scn.drone.goal[0])/2; view.cy=(st[1]+scn.drone.goal[1])/2;
+    $("io-text").value=""; onEdit();
+    setStatus("st-compile",`已加载 ${scn.name}`,true);
+  }catch(e){ setStatus("st-compile","导入失败: "+e.message,false); }
+}
+$("rp-load").addEventListener("click",()=>$("rp-file").click());
+$("rp-file").addEventListener("change",e=>{
+  const f=e.target.files[0]; if(!f) return;
+  f.text().then(txt=>{ try{
+    const j=JSON.parse(txt); replay=j.history||j;
+    if(!Array.isArray(replay)||!replay.length) throw new Error("没有 history 数组");
+    $("rp-info").textContent=`${f.name} · ${replay.length} ticks · ${j.result?("min_clr "+(+j.result.min_clr).toFixed(2)+" m"):""}`;
+    draw();
+  }catch(err){ replay=null; $("rp-info").textContent="导入失败: "+err.message; } });
+});
+$("rp-clear").addEventListener("click",()=>{ replay=null; $("rp-info").textContent="已清除。"; draw(); });
+
+function setStatus(id,msg,ok){ const el=$(id); el.textContent=msg; el.className=ok?"ok":"err"; }
+
+/* ============ 启动 ============ */
+new ResizeObserver(()=>draw()).observe(document.getElementById("canvas-wrap"));
+recompile(); syncPanel(); draw();
+</script>

@@ -1,0 +1,20 @@
+{
+ "schema": "sando-scenario-v1",
+ "name": "speed_sweep",
+ "description": "Speed-matched comparison fixture: the wall_and_crosser layout with the drone's max_vel on a GRID ladder ($vmax grid 1..6 m/s). Run with --variants 6 to sweep; pairs of (ours, native) sweeps at identical vmax are the honest speed-matched A/B the 93-vs-69 audit demanded (the only speed-matched cell was 84 vs 81, p~0.68). One layout, one dial.",
+ "map": {"seed": null},
+ "drone": {"start": [0.0, 0.0, 1.5], "goal": [20.0, 0.0, 1.5], "cruise_z": 1.5, "max_vel": "$vmax", "max_acc": 6.0},
+ "statics": [],
+ "movers": [
+  {"cls": "pedestrian", "spawn_t": 0.0, "path": [[8.0, -1.6]], "speed": 0.0},
+  {"cls": "pedestrian", "spawn_t": 0.0, "path": [[8.0, -0.8]], "speed": 0.0},
+  {"cls": "pedestrian", "spawn_t": 0.0, "path": [[8.0,  0.0]], "speed": 0.0},
+  {"cls": "pedestrian", "spawn_t": 0.0, "path": [[8.0,  0.8]], "speed": 0.0},
+  {"cls": "pedestrian", "spawn_t": 0.0, "path": [[8.0,  1.6]], "speed": 0.0},
+  {"cls": "pedestrian", "spawn_t": 0.0, "path": [[13.0, 3.0], [13.0, -6.0]], "speed": 1.0, "hold_end": true}
+ ],
+ "params": {
+  "vmax": {"value": 3.0, "grid": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]}
+ },
+ "t_max": 40.0
+}

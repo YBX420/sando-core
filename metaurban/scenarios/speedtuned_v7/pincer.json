@@ -1,0 +1,108 @@
+{
+ "description": "4 pedestrians converge radially on the corridor midpoint, timed together; a follower blocks the retreat. Attacks the UNCERTIFIED evade path: nothing certifies, flee direction is occupied.",
+ "drone": {
+  "start": [
+   0,
+   0,
+   1.5
+  ],
+  "goal": [
+   20,
+   0,
+   1.5
+  ],
+  "cruise_z": 1.5,
+  "max_vel": 7.0,
+  "max_acc": 6.0
+ },
+ "statics": [],
+ "movers": [
+  {
+   "cls": "pedestrian",
+   "spawn_t": 1.0,
+   "path": [
+    [
+     10,
+     6
+    ],
+    [
+     10,
+     -6
+    ]
+   ],
+   "speed": 1.8,
+   "hold_end": false
+  },
+  {
+   "cls": "pedestrian",
+   "spawn_t": 1.0,
+   "path": [
+    [
+     10,
+     -6
+    ],
+    [
+     10,
+     6
+    ]
+   ],
+   "speed": 1.8,
+   "hold_end": false
+  },
+  {
+   "cls": "pedestrian",
+   "spawn_t": 0.5,
+   "path": [
+    [
+     16,
+     4
+    ],
+    [
+     7,
+     -3
+    ]
+   ],
+   "speed": 1.9,
+   "hold_end": false
+  },
+  {
+   "cls": "pedestrian",
+   "spawn_t": 0.5,
+   "path": [
+    [
+     16,
+     -4
+    ],
+    [
+     7,
+     3
+    ]
+   ],
+   "speed": 1.9,
+   "hold_end": false
+  },
+  {
+   "cls": "pedestrian",
+   "spawn_t": 0.0,
+   "path": [
+    [
+     2,
+     0
+    ],
+    [
+     18,
+     0
+    ]
+   ],
+   "speed": 2.0,
+   "hold_end": false
+  }
+ ],
+ "t_max": 25.0,
+ "schema": "sando-scenario-v1",
+ "name": "pincer",
+ "map": {
+  "seed": null
+ },
+ "params": {}
+}

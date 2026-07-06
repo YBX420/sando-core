@@ -1,0 +1,134 @@
+{
+ "description": "5 m walls (too tall to fly OVER within Z_CEIL) squeeze a canyon; oncoming crossers occupy the ground; a follower closes from behind. Certified deadlock: no around, no over, evade corridor occupied -- probes the liveness/soundness boundary.",
+ "drone": {
+  "start": [
+   0,
+   0,
+   1.5
+  ],
+  "goal": [
+   20,
+   0,
+   1.5
+  ],
+  "cruise_z": 1.5,
+  "max_vel": 5.0,
+  "max_acc": 6.0
+ },
+ "statics": [
+  {
+   "c": [
+    10,
+    1.6
+   ],
+   "r": 0.6,
+   "h": 5.0
+  },
+  {
+   "c": [
+    8,
+    1.7
+   ],
+   "r": 0.6,
+   "h": 5.0
+  },
+  {
+   "c": [
+    12,
+    1.7
+   ],
+   "r": 0.6,
+   "h": 5.0
+  },
+  {
+   "c": [
+    10,
+    -1.6
+   ],
+   "r": 0.6,
+   "h": 5.0
+  },
+  {
+   "c": [
+    8,
+    -1.7
+   ],
+   "r": 0.6,
+   "h": 5.0
+  },
+  {
+   "c": [
+    12,
+    -1.7
+   ],
+   "r": 0.6,
+   "h": 5.0
+  }
+ ],
+ "movers": [
+  {
+   "cls": "pedestrian",
+   "spawn_t": "$t1",
+   "path": [
+    [
+     16,
+     0
+    ],
+    [
+     4,
+     0
+    ]
+   ],
+   "speed": 1.6,
+   "hold_end": false
+  },
+  {
+   "cls": "pedestrian",
+   "spawn_t": "$t2",
+   "path": [
+    [
+     17,
+     0.5
+    ],
+    [
+     5,
+     0.5
+    ]
+   ],
+   "speed": 1.5,
+   "hold_end": false
+  },
+  {
+   "cls": "pedestrian",
+   "spawn_t": 0.0,
+   "path": [
+    [
+     1,
+     0
+    ],
+    [
+     19,
+     0
+    ]
+   ],
+   "speed": 2.2,
+   "hold_end": false
+  }
+ ],
+ "params": {
+  "t1": {
+   "value": 2.0,
+   "jitter": 0.5
+  },
+  "t2": {
+   "value": 3.2,
+   "jitter": 0.5
+  }
+ },
+ "t_max": 30.0,
+ "schema": "sando-scenario-v1",
+ "name": "canyon_deadlock",
+ "map": {
+  "seed": null
+ }
+}

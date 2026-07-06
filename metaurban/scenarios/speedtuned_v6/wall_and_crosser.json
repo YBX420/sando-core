@@ -1,0 +1,104 @@
+{
+ "schema": "sando-scenario-v1",
+ "name": "wall_and_crosser",
+ "description": "Port of scenario.py 'wall_and_crosser': 5 standing humans spanning y in [-1.6,1.6] at x=8 (forces fly-OVER or wide around) + one crosser at [13,3] walking -y at 1 m/s (forces a timed AROUND). The original default hand scene, now as schema JSON.",
+ "map": {
+  "seed": null
+ },
+ "drone": {
+  "start": [
+   0.0,
+   0.0,
+   1.5
+  ],
+  "goal": [
+   20.0,
+   0.0,
+   1.5
+  ],
+  "cruise_z": 1.5,
+  "max_vel": 6.0,
+  "max_acc": 6.0
+ },
+ "statics": [],
+ "movers": [
+  {
+   "cls": "pedestrian",
+   "spawn_t": 0.0,
+   "path": [
+    [
+     8.0,
+     -1.6
+    ]
+   ],
+   "speed": 0.0
+  },
+  {
+   "cls": "pedestrian",
+   "spawn_t": 0.0,
+   "path": [
+    [
+     8.0,
+     -0.8
+    ]
+   ],
+   "speed": 0.0
+  },
+  {
+   "cls": "pedestrian",
+   "spawn_t": 0.0,
+   "path": [
+    [
+     8.0,
+     0.0
+    ]
+   ],
+   "speed": 0.0
+  },
+  {
+   "cls": "pedestrian",
+   "spawn_t": 0.0,
+   "path": [
+    [
+     8.0,
+     0.8
+    ]
+   ],
+   "speed": 0.0
+  },
+  {
+   "cls": "pedestrian",
+   "spawn_t": 0.0,
+   "path": [
+    [
+     8.0,
+     1.6
+    ]
+   ],
+   "speed": 0.0
+  },
+  {
+   "cls": "pedestrian",
+   "spawn_t": 0.0,
+   "path": [
+    [
+     13.0,
+     3.0
+    ],
+    [
+     13.0,
+     -6.0
+    ]
+   ],
+   "speed": "$crosser_v",
+   "hold_end": true
+  }
+ ],
+ "params": {
+  "crosser_v": {
+   "value": 1.0,
+   "jitter": 0.4
+  }
+ },
+ "t_max": 30.0
+}

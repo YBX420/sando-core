@@ -1,0 +1,81 @@
+{
+ "schema": "sando-scenario-v1",
+ "name": "crossers",
+ "description": "Port of scenario.py 'crossers': three staggered pedestrians crossing the corridor at +-1 m/s -> timed AROUND maneuvers dominate.",
+ "map": {
+  "seed": null
+ },
+ "drone": {
+  "start": [
+   0.0,
+   0.0,
+   1.5
+  ],
+  "goal": [
+   20.0,
+   0.0,
+   1.5
+  ],
+  "cruise_z": 1.5,
+  "max_vel": 7.0,
+  "max_acc": 6.0
+ },
+ "statics": [],
+ "movers": [
+  {
+   "cls": "pedestrian",
+   "spawn_t": 0.0,
+   "path": [
+    [
+     7.0,
+     4.0
+    ],
+    [
+     7.0,
+     -6.0
+    ]
+   ],
+   "speed": "$v",
+   "hold_end": true
+  },
+  {
+   "cls": "pedestrian",
+   "spawn_t": 0.0,
+   "path": [
+    [
+     12.0,
+     -5.0
+    ],
+    [
+     12.0,
+     5.0
+    ]
+   ],
+   "speed": "$v",
+   "hold_end": true
+  },
+  {
+   "cls": "pedestrian",
+   "spawn_t": 0.0,
+   "path": [
+    [
+     16.0,
+     3.5
+    ],
+    [
+     16.0,
+     -5.5
+    ]
+   ],
+   "speed": "$v",
+   "hold_end": true
+  }
+ ],
+ "params": {
+  "v": {
+   "value": 1.0,
+   "jitter": 0.35
+  }
+ },
+ "t_max": 30.0
+}

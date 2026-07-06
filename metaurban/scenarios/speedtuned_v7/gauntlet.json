@@ -1,0 +1,149 @@
+{
+ "schema": "sando-scenario-v1",
+ "name": "gauntlet",
+ "description": "Port of scenario.py 'gauntlet': a full-width standing line of humans spanning y in [-4,4] at x=9, step 0.8 -> no ground route; the drone must certify a fly-OVER.",
+ "map": {
+  "seed": null
+ },
+ "drone": {
+  "start": [
+   0.0,
+   0.0,
+   1.5
+  ],
+  "goal": [
+   18.0,
+   0.0,
+   1.5
+  ],
+  "cruise_z": 1.5,
+  "max_vel": 7.0,
+  "max_acc": 6.0
+ },
+ "statics": [],
+ "movers": [
+  {
+   "cls": "pedestrian",
+   "spawn_t": 0.0,
+   "path": [
+    [
+     9.0,
+     -4.0
+    ]
+   ],
+   "speed": 0.0
+  },
+  {
+   "cls": "pedestrian",
+   "spawn_t": 0.0,
+   "path": [
+    [
+     9.0,
+     -3.2
+    ]
+   ],
+   "speed": 0.0
+  },
+  {
+   "cls": "pedestrian",
+   "spawn_t": 0.0,
+   "path": [
+    [
+     9.0,
+     -2.4
+    ]
+   ],
+   "speed": 0.0
+  },
+  {
+   "cls": "pedestrian",
+   "spawn_t": 0.0,
+   "path": [
+    [
+     9.0,
+     -1.6
+    ]
+   ],
+   "speed": 0.0
+  },
+  {
+   "cls": "pedestrian",
+   "spawn_t": 0.0,
+   "path": [
+    [
+     9.0,
+     -0.8
+    ]
+   ],
+   "speed": 0.0
+  },
+  {
+   "cls": "pedestrian",
+   "spawn_t": 0.0,
+   "path": [
+    [
+     9.0,
+     0.0
+    ]
+   ],
+   "speed": 0.0
+  },
+  {
+   "cls": "pedestrian",
+   "spawn_t": 0.0,
+   "path": [
+    [
+     9.0,
+     0.8
+    ]
+   ],
+   "speed": 0.0
+  },
+  {
+   "cls": "pedestrian",
+   "spawn_t": 0.0,
+   "path": [
+    [
+     9.0,
+     1.6
+    ]
+   ],
+   "speed": 0.0
+  },
+  {
+   "cls": "pedestrian",
+   "spawn_t": 0.0,
+   "path": [
+    [
+     9.0,
+     2.4
+    ]
+   ],
+   "speed": 0.0
+  },
+  {
+   "cls": "pedestrian",
+   "spawn_t": 0.0,
+   "path": [
+    [
+     9.0,
+     3.2
+    ]
+   ],
+   "speed": 0.0
+  },
+  {
+   "cls": "pedestrian",
+   "spawn_t": 0.0,
+   "path": [
+    [
+     9.0,
+     4.0
+    ]
+   ],
+   "speed": 0.0
+  }
+ ],
+ "params": {},
+ "t_max": 30.0
+}

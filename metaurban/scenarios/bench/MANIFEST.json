@@ -1,0 +1,162 @@
+[
+ {
+  "file": "scenarios/bench/street_busy_s0.json",
+  "tier": "busy",
+  "seed": 0,
+  "n": 19,
+  "dropped": 0,
+  "worst_pair": {
+   "i": 0,
+   "j": 7,
+   "clearance": 2.2,
+   "floor": 0.8
+  },
+  "pressure": 0.9
+ },
+ {
+  "file": "scenarios/bench/street_busy_s0_alt1.json",
+  "tier": "busy",
+  "seed": 0,
+  "alt": 1
+ },
+ {
+  "file": "scenarios/bench/street_busy_s1.json",
+  "tier": "busy",
+  "seed": 1,
+  "n": 19,
+  "dropped": 0,
+  "worst_pair": {
+   "i": 11,
+   "j": 14,
+   "clearance": 0.98,
+   "floor": 0.8
+  },
+  "pressure": 0.59
+ },
+ {
+  "file": "scenarios/bench/street_busy_s1_alt1.json",
+  "tier": "busy",
+  "seed": 1,
+  "alt": 1
+ },
+ {
+  "file": "scenarios/bench/street_busy_s2.json",
+  "tier": "busy",
+  "seed": 2,
+  "n": 19,
+  "dropped": 0,
+  "worst_pair": {
+   "i": 9,
+   "j": 14,
+   "clearance": 7.91,
+   "floor": 0.8
+  },
+  "pressure": 0.96
+ },
+ {
+  "file": "scenarios/bench/street_busy_s2_alt1.json",
+  "tier": "busy",
+  "seed": 2,
+  "alt": 1
+ },
+ {
+  "file": "scenarios/bench/street_busy_s3.json",
+  "tier": "busy",
+  "seed": 3,
+  "n": 19,
+  "dropped": 0,
+  "worst_pair": {
+   "i": 10,
+   "j": 13,
+   "clearance": 3.4,
+   "floor": 0.8
+  },
+  "pressure": 0.93
+ },
+ {
+  "file": "scenarios/bench/street_busy_s3_alt1.json",
+  "tier": "busy",
+  "seed": 3,
+  "alt": 1
+ },
+ {
+  "file": "scenarios/bench/street_rush_s0.json",
+  "tier": "rush",
+  "seed": 0,
+  "n": 30,
+  "dropped": 0,
+  "worst_pair": {
+   "i": 17,
+   "j": 26,
+   "clearance": 2.84,
+   "floor": 2.0
+  },
+  "pressure": 0.67
+ },
+ {
+  "file": "scenarios/bench/street_rush_s0_alt1.json",
+  "tier": "rush",
+  "seed": 0,
+  "alt": 1
+ },
+ {
+  "file": "scenarios/bench/street_rush_s1.json",
+  "tier": "rush",
+  "seed": 1,
+  "n": 30,
+  "dropped": 0,
+  "worst_pair": {
+   "i": 7,
+   "j": 20,
+   "clearance": 0.95,
+   "floor": 0.8
+  },
+  "pressure": 0.45
+ },
+ {
+  "file": "scenarios/bench/street_rush_s1_alt1.json",
+  "tier": "rush",
+  "seed": 1,
+  "alt": 1
+ },
+ {
+  "file": "scenarios/bench/street_rush_s2.json",
+  "tier": "rush",
+  "seed": 2,
+  "n": 30,
+  "dropped": 0,
+  "worst_pair": {
+   "i": 5,
+   "j": 11,
+   "clearance": 1.07,
+   "floor": 0.8
+  },
+  "pressure": 0.98
+ },
+ {
+  "file": "scenarios/bench/street_rush_s2_alt1.json",
+  "tier": "rush",
+  "seed": 2,
+  "alt": 1
+ },
+ {
+  "file": "scenarios/bench/street_rush_s3.json",
+  "tier": "rush",
+  "seed": 3,
+  "n": 30,
+  "dropped": 0,
+  "worst_pair": {
+   "i": 6,
+   "j": 19,
+   "clearance": 3.25,
+   "floor": 0.8
+  },
+  "pressure": 0.46
+ },
+ {
+  "file": "scenarios/bench/street_rush_s3_alt1.json",
+  "tier": "rush",
+  "seed": 3,
+  "alt": 1
+ }
+]

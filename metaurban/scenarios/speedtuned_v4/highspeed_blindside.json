@@ -1,0 +1,85 @@
+{
+ "description": "11 m/s vehicle timed to the drone's crossing instant: 10 m sensing range gives 0.9 s = 3 control ticks from first detection to impact; a second staggered vehicle punishes the recovery.",
+ "drone": {
+  "start": [
+   0,
+   0,
+   1.5
+  ],
+  "goal": [
+   22,
+   0,
+   1.5
+  ],
+  "cruise_z": 1.5,
+  "max_vel": 4.0,
+  "max_acc": 6.0
+ },
+ "statics": [],
+ "movers": [
+  {
+   "cls": "vehicle",
+   "spawn_t": "$t1",
+   "path": [
+    [
+     11,
+     -30
+    ],
+    [
+     11,
+     30
+    ]
+   ],
+   "speed": 11.0,
+   "hold_end": false
+  },
+  {
+   "cls": "vehicle",
+   "spawn_t": "$t2",
+   "path": [
+    [
+     14,
+     30
+    ],
+    [
+     14,
+     -30
+    ]
+   ],
+   "speed": 10.0,
+   "hold_end": false
+  },
+  {
+   "cls": "pedestrian",
+   "spawn_t": 0.0,
+   "path": [
+    [
+     8,
+     3
+    ],
+    [
+     8,
+     -3
+    ]
+   ],
+   "speed": 1.2,
+   "hold_end": false
+  }
+ ],
+ "params": {
+  "t1": {
+   "value": 1.0,
+   "jitter": 0.4
+  },
+  "t2": {
+   "value": 2.2,
+   "jitter": 0.4
+  }
+ },
+ "t_max": 25.0,
+ "schema": "sando-scenario-v1",
+ "name": "highspeed_blindside",
+ "map": {
+  "seed": null
+ }
+}

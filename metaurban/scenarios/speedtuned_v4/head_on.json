@@ -1,0 +1,49 @@
+{
+ "schema": "sando-scenario-v1",
+ "name": "head_on",
+ "description": "Port of scenario.py 'head_on': one pedestrian walking straight AT the drone along the corridor axis -> pure closing-speed conflict, no lateral escape needed but timing matters.",
+ "map": {
+  "seed": null
+ },
+ "drone": {
+  "start": [
+   0.0,
+   0.0,
+   1.5
+  ],
+  "goal": [
+   20.0,
+   0.0,
+   1.5
+  ],
+  "cruise_z": 1.5,
+  "max_vel": 4.0,
+  "max_acc": 6.0
+ },
+ "statics": [],
+ "movers": [
+  {
+   "cls": "pedestrian",
+   "spawn_t": 0.0,
+   "path": [
+    [
+     10.0,
+     0.0
+    ],
+    [
+     -4.0,
+     0.0
+    ]
+   ],
+   "speed": "$v",
+   "hold_end": false
+  }
+ ],
+ "params": {
+  "v": {
+   "value": 1.2,
+   "jitter": 0.4
+  }
+ },
+ "t_max": 30.0
+}

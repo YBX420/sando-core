@@ -1,0 +1,154 @@
+{
+ "schema": "sando-scenario-v1",
+ "name": "climb_trap",
+ "description": "High-altitude strand stressor: a U-shaped static wall boxes the corridor from three sides with the only ground opening guarded by a pacing pedestrian -> the tournament is pushed to CLIMB. Acceptance dial for the stuck-at-altitude problem (post-climb the horizontal cert must eventually re-admit a descent; CRET-hold's smooth-brake also lands here). The pacer patrols the gap so ground routes flicker between certifiable and not.",
+ "map": {
+  "seed": null
+ },
+ "drone": {
+  "start": [
+   0.0,
+   0.0,
+   1.5
+  ],
+  "goal": [
+   18.0,
+   0.0,
+   1.5
+  ],
+  "cruise_z": 1.5,
+  "max_vel": 8.0,
+  "max_acc": 6.0
+ },
+ "statics": [
+  {
+   "c": [
+    9.0,
+    -3.0
+   ],
+   "r": 0.5,
+   "h": 3.4
+  },
+  {
+   "c": [
+    9.0,
+    -2.1
+   ],
+   "r": 0.5,
+   "h": 3.4
+  },
+  {
+   "c": [
+    9.0,
+    -1.2
+   ],
+   "r": 0.5,
+   "h": 3.4
+  },
+  {
+   "c": [
+    9.0,
+    -0.3
+   ],
+   "r": 0.5,
+   "h": 3.4
+  },
+  {
+   "c": [
+    9.0,
+    0.6
+   ],
+   "r": 0.5,
+   "h": 3.4
+  },
+  {
+   "c": [
+    9.0,
+    1.5
+   ],
+   "r": 0.5,
+   "h": 3.4
+  },
+  {
+   "c": [
+    9.0,
+    2.4
+   ],
+   "r": 0.5,
+   "h": 3.4
+  },
+  {
+   "c": [
+    7.6,
+    -3.8
+   ],
+   "r": 0.5,
+   "h": 3.4
+  },
+  {
+   "c": [
+    6.2,
+    -4.2
+   ],
+   "r": 0.5,
+   "h": 3.4
+  },
+  {
+   "c": [
+    7.6,
+    3.2
+   ],
+   "r": 0.5,
+   "h": 3.4
+  },
+  {
+   "c": [
+    6.2,
+    3.6
+   ],
+   "r": 0.5,
+   "h": 3.4
+  }
+ ],
+ "movers": [
+  {
+   "cls": "pedestrian",
+   "spawn_t": 0.0,
+   "path": [
+    [
+     9.0,
+     3.4
+    ],
+    [
+     9.0,
+     5.2
+    ],
+    [
+     9.0,
+     3.4
+    ],
+    [
+     9.0,
+     5.2
+    ],
+    [
+     9.0,
+     3.4
+    ],
+    [
+     9.0,
+     5.2
+    ]
+   ],
+   "speed": "$pace_v",
+   "hold_end": true
+  }
+ ],
+ "params": {
+  "pace_v": {
+   "value": 0.9,
+   "jitter": 0.3
+  }
+ },
+ "t_max": 30.0
+}

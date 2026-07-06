@@ -1,0 +1,98 @@
+{
+ "schema": "sando-scenario-v1",
+ "name": "occlusion_reveal",
+ "description": "Late-reveal crosser: a static wall of obstacles hugs the corridor at x=8..9 (y>0.8) and a fast pedestrian bursts from BEHIND it across the path, timed to the drone's arrival. Under GT-see-through perception the drone tracks the crosser through the wall (easy); under a future occluding front-end the track only starts at reveal -> the fresh-track/age-0 stressor. Kept in the library now so the same scenario becomes the acceptance test when realistic perception lands.",
+ "map": {
+  "seed": null
+ },
+ "drone": {
+  "start": [
+   0.0,
+   0.0,
+   1.5
+  ],
+  "goal": [
+   18.0,
+   0.0,
+   1.5
+  ],
+  "cruise_z": 1.5,
+  "max_vel": 6.0,
+  "max_acc": 6.0
+ },
+ "statics": [
+  {
+   "c": [
+    8.0,
+    1.2
+   ],
+   "r": 0.45,
+   "h": 3.2
+  },
+  {
+   "c": [
+    8.0,
+    2.1
+   ],
+   "r": 0.45,
+   "h": 3.2
+  },
+  {
+   "c": [
+    8.0,
+    3.0
+   ],
+   "r": 0.45,
+   "h": 3.2
+  },
+  {
+   "c": [
+    8.9,
+    1.2
+   ],
+   "r": 0.45,
+   "h": 3.2
+  },
+  {
+   "c": [
+    8.9,
+    2.1
+   ],
+   "r": 0.45,
+   "h": 3.2
+  }
+ ],
+ "movers": [
+  {
+   "cls": "pedestrian",
+   "spawn_t": "$burst_t",
+   "path": [
+    [
+     8.45,
+     1.0
+    ],
+    [
+     8.45,
+     -5.0
+    ]
+   ],
+   "speed": {
+    "v0": 0.0,
+    "v1": "$burst_v",
+    "a": 2.5
+   },
+   "hold_end": false
+  }
+ ],
+ "params": {
+  "burst_t": {
+   "value": 2.0,
+   "jitter": 0.6
+  },
+  "burst_v": {
+   "value": 2.2,
+   "jitter": 0.5
+  }
+ },
+ "t_max": 25.0
+}

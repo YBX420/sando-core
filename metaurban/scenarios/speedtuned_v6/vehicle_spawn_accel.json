@@ -1,0 +1,77 @@
+{
+ "schema": "sando-scenario-v1",
+ "name": "vehicle_spawn_accel",
+ "description": "CV!=CA stressor: a vehicle spawns stationary just off the corridor and accelerates hard (|a|~2.8 m/s^2, 0->8 m/s) across the drone's path timed to cross mid-corridor. The CV predictor sees v~0 at spawn and under-predicts the sweep; CA/IMM or conformal growth must cover it. No previous scenario source had any accelerating mover.",
+ "map": {
+  "seed": null
+ },
+ "drone": {
+  "start": [
+   0.0,
+   0.0,
+   1.5
+  ],
+  "goal": [
+   16.0,
+   0.0,
+   1.5
+  ],
+  "cruise_z": 1.5,
+  "max_vel": 6.0,
+  "max_acc": 6.0
+ },
+ "statics": [],
+ "movers": [
+  {
+   "cls": "vehicle",
+   "spawn_t": "$spawn_t",
+   "path": [
+    [
+     8.0,
+     -14.0
+    ],
+    [
+     8.0,
+     14.0
+    ]
+   ],
+   "speed": {
+    "v0": 0.0,
+    "v1": "$v_top",
+    "a": "$accel"
+   },
+   "hold_end": false
+  },
+  {
+   "cls": "pedestrian",
+   "spawn_t": 0.0,
+   "path": [
+    [
+     12.0,
+     4.0
+    ],
+    [
+     12.0,
+     -4.0
+    ]
+   ],
+   "speed": 1.2,
+   "hold_end": true
+  }
+ ],
+ "params": {
+  "spawn_t": {
+   "value": 1.2,
+   "jitter": 0.8
+  },
+  "v_top": {
+   "value": 8.0,
+   "jitter": 1.5
+  },
+  "accel": {
+   "value": 2.8,
+   "jitter": 0.7
+  }
+ },
+ "t_max": 25.0
+}

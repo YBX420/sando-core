@@ -45,6 +45,9 @@ def load_calib(eps=0.05):
     for cls in ("pedestrian", "vehicle", "animal"):
         out.setdefault(cls, (0.15, 0.6))
     out.setdefault("_all", (0.15, 0.6))
+    # MAPPED STATICS (online-mapping perception): position uncertainty only, NO growing tube --
+    # a remembered tree does not move; giving it the mover v_eff seals every corridor it borders.
+    out.setdefault("static", (0.15, 0.0))
     return out
 
 
@@ -77,6 +80,32 @@ def cert_clear(ego, cyl, tau=TAU, delta=None):
     return True
 
 
+def cert_verdict3(ego, cyl, tau=TAU, delta=None):
+    """DIAGNOSTIC three-valued twin of cert_clear (does NOT drive the decision -- cert_clear stays the gate).
+    Returns (overall, details): overall in 'certified'|'refuted'|'unknown'; details = one dict per mover with
+    the three sub-verdicts. Three-valued logic: AND = refuted if any refuted else certified if all certified
+    else unknown; OR = certified if any certified else refuted if all refuted else unknown; movers are ANDed.
+    'refuted' = the keep-out is PROVABLY violated (truly blocked); 'unknown' = envelope too loose / budget out
+    -- the only verdict where an adaptive deeper budget could still certify. Instrument for the DNF seeds."""
+    def _and(a, b):
+        if "refuted" in (a, b): return "refuted"
+        return "certified" if a == b == "certified" else "unknown"
+    def _or(a, b):
+        if "certified" in (a, b): return "certified"
+        return "refuted" if a == b == "refuted" else "unknown"
+    d = tau if delta is None else delta
+    overall = "certified"; details = []
+    for (c0, vv, aa, R, zc, veff) in cyl:
+        hp, mp = ego.certify_horizontal3(obs_c0=c0, R=R, obs_vel=vv, obs_acc=aa, t_hi=tau, v_eff=veff, delta=d)
+        hc, mc = ego.certify_horizontal3(obs_c0=c0, R=R, obs_vel=(0, 0, 0), t_hi=tau, v_eff=veff, delta=d)
+        vo, mv = ego.certify_above3(z_clear=zc, t_hi=tau, v_eff_z=0.0, delta=d)
+        mover = _or(_and(hp, hc), vo)
+        details.append(dict(horiz_pred=hp, horiz_cur=hc, above=vo, verdict=mover,
+                            margins=(round(mp, 4), round(mc, 4), round(mv, 4))))
+        overall = _and(overall, mover)
+    return overall, details
+
+
 def _rot(v2, ang):
     c, s = np.cos(ang), np.sin(ang)
     return np.array([c * v2[0] - s * v2[1], s * v2[0] + c * v2[1]])
@@ -87,7 +116,9 @@ def maneuver_decide(ego, p_d, v_d, a_d, goal, ztop, clear_fn, cruise_z=CRUISE_Z,
     """Run the fastest-safe tournament and LEAVE ego holding the chosen B-spline. `clear_fn()` -> bool gates each
     committed candidate (normally cert_clear(ego, cyl); the discrete-sampling ablation passes its own). Returns the
     kind 'straight'|'around_l'|'around_r'|'over'|'climb'|'evade'. 'evade' = nothing certified -> caller flees via
-    evade_setpoint(); any other kind = ego holds a certified (or, for 'climb', the no-freeze) plan.
+    evade_setpoint(); any other kind = ego holds a CERTIFIED plan ('climb' included -- an uncertified climb was
+    the seed-56 soundness hole the renderer fixed at 6/27; this shared layer now applies the same gate: NEVER
+    fly uncertified, fall through to 'evade' instead).
     straight_clip: if set (the renderer's EGO_HOR), the STRAIGHT goal is clipped to a receding horizon too -- a 75 m
     raw goal makes EGO extrapolate past the perceived region and fail; the headless corridor goal is short so it
     leaves it None (replan straight to the true goal)."""
@@ -105,10 +136,12 @@ def maneuver_decide(ego, p_d, v_d, a_d, goal, ztop, clear_fn, cruise_z=CRUISE_Z,
                      ("around_r", np.array([*(p_d[:2] + L * _rot(gdir, -2 * PHI)), cruise_z]))):
         if ego.replan(p_d, v_d, a_d, gsub) and ego.duration() > 1e-3 and clear_fn():
             return gk
-    # ground blocked -> fly OVER (certified); boxed -> climb straight up (no-freeze, uncertified)
+    # ground blocked -> fly OVER (certified); boxed -> CERTIFIED vertical climb-escape; else evade (the caller's
+    # no-freeze fallback). The climb MUST pass clear_fn() too -- flying an uncertified climb was the seed-56
+    # soundness hole (a labelled-certified lap could collide); renderer fixed 6/27, ported here.
     if ego.replan(p_d, v_d, a_d, np.array([goal[0], goal[1], ztop])) and ego.duration() > 1e-3 and clear_fn():
         return "over"
-    if ego.replan(p_d, v_d, a_d, np.array([p_d[0], p_d[1], ztop])) and ego.duration() > 1e-3:
+    if ego.replan(p_d, v_d, a_d, np.array([p_d[0], p_d[1], ztop])) and ego.duration() > 1e-3 and clear_fn():
         return "climb"
     return "evade"
 

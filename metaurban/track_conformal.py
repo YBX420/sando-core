@@ -113,15 +113,26 @@ def main():
            "n_substeps": int(len(allrows)), "n_windows_cal": int(len(cal_wm)), "levels": {}}
     print(f"\n{'eps':>5} | {'delta_track(FLIGHT)':>19} {'flight_cov':>10} | {'delta_window':>12} {'win_cov':>8}")
     for eps in EPS_LIST:
-        # PER-FLIGHT (episode) conformal quantile with finite-sample (m+1) correction -> the deployed margin
-        me = len(cal_em); rke = min(int(np.ceil((me + 1) * (1 - eps))), me)
-        delta_flight = float(np.sort(cal_em)[rke - 1])
-        flight_cov = float(np.mean(test_em <= delta_flight))
+        # PER-FLIGHT (episode) conformal quantile with finite-sample (m+1) correction -> the deployed margin.
+        # If ceil((m+1)(1-eps)) > m the finite-sample quantile DOES NOT EXIST (it is +inf): eps is not achievable
+        # with m episodes (need m >= (1-eps)/eps, e.g. eps=0.01 needs >=99). The old silent min(rank, m) clamp
+        # reported the sample max as if it were a valid (1-eps) margin -- an unbacked guarantee. Now: loud
+        # UNACHIEVABLE + null in the JSON; harvest more episodes or pick a larger eps instead of shipping it.
+        me = len(cal_em); rke = int(np.ceil((me + 1) * (1 - eps)))
         # per-window (reference only; NOT per-flight valid)
         mw = len(cal_wm); rkw = min(int(np.ceil((mw + 1) * (1 - eps))), mw)
         delta_window = float(np.sort(cal_wm)[rkw - 1])
         win_cov = float(np.mean(test_wm <= delta_window))
-        out["levels"][str(eps)] = {"delta_track_m": delta_flight, "flight_coverage": flight_cov,
+        if rke > me:
+            out["levels"][str(eps)] = {"delta_track_m": None, "achievable": False, "flight_coverage": None,
+                                       "delta_track_window_m": delta_window, "window_coverage": win_cov,
+                                       "target": 1 - eps, "n_cal_episodes": me,
+                                       "n_episodes_needed": int(np.ceil((1 - eps) / eps))}
+            print(f"{eps:>5} | {'UNACHIEVABLE(m=%d)' % me:>19} {'--':>10} | {delta_window:>12.3f} {win_cov:>8.3f}")
+            continue
+        delta_flight = float(np.sort(cal_em)[rke - 1])
+        flight_cov = float(np.mean(test_em <= delta_flight))
+        out["levels"][str(eps)] = {"delta_track_m": delta_flight, "achievable": True, "flight_coverage": flight_cov,
                                    "delta_track_window_m": delta_window, "window_coverage": win_cov,
                                    "target": 1 - eps, "n_cal_episodes": me}
         print(f"{eps:>5} | {delta_flight:>19.3f} {flight_cov:>10.3f} | {delta_window:>12.3f} {win_cov:>8.3f}")

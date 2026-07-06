@@ -24,6 +24,11 @@ import safety_layer as SL          # the ONE shared certified-maneuver decision 
 
 OUTDIR = os.path.join(os.path.dirname(HERE), "out", "conformal")
 
+# B-bucket deployment-in-the-loop residual harvest (activated by b_bucket_recalibrate.py, not env):
+PERCEPT_HARVEST = None            # set to a list to collect (Delta, resid, age, cls, ep_id) tuples
+_HARV_DELTAS = (0.10, 0.25, 0.40, 0.55, 0.70, 0.85)   # elapsed-since-detection grid, covers TAU+delta=0.85
+_HARV_EP = [0]
+
 # ---- geometry / dynamics ----
 DT = 0.30; TAU = 0.75; DELTA = DT
 CRUISE_Z = 1.5; Z_CEIL = 4.6
@@ -33,7 +38,9 @@ PHI = math.radians(25.0)
 HORIZON = 7.5
 MAXTICKS = 240
 PRED_MODEL = os.environ.get("PRED_MODEL", "cv")   # deployed predictor (CV: tighter conformal keep-out, see calib)
-FOV_R = 14.0          # perception/cert range: only movers within FOV_R are fed to EGO + certified (a TAU=0.75s,
+FOV_R = 10.0          # FROZEN 2026-07-03: unified sensing range (= PERCEPT_RANGE = abr --fov_range).
+#                       Was 14.0 -- the headless gt/native gate saw further than the frozen sensor claim.
+#                       (perception/cert range: only movers within FOV_R are fed to EGO + certified (a TAU=0.75s,
 #                       3 m/s mover >14 m away can't reach the drone within the trust window). Matches a real
 #                       onboard depth sensor's useful range and keeps the per-tick cert/cloud cost bounded.
 REACH_PAD = 0.3
@@ -174,12 +181,15 @@ def _rot(v2, ang):
 
 
 def run_replay(movers, ep, mode="ours", calib=None, predict=True, max_vel=3.0, max_acc=6.0,
-               cont_cert=True, n_sample=0, record=False, dynamics=False, flier=None):
+               cont_cert=True, n_sample=0, record=False, dynamics=False, flier=None, tick_cb=None):
     """One replay episode. cont_cert=True uses the continuous-time Bernstein cylinder cert; if False (ablation)
     the gate uses n_sample fixed-rate samples of the committed B-spline instead.
     dynamics=True flies the planned set-points through real QUADROTOR dynamics (tilt-to-accel, inertia, thrust
     limit) and measures clearance on the FLOWN position -- the renderer/PX4 reality (what flies != what's planned).
-    With dynamics=False the drone is a perfect-tracking point mass (the optimistic headless number). Returns a dict."""
+    With dynamics=False the drone is a perfect-tracking point mass (the optimistic headless number). Returns a dict.
+    tick_cb(info): optional per-tick hook for live/3D visualisation -- called after each decision+step with
+    dict(tick, t, p (LOCAL frame; add back org=midpoint(start,goal) for world), kind, clr). Keep it fast;
+    it runs inside the control loop."""
     calib = calib or load_calib()
     # work in a LOCAL frame centred on the corridor midpoint: MetaUrban world coords span hundreds of metres,
     # so a global grid would be billions of voxels. Translate everything by -org -> a small local map suffices.
@@ -205,11 +215,31 @@ def run_replay(movers, ep, mode="ours", calib=None, predict=True, max_vel=3.0, m
     last_rt = 0.0
     sando_path = None          # SANDO's last committed path; replan periodically + EXECUTE it (not replan every tick)
     trackers = {}                                   # mover idx -> MoverTracker (created on first detection)
-    rng = np.random.default_rng(1234567)
+    rng = np.random.default_rng(int(os.environ.get("PERCEPT_SEED", 1234567)))
+    # ^ detection-noise stream follows PERCEPT_SEED in BOTH gt and realistic modes: otherwise the gt
+    #   arms are deterministic and N "resamples" are one run copied N times (fake sample size).
+    if PERCEPT_HARVEST is not None:
+        _HARV_EP[0] += 1                                   # episode id for exchangeable-unit splitting
+    # PERCEPT=realistic swaps OUR mover perception for the shared front-end (perception.py): FOV cone +
+    # occlusion + distance miss/noise + NN-associated tracks with NO GT identity. Default stays "gt"
+    # (omniscient control) until the B-bucket recalibration -- never silently change a headline's meaning.
+    # Baselines (native/sando) keep their own perception either way: PERCEPT only governs "ours".
+    percept_fe = None                                  # NB: name must not collide with `pf, vf = ...` below
+    if os.environ.get("PERCEPT", "realistic") == "realistic" and mode in ("ours", "native"):
+        # FROZEN 2026-07-03 (+7-04 baseline PERCEPTION PARITY: native can now consume the SAME
+        # realistic is the DEFAULT deployment claim now; PERCEPT=gt is the explicit omniscient control.
+        from perception import PerceptionFrontEnd, PerceptCfg
+        # PERCEPT_SEED varies the sensor's random draws (miss/noise/clutter) so one scenario can be
+        # RESAMPLED: perception outcomes are heavy-tailed, single-draw min_clr numbers are not citable.
+        percept_fe = PerceptionFrontEnd(PerceptCfg.from_env(dt=DT),
+                                        seed=int(os.environ.get("PERCEPT_SEED", 1234567)))
 
     p_d = start.copy(); v_d = np.zeros(3); a_d = np.zeros(3)
+    _hd_cmd = [None]     # yaw-to-path: cone follows LAST tick's commanded set-point direction
     min_clr = 1e18; max_z = start[2]; reached = False
     counts = {k: 0 for k in ("straight", "around_l", "around_r", "over", "climb", "evade", "native", "sando")}
+    rta = dict(certified_ticks=0, violations=0)      # RTA failure rate: cert-passed tick followed by
+    #                                                  a clearance violation within the SAME trust window
     hist = []
     best_d = 1e18; stall = 0                            # early-stop degenerate episodes (EGO can't plan -> evade spins)
     quad = Quadrotor() if dynamics else None            # real flight dynamics (what FLIES != what's planned)
@@ -241,8 +271,17 @@ def run_replay(movers, ep, mode="ours", calib=None, predict=True, max_vel=3.0, m
 
         if mode == "native":
             cloud = []
-            for i in near:
-                cloud += _cyl_cloud([dets[i][:2]], movers.m[i]["r"], 0.3, movers.m[i]["h"])
+            if percept_fe is not None:
+                # PERCEPTION PARITY: native sees the SAME realistic front-end tracks ours does
+                # (cone/occlusion/miss/NN association) -- the fair native_real_dyn arm.
+                hd = v_d[:2] if float(np.hypot(v_d[0], v_d[1])) > 0.3 else gdir
+                gt_cyl = [(pos_l(i, t), movers.m[i]["r"], movers.m[i]["h"], movers.m[i]["cls"])
+                          for i in idx]
+                for tr in percept_fe.step(p_d[:2], hd, gt_cyl):
+                    cloud += _cyl_cloud([tr.xy[:2]], tr.r, 0.3, tr.h)
+            else:
+                for i in near:
+                    cloud += _cyl_cloud([dets[i][:2]], movers.m[i]["r"], 0.3, movers.m[i]["h"])
             ego.update_cloud(np.asarray(cloud, float) if cloud else np.zeros((0, 3)), p_d)
             if ego.replan(p_d, v_d, a_d, goal) and ego.duration() > 1e-3:
                 r = ego.eval(min(DT, max(ego.duration() - 1e-3, 0.0)))
@@ -293,21 +332,69 @@ def run_replay(movers, ep, mode="ours", calib=None, predict=True, max_vel=3.0, m
                     p_ref, v_ref, a_ref = (np.asarray(ng[0], float), np.asarray(ng[1], float), np.asarray(ng[2], float))
             counts["sando"] += 1; kind = "sando"
         else:
+            # WHAT ours perceives this tick: (tracker, last_xy, r, h, cls) per perceived mover.
+            #   gt (default): omniscient control -- trackers keyed by GT index, plain range gate.
+            #   realistic:    shared front-end tracks -- cone + occlusion + miss/noise + NN association.
+            if percept_fe is not None:
+                # YAW-TO-PATH (2026-07-04): the cone follows where the drone is GOING, not its
+                # instantaneous velocity. During aggressive detours velocity-aligned heading points
+                # the sensor AWAY from the swept region -> blind lateral entry (props_alley seed0:
+                # 0 detections for 15 ticks while arcing into an unseen canopy at 5 m/s). Real
+                # quads yaw toward the path for exactly this reason.
+                hd = _hd_cmd[0] if _hd_cmd[0] is not None else (v_d[:2] if float(np.hypot(v_d[0], v_d[1])) > 0.3 else gdir)
+                gt_cyl = [(pos_l(i, t), movers.m[i]["r"], movers.m[i]["h"], movers.m[i]["cls"])
+                          for i in idx]
+                ptracks = percept_fe.step(p_d[:2], hd, gt_cyl)
+                percepts = [(tr.trk, tr.xy, tr.r, tr.h, tr.cls) for tr in ptracks]
+                if PERCEPT_HARVEST is not None:
+                    # DEPLOYMENT-IN-THE-LOOP residual harvest (B-bucket CRITICAL#1): score the DEPLOYED
+                    # tracks' predictions against the nearest GT mover's true future -- association error,
+                    # intermittency and coast are all part of the residual, exactly as flown.
+                    for tr in ptracks:
+                        if not tr.trk.ready:
+                            continue
+                        # associate the track to its GT mover NOW (gated): ghost/expired tracks must
+                        # not be scored against some unrelated far-away mover's future.
+                        gi, gd, g2 = None, 1.0, 1e9
+                        for i in idx:
+                            dd = float(np.hypot(*(pos_l(i, t) - tr.xy[:2])))
+                            if dd < gd:
+                                gi, g2, gd = i, gd, dd
+                            elif dd < g2:
+                                g2 = dd
+                        if gi is None or g2 < gd + 0.5:
+                            continue                        # ambiguous association (ID-swap risk):
+                            # that failure mode belongs to the multiplicity layer, not this residual law
+                        d_drone = float(np.hypot(*(tr.xy[:2] - p_d[:2])))   # BINDING-REGION field:
+                        # only movers close enough to collide within the trust window can make a
+                        # certified tick unsafe -- the composition theorem's sup runs over these rows
+                        for dh in _HARV_DELTAS:
+                            if not movers.present(gi, t + dh):
+                                continue                    # mover leaves the world: nothing to predict
+                            pred = tr.trk.predict([dh], model=PRED_MODEL)[0, :2]
+                            resid = float(np.hypot(*(pos_l(gi, t + dh) - pred)))
+                            PERCEPT_HARVEST.append((float(dh), resid, int(tr.trk.n),
+                                                    str(tr.cls), int(_HARV_EP[0]), d_drone))
+            else:
+                percepts = [(trackers[i], dets[i], movers.m[i]["r"], movers.m[i]["h"], movers.m[i]["cls"])
+                            for i in near]
             # near-term predicted cloud for EGO's grid
             cloud = []
-            for i in near:
-                trk = trackers[i]
-                xy = trk.predict(np.linspace(0, DT, 2), model=PRED_MODEL)[:, :2] if trk.ready else dets[i][None, :2]
-                cloud += _cyl_cloud(xy, movers.m[i]["r"], 0.3, movers.m[i]["h"])
+            for (trk, dxy, r_o, h_o, _c) in percepts:
+                xy = trk.predict(np.linspace(0, DT, 2), model=PRED_MODEL)[:, :2] if trk.ready \
+                    else np.asarray(dxy, float)[None, :2]
+                cloud += _cyl_cloud(xy, r_o, 0.3, h_o)
             ego.update_cloud(np.asarray(cloud, float) if cloud else np.zeros((0, 3)), p_d)
 
-            # SHARED safety layer (same code the renderer calls): conformal per-class keep-out + tournament + evade.
+            # safety_layer decision (NB: the renderer still runs its OWN tournament copy in render_3d_video.py
+            # ~L1148 with extra static/flown gates -- the two are behaviourally aligned on the climb cert gate
+            # since 2026-07-02 but NOT the same code): conformal per-class keep-out + tournament + evade.
             mlist = []
-            for i in near:
-                c0, vv, aa = trackers[i].state()
+            for (trk, _d, r_o, h_o, cls_o) in percepts:
+                c0, vv, aa = trk.state()
                 if PRED_MODEL == "cv":
                     aa = np.zeros(3)                     # CV deployment: cert polynomial matches the CV-calibrated tube
-                mlist.append((c0, vv, aa, movers.m[i]["r"], movers.m[i]["h"], movers.m[i]["cls"]))
+                mlist.append((c0, vv, aa, r_o, h_o, cls_o))
             cyl, ztop = SL.build_cylinders(mlist, calib, predict=predict)
             if cont_cert:
                 clear_fn = lambda: SL.cert_clear(ego, cyl, tau=TAU, delta=DELTA)
@@ -329,7 +416,11 @@ def run_replay(movers, ep, mode="ours", calib=None, predict=True, max_vel=3.0, m
                 if rr is not None:
                     p_ref, v_ref, a_ref = (np.asarray(x, float) for x in rr)
             elif idx:
-                pos, vel = SL.evade_setpoint(p_d, [dets[i] for i in idx], max_vel, DT, ztop, gdir)
+                # realistic mode flees only what it TRACKS (fleeing an unseen mover would be omniscient);
+                # with nothing tracked evade_setpoint falls back to fleeing along gdir.
+                flee = ([tuple(d) for (_t, d, *_r) in percepts] if percept_fe is not None
+                        else [dets[i] for i in idx])
+                pos, vel = SL.evade_setpoint(p_d, flee, max_vel, DT, ztop, gdir)
                 p_ref, v_ref, a_ref = pos, vel, np.zeros(3)
             counts[kind] = counts.get(kind, 0) + 1
 
@@ -350,6 +441,16 @@ def run_replay(movers, ep, mode="ours", calib=None, predict=True, max_vel=3.0, m
         for i in present_idx(t):
             cl = _clearance(p_d, pos_l(i, t), movers.m[i]["r"], movers.m[i]["h"])
             tick_clr = min(tick_clr, cl); min_clr = min(min_clr, cl)
+        _dcmd = np.asarray(p_ref, float)[:2] - p_d[:2]
+        if float(np.hypot(*_dcmd)) > 0.15:
+            _hd_cmd[0] = _dcmd.copy()      # look where you are COMMANDED to go (real quads yaw-to-path)
+        if kind in ("straight", "around_l", "around_r", "over", "climb"):
+            rta["certified_ticks"] += 1
+            if tick_clr < 1e17 and tick_clr < 0.0:
+                rta["violations"] += 1               # flew a CERT-PASSED plan into a violation
+        if tick_cb is not None:
+            tick_cb(dict(tick=tick, t=t, p=p_d.copy(), kind=kind,
+                         clr=(tick_clr if tick_clr < 1e17 else None)))
         if record:
             hist.append(dict(tick=tick, t=round(t, 2), clr=round(tick_clr, 3) if tick_clr < 1e17 else None,
                              kind=kind, z=round(float(p_d[2]), 2),
@@ -373,7 +474,7 @@ def run_replay(movers, ep, mode="ours", calib=None, predict=True, max_vel=3.0, m
                 collided=(min_clr < -1e-6), max_z=max_z, counts=counts, dynamics=dynamics,
                 track_err_med=float(np.median(track_err)) if track_err else 0.0,
                 track_err_max=float(np.max(track_err)) if track_err else 0.0,
-                predict=predict, cont_cert=cont_cert, history=hist if record else None)
+                predict=predict, cont_cert=cont_cert, rta=rta, history=hist if record else None)
 
 
 if __name__ == "__main__":

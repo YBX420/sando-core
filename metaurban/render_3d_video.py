@@ -77,6 +77,12 @@ ap.add_argument("--mp4", action="store_true", help="also write out/drone_3d.mp4"
 ap.add_argument("--headless", action="store_true", help="run the SAME MetaUrban sim + planner + safety layer + real-quad dynamics but SKIP all 3-D rendering (no grab_views/compose/path overlays) -> fast headless-on-MetaUrban; the lap-done reach/collision/clearance numbers are byte-identical to the rendered run (same scenario, just no pixels). Incompatible with --d435i (which needs the depth camera), --mp4/--live/--serve.")
 ap.add_argument("--pointmass", action="store_true", help="DIAGNOSTIC: fly the commanded set-point exactly (teleport) instead of through the real quadrotor dynamics -> flown==planned, isolates how much of the collision gap is plan->flown TRACKING error vs planning/perception.")
 ap.add_argument("--loop_scene", action="store_true", help="restart the fly-through forever for continuous live viewing")
+ap.add_argument("--scenario", type=str, default=None,
+                help="sando-scenario-v1 JSON: SCRIPTED movers (compiled tracks) replace/augment the native "
+                     "crowd, and the drone flies the scenario's start->goal corridor. THE bridge from the "
+                     "scenario workbench into this full-sensor renderer (D435i/cone/KF views/AB).")
+ap.add_argument("--no_crowd", action="store_true",
+                help="minimal native crowd (deterministic benchmark: scripted movers only; ORCA needs >=1 human)")
 args = ap.parse_args()
 if args.maneuver:
     args.ego = True; args.ego_safe = False   # the no-HOLD tournament REPLACES the ego_safe HOLD wrapper
@@ -115,6 +121,11 @@ def obj_size(o):
 
 def p3(xy, z): return np.array([float(xy[0]), float(xy[1]), float(z)], float)
 
+_SCN = None
+if args.scenario:
+    import scenario_lib as _SLB
+    _SCN = _SLB.load(args.scenario)
+
 env_cfg = dict(
     crswalk_density=1, object_density=0.9, walk_on_all_regions=False,   # DENSE scene -> the avoider has real work
     use_render=False, image_observation=(not args.headless),   # --headless: no camera -> no GL, faster startup
@@ -135,8 +146,9 @@ env_cfg = dict(
     show_sidewalk=True, show_crosswalk=True, random_spawn_lane_index=False,
     num_scenarios=20, accident_prob=0, relax_out_of_road_done=True, max_lateral_dist=1e3,
     crash_vehicle_done=False, crash_object_done=False, crash_human_done=False, traffic_density=0.5,
-    spawn_human_num=85, spawn_wheelchairman_num=5, spawn_edog_num=6, spawn_erobot_num=3,
-    spawn_drobot_num=3, max_actor_num=170)
+    spawn_human_num=(1 if args.no_crowd else 85), spawn_wheelchairman_num=(0 if args.no_crowd else 5),
+    spawn_edog_num=(0 if args.no_crowd else 6), spawn_erobot_num=(0 if args.no_crowd else 3),
+    spawn_drobot_num=(0 if args.no_crowd else 3), max_actor_num=(2 if args.no_crowd else 170))
 
 print("[3dv] constructing offscreen env ...", flush=True)
 env = SidewalkDynamicMetaUrbanEnv(env_cfg)
@@ -166,6 +178,10 @@ ROUTE_LEN = max(MIN_GOAL + 25.0, 75.0)   # LONGER corridor than the old 56 m
 
 
 def plan_route(lap_idx):
+    if _SCN is not None:                                     # scenario corridor overrides the random route
+        st = np.asarray(_SCN["drone"]["start"], float); gl = np.asarray(_SCN["drone"]["goal"], float)
+        d = gl[:2] - st[:2]; L = max(1e-6, float(np.linalg.norm(d))); d = d / L
+        return [p3(st[:2], CRUISE_Z), p3(gl[:2], CRUISE_Z)], d, np.array([-d[1], d[0]])
     """Per-lap LONG, randomised route that THREADS THROUGH PEOPLE: pick 2-3 random pedestrians as
     waypoints (movers first => crossing at crosswalks), order them along their principal axis, then
     extend a start/goal before & after for length. Guarantees the drone flies through the crowd, with
@@ -275,25 +291,41 @@ def occ_reset():
     _OCC_MEM = np.zeros((0, 3))
 
 
-def occ_remember(new_pts, p_d, movers):
-    """Accumulate `new_pts` (a fresh d435i world cloud) into the persistent static memory, minus mover surfaces,
-    bounded to _OCC_R of the drone and voxel-deduped. Returns the full remembered static cloud."""
-    global _OCC_MEM
+_OCC_CAP = int(os.environ.get("OCC_CAP", 20000))       # v2: HARD density cap (v1 over-densified and
+_OCC_TTL = float(os.environ.get("OCC_TTL", 30.0))       #     walled seed 5 in); unconditional TTL (s)
+_OCC_T = [0.0]
+
+
+def occ_remember(new_pts, p_d, movers, t_sim=None):
+    """v2 online static memory (real-deployment mapping): accumulate d435i clouds minus mover
+    surfaces, voxel-dedup, HARD point cap (v1's unbounded densification walled the drone in on
+    seed 5) and an UNCONDITIONAL per-point TTL (a stale wall eventually re-earns its existence by
+    being re-observed; killing only-in-cone points left phantom walls behind the drone forever)."""
+    global _OCC_MEM, _OCC_AGE
+    t_now = float(t_sim if t_sim is not None else _OCC_T[0]); _OCC_T[0] = t_now
     new_pts = np.asarray(new_pts, float).reshape(-1, 3)
     if len(new_pts) and movers:
         keep = np.ones(len(new_pts), bool)
-        for (_oid, c3, _vel, r_obs, _d) in movers:                       # drop this frame's mover surfaces
+        for (_oid, c3, _vel, r_obs, _d) in movers:
             keep &= np.linalg.norm(new_pts[:, :2] - np.asarray(c3, float)[:2], axis=1) > (float(r_obs) + 0.5)
         new_pts = new_pts[keep]
+    if "_OCC_AGE" not in globals() or len(_OCC_AGE) != len(_OCC_MEM):
+        _OCC_AGE = np.full(len(_OCC_MEM), t_now)
     allpts = np.vstack([_OCC_MEM, new_pts]) if (len(_OCC_MEM) and len(new_pts)) else (
         new_pts if len(new_pts) else _OCC_MEM)
+    ages = np.concatenate([_OCC_AGE, np.full(len(new_pts), t_now)]) if len(new_pts) else _OCC_AGE
     if not len(allpts):
-        _OCC_MEM = allpts; return allpts
+        _OCC_MEM = allpts; _OCC_AGE = ages; return allpts
     d = np.linalg.norm(allpts[:, :2] - np.asarray(p_d, float)[:2], axis=1)
-    allpts = allpts[d <= _OCC_R]                                          # bound the memory footprint
-    keys = np.floor(allpts / _OCC_VOX).astype(np.int64)                  # voxel dedup -> bounded size, fast A*
+    m = (d <= _OCC_R) & (t_now - ages <= _OCC_TTL)          # bound footprint + unconditional TTL
+    allpts, ages = allpts[m], ages[m]
+    keys = np.floor(allpts / _OCC_VOX).astype(np.int64)
     _, idx = np.unique(keys, axis=0, return_index=True)
-    _OCC_MEM = allpts[idx]
+    allpts, ages = allpts[idx], ages[idx]
+    if len(allpts) > _OCC_CAP:                              # hard density cap: keep the FRESHEST
+        order = np.argsort(-ages)[:_OCC_CAP]
+        allpts, ages = allpts[order], ages[order]
+    _OCC_MEM = allpts; _OCC_AGE = ages
     return _OCC_MEM
 
 
@@ -327,6 +359,64 @@ class Animal:
 
 
 animals = []
+
+
+class ScriptedMover:
+    """Scenario-JSON mover riding the EXISTING `animals` duck-type: every consumer evaluates
+    `a.p0 + a.vel * t_sim`, so update(t) re-linearizes the compiled track at the current tick
+    (p0 = pos(t) - vel*t) and ALL six consumption sites (cert, occupancy, native feed, fov cloud,
+    clearance) work unchanged. cls_name carries the true class for per-class d_safe."""
+    _next_id = 5000
+
+    def __init__(self, spec, track):
+        import scenario_lib as _SLB
+        self.cls_name = spec.get("cls", "animal")
+        self.track = track
+        r = float(spec.get("r") or _SLB.CLS_R.get(self.cls_name, 0.4))
+        h = float(spec.get("h") or _SLB.CLS_H.get(self.cls_name, 1.6))
+        self.size = np.array([2 * r, 2 * r, h], float)
+        self.id = ScriptedMover._next_id; ScriptedMover._next_id += 1
+        x0, y0 = float(track["xy"][0][0]), float(track["xy"][0][1])
+        self.p0 = np.array([x0, y0]); self.vel = np.zeros(2)
+        glb, sz, hpr = _SCRIPTED_VISUAL.get(self.cls_name, _SCRIPTED_VISUAL["animal"])
+        cls_obj = make_glb_class(f"scn_{self.cls_name}_{self.id}", glb,
+                                 self.size[0], self.size[1], self.size[2], hpr_fix=hpr)
+        self.obj = eng.spawn_object(cls_obj, position=[x0, y0], heading_theta=0.0)
+
+    def update(self, t):
+        tr = self.track
+        if t > float(tr["t"][-1]) + 1e-6:                    # despawned: park far away, out of SENSE_R
+            self.p0 = np.array([9e3, 9e3]); self.vel = np.zeros(2)
+            self.obj.set_position([9e3, 9e3, 0.0])
+            return
+        x = float(np.interp(t, tr["t"], tr["xy"][:, 0])); y = float(np.interp(t, tr["t"], tr["xy"][:, 1]))
+        t2 = min(t + 0.2, float(tr["t"][-1]))
+        x2 = float(np.interp(t2, tr["t"], tr["xy"][:, 0])); y2 = float(np.interp(t2, tr["t"], tr["xy"][:, 1]))
+        v = (np.array([x2, y2]) - np.array([x, y])) / max(1e-6, t2 - t) if t2 > t else np.zeros(2)
+        self.vel = v
+        self.p0 = np.array([x, y]) - v * t                   # linearization: p0 + vel*t == pos(t)
+        self.obj.set_position([x, y, 0.0])
+        if float(np.hypot(*v)) > 0.15:
+            self.obj.set_heading_theta(float(np.arctan2(v[1], v[0])))
+
+
+_MU_TEST = "/media/boxuan/Data2/projects/metaurban/metaurban/assets/models/test/"
+_MU_PED = "/media/boxuan/Data2/projects/metaurban/metaurban/assets/models/pedestrian/scene.gltf"
+_SCRIPTED_VISUAL = {   # cls -> (glb path, default size, hpr_fix); sizes overridden per-spec above
+    "pedestrian": (_MU_PED, [0.5, 0.5, 1.75], (0.0, 0.0, 0.0)),
+    "vehicle": (_MU_TEST + "car-334ebc41e59747898f612b38cef4aa7a.glb", [1.8, 4.4, 1.5], (0.0, 0.0, 0.0)),
+    "animal": (ASSETS + "cow_quaternius.glb", [0.9, 2.6, 1.6], (0.0, -90.0, 0.0)),
+    "static": (_MU_TEST + "Bollard-0b87b812751d4545943ef436c5f997a8.glb", [0.8, 0.8, 3.0], (0.0, 0.0, 0.0)),
+}
+
+if _SCN is not None:
+    _raw = _SLB.to_movers_raw(_SCN)
+    _specs = list(_SCN.get("movers", [])) + [dict(cls="static", r=st.get("r"), h=st.get("h"))
+                                             for st in _SCN.get("statics", [])]
+    for _spec, _tr in zip(_specs, _raw):
+        animals.append(ScriptedMover(_spec, _tr))
+    print(f"[3dv] scenario '{_SCN['name']}': {len(_raw)} scripted movers grafted onto the animals path",
+          flush=True)
 _cow_frac = 0.5                                      # the single cow crosses the corridor at mid-span
 c = START[:2] + axis * (np.linalg.norm(GOAL[:2] - START[:2]) * _cow_frac)
 _cow = Animal("cow", c + left * 6.0, -left * 1.0); _cow.id = 900
@@ -539,7 +629,8 @@ def feed(sando, _cache, t_sim, p_drone):
         pos = a.p0 + a.vel * t_sim; c3 = p3(pos, a.size[2] * 0.5)
         if np.linalg.norm(c3[:2] - p_drone[:2]) <= SENSE_R:
             if sando is not None:
-                _dt_into(sando, _cache, a.id, a.size, pos, a.vel, CLASS_LABEL["animal"], t_sim)
+                _dt_into(sando, _cache, a.id, a.size, pos, a.vel,
+                         CLASS_LABEL.get(getattr(a, "cls_name", "animal"), CLASS_LABEL["animal"]), t_sim)
             fed.append(("animal", c3, a.size))
     if sando is not None:
         sando.update_occupancy_map_ptr(cloud)
@@ -568,7 +659,8 @@ def ego_safety_obstacles(p_d, t_sim):
         c3 = p3(pos, a.size[2] * 0.5)
         if np.linalg.norm(c3[:2] - p_d[:2]) <= SENSE_R:
             out.append((c3, (float(a.vel[0]), float(a.vel[1]), 0.0),
-                        0.5 * float(max(a.size[0], a.size[1])), EGO_PERCLASS_DSAFE["animal"]))
+                        0.5 * float(max(a.size[0], a.size[1])),
+                        EGO_PERCLASS_DSAFE.get(getattr(a, "cls_name", "animal"), 0.7)))
     return out
 
 
@@ -601,7 +693,9 @@ def _local_static(p_d):
 # EGO_STATIC_MAP=1: BOTH ours and native perceive static as the local KNOWN map (fair + realistic); movers stay
 # forward-cone for both. =0: forward-cone static (the strict single-depth-cam setup). The only A/B variable stays the
 # safety layer either way.
-STATIC_MAP = os.environ.get("EGO_STATIC_MAP", "1") == "1"   # default ON: known static map (both ours+native, fair+real)
+STATIC_MAP = os.environ.get("EGO_STATIC_MAP", "0") == "1"   # REAL-DEPLOYMENT DEFAULT (2026-07-03):
+# no prior map -- the map is BUILT (cone observation + occ_remember v2 memory). EGO_STATIC_MAP=1
+# restores the old 360-degree known-map convenience as an explicit CONTROL condition.   # default ON: known static map (both ours+native, fair+real)
 
 
 def _percept_static(p_d, heading):
@@ -647,12 +741,67 @@ def _path_free_dist(p_d, heading, t_sim):
 EGO_PREDICT = os.environ.get("EGO_PREDICT", "1") == "1"
 
 
+_PFE_MEMO = {"t": None, "out": None, "pred": None}
+
+
+def _kf_movers_realistic(p_d, t_sim, cam_heading):
+    """PERCEPT=realistic twin of kf_movers on the cone path: same output contract
+    [(oid, c3_kf, vel3, r_eff, d_safe)] + _KF_PRED, but detections come from the shared perception
+    front-end (occlusion + miss + noise + NN association -- track ids, NOT GT object ids). Coasting
+    READY tracks inflate their keep-out by MAN_MEM_K * pos_sigma exactly like the GT path's track
+    memory; a coasting NOT-ready track (single glimpse, huge two-point prior sigma) is NOT emitted,
+    mirroring the GT memory loop's `if not trk.ready: continue` -- otherwise one noisy glimpse casts
+    a ~+8 m phantom keep-out the very next tick. MEMOIZED per t_sim: debug re-queries in the same
+    tick (MAN_COLLDBG, slip) must not advance the stateful front-end twice.
+    v1 honesty note: occluders are the MOVER cylinders only; static buildings do not occlude yet."""
+    global _KF_PRED
+    if _PFE_MEMO["t"] == t_sim:
+        _KF_PRED = _PFE_MEMO["pred"]
+        return _PFE_MEMO["out"]
+    _KF_PRED = []
+    cyls = []
+    for _oid, cls, pos, vel, size in native_objects():
+        if cls == "static" or EGO_PERCLASS_DSAFE.get(cls) is None:
+            continue
+        cyls.append((np.asarray(pos[:2], float), 0.5 * float(max(size[0], size[1])), float(size[2]), cls))
+    for a in animals:
+        pos = a.p0 + a.vel * t_sim
+        cyls.append((np.asarray(pos[:2], float), 0.5 * float(max(a.size[0], a.size[1])), float(a.size[2]),
+                     getattr(a, "cls_name", "animal")))
+    tracks = _PFE.step(p_d[:2], (np.cos(cam_heading), np.sin(cam_heading)), cyls)
+    out = []
+    for tr in tracks:
+        if tr.miss > 0 and (not MAN_MEM or not tr.trk.ready):
+            continue    # memory OFF -> no coasting ghosts (same EGO_MEM dial as gt); single-glimpse coaster:
+            #             no usable state yet either way
+        d_safe = EGO_PERCLASS_DSAFE.get(tr.cls, 0.8)
+        zc = 0.5 * tr.h
+        if tr.trk.ready:
+            kc0, kv, _ka = tr.trk.state()
+            kc0 = np.array([kc0[0], kc0[1], zc])
+            pred = tr.trk.predict(np.linspace(0.0, EGO_TAU_TRUST, 6))
+        else:
+            kc0, kv = p3(tr.xy, zc), np.zeros(3)
+            pred = np.asarray([kc0, kc0])
+        if not EGO_PREDICT:                                 # A/B ablation: reactive, no forecast
+            kv = np.zeros(3); pred = np.asarray([kc0, kc0])
+        r_eff = tr.r + (MAN_MEM_K * tr.trk.pos_sigma if tr.miss > 0 else 0.0)
+        out.append((f"trk{tr.id}", kc0, (float(kv[0]), float(kv[1]), 0.0), float(r_eff), d_safe))
+        _KF_PRED.append((np.asarray(tr.xy[:2], float).copy(), np.asarray(kc0[:2], float).copy(),
+                         [(float(p[0]), float(p[1])) for p in pred], float(zc)))
+    _PFE_MEMO["t"], _PFE_MEMO["out"], _PFE_MEMO["pred"] = t_sim, out, _KF_PRED
+    return out
+
+
 def kf_movers(p_d, t_sim, cam_heading=None):
     """Like ego_safety_obstacles, but each mover's centre + velocity come from a LIVE per-mover CA-Kalman filter
     fed NOISY detections of the GT position (this is what proves the KF is in the loop, not GT omniscience). Also
     stashes each filter's PREDICTED future trajectory into _KF_PRED for draw_predictions. When cam_heading is given,
     a mover is only DETECTED if it falls in the forward depth cone (same sensor as native's fov_cloud) -> ours and
-    native track the SAME movers; the KF prediction on top is the safety layer. Returns [(oid,c3,vel,r_obs,d_safe)]."""
+    native track the SAME movers; the KF prediction on top is the safety layer. Returns [(oid,c3,vel,r_obs,d_safe)].
+    PERCEPT=realistic reroutes the cone path through the shared perception front-end (see _kf_movers_realistic)."""
+    if _PERCEPT_REAL and cam_heading is not None:
+        return _kf_movers_realistic(p_d, t_sim, cam_heading)
     global _KF_PRED
     _KF_PRED = []
     raw = []
@@ -671,7 +820,8 @@ def kf_movers(p_d, t_sim, cam_heading=None):
         pos = a.p0 + a.vel * t_sim
         c3 = p3(pos, a.size[2] * 0.5)
         if seen(c3):
-            raw.append((getattr(a, "id", id(a)), c3, 0.5 * float(max(a.size[0], a.size[1])), EGO_PERCLASS_DSAFE["animal"]))
+            raw.append((getattr(a, "id", id(a)), c3, 0.5 * float(max(a.size[0], a.size[1])),
+                        EGO_PERCLASS_DSAFE.get(getattr(a, "cls_name", "animal"), EGO_PERCLASS_DSAFE["animal"])))
     out = []
     fresh = set()                                                          # oids DETECTED in-cone this tick
     for (oid, c3, r, d) in raw:
@@ -768,7 +918,7 @@ def _slip_mover_cloud(p_d, t_sim):
     return np.asarray(pts, float) if pts else np.zeros((0, 3))
 
 
-def ego_speed_search(p_d, v_d, t_sim):
+def ego_speed_search(p_d, v_d, t_sim, u0=0.0):
     """SLIP core. EGO has just committed ONE tight B-spline X(u). Pick the FASTEST scalar speed-warp s such that
     flying X at rate s is certified clear of every KF-predicted moving object, via the SOUND re-timing
     substitution: flying X(u) at rate s -> real time tau=u/s -> mover c(tau)=c0+v tau+0.5 a tau^2 becomes, in the
@@ -809,8 +959,14 @@ def ego_speed_search(p_d, v_d, t_sim):
             # certify the PREDICTED moving obstacle (re-timed). NO frozen-mover variant: it certifies the mover's
             # CURRENT position, which is exactly where slip-behind passes through -> it would forbid every slip.
             # KF deviation is covered by the v_eff tube + the 0.1s per-tick re-cert (a mover can't jump in one DT).
-            hp, _ = ego.certify_horizontal(obs_c0=c0, R=R, obs_vel=tuple(vel / s), obs_acc=(0, 0, 0),
-                                           t_hi=s * EGO_TAU_TRUST, v_eff=EGO_VEFF_SLIP / s, delta=REPLAN_DT * s)
+            # STALE-SPLINE WINDOW FIX (audit 6/27): the drone is u0 deep into the committed spline
+            # (u0~0 right after a replan; grows when replans FAIL). Certifying [0, s*TAU] from the
+            # spline HEAD proves the already-flown past, not the upcoming window. Back-date the mover
+            # to the spline start (c0 - v*u0/s) and certify [0, u0 + s*TAU]: at param u the mover sits
+            # at its true CV position for real time (u-u0)/s, so the REAL upcoming [0,TAU] is covered.
+            c0b = np.asarray(c0, float) - np.asarray(vel, float) * (u0 / s)
+            hp, _ = ego.certify_horizontal(obs_c0=c0b, R=R, obs_vel=tuple(vel / s), obs_acc=(0, 0, 0),
+                                           t_hi=u0 + s * EGO_TAU_TRUST, v_eff=EGO_VEFF_SLIP / s, delta=REPLAN_DT * s)
             if not hp:
                 ok = False; break
         if ok:
@@ -819,7 +975,7 @@ def ego_speed_search(p_d, v_d, t_sim):
     return 0.0, "blocked"                                    # no certified warp -> hover on the same path
 
 
-def ego_slip_feasible(p_d, v_d, t_sim, s):
+def ego_slip_feasible(p_d, v_d, t_sim, s, u0=0.0):
     """Re-certify ONE specific speed-warp s against the current KF movers (used to certify the post-LPF FLOWN
     scale: the LPF may release to a slower s that is NOT certified — for a slip-ahead mover, slowing is unsafe)."""
     if s <= 1e-3:
@@ -832,8 +988,9 @@ def ego_slip_feasible(p_d, v_d, t_sim, s):
         if closing <= EGO_APPROACH_EPS and dist > r_obs + body + EGO_SLIP_DSAFE:
             continue
         R = r_obs + body + EGO_SLIP_DSAFE
-        hp, _ = ego.certify_horizontal(obs_c0=c0, R=R, obs_vel=tuple(vel / s), obs_acc=(0, 0, 0),
-                                       t_hi=s * EGO_TAU_TRUST, v_eff=EGO_VEFF_SLIP / s, delta=REPLAN_DT * s)
+        c0b = c0 - vel * (u0 / s)                    # stale-spline window fix (see ego_speed_search)
+        hp, _ = ego.certify_horizontal(obs_c0=c0b, R=R, obs_vel=tuple(vel / s), obs_acc=(0, 0, 0),
+                                       t_hi=u0 + s * EGO_TAU_TRUST, v_eff=EGO_VEFF_SLIP / s, delta=REPLAN_DT * s)
         if not hp:
             return False
     return True
@@ -863,7 +1020,9 @@ def _load_perclass_conf(eps):
 
 
 PERCLASS_CONF = _load_perclass_conf(MAN_EPS)   # {d_safe: (q_conformal, v_eff)}; empty -> fall back to MAN_QCONF/MAN_VEFF
-MAN_TRACK = float(os.environ.get("EGO_TRACK", 0.45))   # HCT-D plan->flown TRACKING margin, split-conformal CALIBRATED
+MAN_TRACK = float(os.environ.get("EGO_TRACK", 0.473))  # HCT-D plan->flown TRACKING margin: 0.473 = the LEGAL
+#   eps=0.01 per-flight quantile over all 100 episodes (B-bucket 2026-07-03; old 0.45 was hand-picked BELOW the
+#   observed max 0.473 -- an unbacked number the 6/27 audit flagged).
 #   on the PER-FLIGHT (episode) unit -- the correct exchangeable unit for a per-flight collision-freedom guarantee
 #   (windows within one flight are autocorrelated, NOT exchangeable -- the old per-window 0.29 m gave only marginal
 #   coverage and ~30% of FLIGHTS breached it; code-review 2026-06-27 critical fix). delta_track = (1-eps) quantile of
@@ -910,6 +1069,22 @@ _KF = {}                                                    # mover id -> MoverT
 _KF_RNG = np.random.default_rng(int(args.seed) * 7 + 1)
 KF_MEAS_NOISE = float(os.environ.get("EGO_MEASNOISE", 0.10))   # detection noise (m) the filter must see through
 _KF_PRED = []                                               # latest [(now_xy, [predicted xy over horizon])] for drawing
+# ---- PERCEPT=realistic: swap the GT-see-through mover perception (guaranteed in-cone detection, GT-keyed
+# identity) for the SHARED front-end (perception.py: cone + hard occlusion + distance miss/noise + NN-associated
+# tracks, no GT identity). Applies only to the real cone path (cam_heading given); the omniscient re-query /
+# debug paths keep GT. Default stays "gt" until the B-bucket recalibration (headline semantics must not move).
+_PERCEPT_REAL = os.environ.get("PERCEPT", "realistic") == "realistic"   # FROZEN 2026-07-03: realistic default
+_PFE = None
+if _PERCEPT_REAL:
+    from perception import PerceptionFrontEnd, PerceptCfg
+    _pcfg = PerceptCfg.from_env(dt=REPLAN_DT)
+    if "PERCEPT_FOV_DEG" not in os.environ:                 # default the cone to THIS harness's sensor args
+        _pcfg.fov_deg = float(args.fov_deg)
+    if "PERCEPT_RANGE" not in os.environ:
+        _pcfg.fov_range = float(args.fov_range)
+    _PFE = PerceptionFrontEnd(_pcfg, seed=int(args.seed) * 13 + 5)
+    print(f"[percept] REALISTIC front-end on: cone {_pcfg.fov_deg:.0f}deg/{_pcfg.fov_range:.0f}m, "
+          f"occlusion={_pcfg.occlusion}, p_miss0={_pcfg.p_miss0}", flush=True)
 # ---- OUT-OF-CONE MOVER TRACK MEMORY (extrapolate-only; NO GT read for unseen movers, so still fair vs native) ----
 # A mover that leaves the +-fov_deg/fov_range cone used to vanish from the cert + occupancy the SAME tick (forget-
 # after-pass) while its KF froze (no predict, no covariance growth). Instead we KEEP a recently-seen mover for a few
@@ -918,6 +1093,9 @@ _KF_PRED = []                                               # latest [(now_xy, [
 MAN_MEM = os.environ.get("EGO_MEM", "1") == "1"             # master switch for out-of-cone mover track memory
 MAN_MEM_TICKS = int(os.environ.get("EGO_MEM_TICKS", 8))    # remember an out-of-cone mover this many replan ticks (~0.8s @10Hz)
 MAN_MEM_K = float(os.environ.get("EGO_MEM_K", 2.0))        # keep-out inflation = this many KF position-sigmas (covariance growth)
+if _PFE is not None and "PERCEPT_TTL" not in os.environ:
+    _PFE.cfg.ttl_ticks = MAN_MEM_TICKS                     # realistic memory horizon follows the SAME dial as gt
+    # (a gt-vs-realistic A/B must not silently compare different memory policies)
 MAN_PHI = np.radians(25.0)
 MAN_DEADBAND = 0.5    # hysteresis: keep the CURRENT maneuver unless another certified one beats its goal-ward
                       # speed by >this (m/s). Stops the around-L/R/over flicker that brakes-and-reaccelerates
@@ -940,7 +1118,10 @@ def _man_cloud(p_d, heading, t_sim, movers):
         # naive version (mover surfaces removed only at the current frame) leaves phantom walls along mover trails
         # and over-densifies -> on seed 5 it walled the drone in (froze, climb x31). Default OFF = the validated
         # single-frame path. Fixing memory (decay + mover-track removal) is future work; see occ_remember().
-        stat = np.asarray(occ_remember(_raw, p_d, movers) if os.environ.get("OCC_MEM") == "1" else _raw, float)
+        stat = np.asarray(_raw if os.environ.get("OCC_MEM", "1") == "0" else
+                          occ_remember(_raw, p_d, movers, t_sim), float)
+        # ^ REAL-DEPLOYMENT DEFAULT (2026-07-03): the map is BUILT (v2 memory: cap+TTL). OCC_MEM=0
+        #   restores single-frame cone-only static as an explicit ablation.
     elif len(STATIC_CLOUD):
         # FAIR-COMPARISON perception: static comes through the SAME forward depth cone native's fov_cloud uses (heading
         # == cam yaw), NOT a 360-degree omniscient map. Both planners therefore see the identical static, so the only
@@ -1025,10 +1206,13 @@ def ego_maneuver_replan(p_d, v_d, a_d, cur_wp, t_sim):
         # mover-conservatism -> path churn -> MORE static grazes 9->13, reach 88->84). Per-class tube also reverted to
         # the pedestrian scalar (documented limitation); the dominant problem is the STATIC gate, not the mover cert.
         for (_oid, c3, vel, r_obs, d_safe) in movers:
-            R = r_obs + MAN_DSAFE + MAN_QCONF + MAN_TRACK   # +tracking margin so the cert covers the FLOWN path
-            hp, _ = ego.certify_horizontal(obs_c0=c3, R=R, obs_vel=vel, t_hi=EGO_TAU_TRUST, v_eff=MAN_VEFF, delta=REPLAN_DT)
-            hc, _ = ego.certify_horizontal(obs_c0=c3, R=R, obs_vel=(0, 0, 0), t_hi=EGO_TAU_TRUST, v_eff=MAN_VEFF, delta=REPLAN_DT)
-            vo, _ = ego.certify_above(z_clear=2.0 * c3[2] + MAN_REACH_PAD + MAN_DSAFE_V + MAN_QCONF + MAN_TRACK,
+            # PER-CLASS conformal tube (was the audit's dead code: PERCLASS_CONF loaded but never read;
+            # every class got the pedestrian scalar). Falls back to the scalars when calib lacks the class.
+            q_c, veff_c = PERCLASS_CONF.get(d_safe, (MAN_QCONF, MAN_VEFF))
+            R = r_obs + MAN_DSAFE + q_c + MAN_TRACK         # +tracking margin so the cert covers the FLOWN path
+            hp, _ = ego.certify_horizontal(obs_c0=c3, R=R, obs_vel=vel, t_hi=EGO_TAU_TRUST, v_eff=veff_c, delta=REPLAN_DT)
+            hc, _ = ego.certify_horizontal(obs_c0=c3, R=R, obs_vel=(0, 0, 0), t_hi=EGO_TAU_TRUST, v_eff=veff_c, delta=REPLAN_DT)
+            vo, _ = ego.certify_above(z_clear=2.0 * c3[2] + MAN_REACH_PAD + MAN_DSAFE_V + q_c + MAN_TRACK,
                                       t_hi=EGO_TAU_TRUST, delta=REPLAN_DT)
             if not ((hp and hc) or vo):
                 return False
@@ -1255,8 +1439,9 @@ def feed_native(t_sim, p_drone):
     for a in animals:
         pos = a.p0 + a.vel * t_sim; c3 = p3(pos, a.size[2] * 0.5)
         if np.linalg.norm(c3[:2] - p_drone[:2]) <= SENSE_R:
-            _add_native_traj(100000 + a.id, a.size, pos, a.vel, "animal", t_sim)
-            fed.append(("animal", c3, a.size))
+            _cn = getattr(a, "cls_name", "animal")
+            _add_native_traj(100000 + a.id, a.size, pos, a.vel, _cn, t_sim)
+            fed.append((_cn, c3, a.size))
     native.clean_old_trajs(t_sim)
     return fed
 
@@ -1451,6 +1636,7 @@ if os.environ.get("TREE_DBG") == "1":   # diagnostic: does WLH match the real me
               f"H={np.median([t[2] for t in tight[tn]]):.2f}") if tn in tight else "  (no tight bounds)"
         print(f"[treedbg]   {tn}: n={n}  WLH W={m[0]:.2f} L={m[1]:.2f} H={m[2]:.2f}{tt}", flush=True)
 
+_STALE_CNT = [0, 0]                    # [stale ticks, flown ticks] -- composition-theorem branch 2 freq
 lap_idx = 0
 quit_now = False
 while not quit_now:
@@ -1471,6 +1657,9 @@ while not quit_now:
             route, axis, left = plan_route(lap_idx + (att + 1) * 7919)   # different start/route, same seed family
         c_best, route, axis, left = best
         print(f"[3dv] clear_spawn: START spawn clearance {c_best:+.2f}m (target >= {SPAWN_CLR_MIN}m)", flush=True)
+    if _STALE_CNT[1]:
+        print(f"[theorem] stale-spline branch: {_STALE_CNT[0]}/{_STALE_CNT[1]} flown ticks "
+              f"({100.0*_STALE_CNT[0]/_STALE_CNT[1]:.1f}%)", flush=True)
     lap_idx += 1
     START = route[0]; GOAL = route[-1]
     wp = [np.asarray(q, float) for q in route[1:]]   # ordered goals: intermediate waypoints + final goal
@@ -1514,6 +1703,9 @@ while not quit_now:
     man_switches = 0; man_counts = {}; _prev_mk = None; _MAN_STATE["kind"] = None   # reset hysteresis per lap
     _sw_lr = 0; _sw_sa = 0; _sw_oth = 0; _sp_hist = []   # thrash instrumentation: classify switches + speed-history cost
     _KF.clear()                                          # fresh mover trackers per lap (no stale cross-lap KF state)
+    if _PFE is not None:
+        _PFE.tracks.clear()                              # realistic front-end: no stale cross-lap tracks either
+        _PFE_MEMO["t"] = None                            # and no stale same-t memo across laps
     while t < T_MAX and not reached:
         cur_wp = wp[wp_i]
         if ego is not None:
@@ -1567,9 +1759,9 @@ while not quit_now:
                     ego_hold_class = wc; ego_n_slow += 1     # anticipatory brake: slowing, not stopped
             elif args.slip and ego_dur > 1e-3:
                 # SLIP: fastest space-time speed-warp the cert allows (>1 = slip-AHEAD, faster than EGO's plan).
-                s_raw, wc = ego_speed_search(p_d, v_d, t)
+                s_raw, wc = ego_speed_search(p_d, v_d, t, u0=t_ego)
                 g = s_raw if s_raw < ego_g_prev else min(s_raw, ego_g_prev + EGO_G_RELEASE)   # brake free, release slow
-                while g >= EGO_S_MIN - 1e-9 and not ego_slip_feasible(p_d, v_d, t, g):         # RE-CERT THE FLOWN SCALE
+                while g >= EGO_S_MIN - 1e-9 and not ego_slip_feasible(p_d, v_d, t, g, u0=t_ego):  # RE-CERT THE FLOWN SCALE
                     g -= EGO_S_STEP
                 ego_speed_g = g if g >= EGO_S_MIN - 1e-9 else 0.0
                 ego_g_prev = ego_speed_g
@@ -1648,6 +1840,10 @@ while not quit_now:
                 s = (ego.eval(min(t_ego + ego_speed_g * DT, max(ego_dur - 1e-3, 0.0)))
                      if (ego_dur > 1e-3 and not ego_cert_hold) else None)
                 if s is not None:
+                    _STALE_CNT[1] += 1
+                    if t_ego > REPLAN_DT * 1.5:
+                        _STALE_CNT[0] += 1        # flying a spline older than one replan period =
+                        #                            the theorem's STALE branch; freq printed per lap
                     t_ego += ego_speed_g * DT
                     sp_pos, sp_vel, sp_acc = s; sp_pos = np.asarray(sp_pos, float).copy()
                     sp_vel = np.asarray(sp_vel, float) * ego_speed_g            # feed-forward vel matches the warp

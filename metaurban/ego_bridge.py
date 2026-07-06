@@ -8,7 +8,7 @@ import os, ctypes as C
 import numpy as np
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
-_SO = os.path.join(os.path.dirname(_HERE), "ego", "capi", "ego_capi.so")
+_SO = os.environ.get("EGO_CAPI_SO") or os.path.join(os.path.dirname(_HERE), "ego", "capi", "ego_capi.so")
 _lib = C.CDLL(_SO)
 _d = C.POINTER(C.c_double)
 
@@ -31,6 +31,13 @@ _certify_horiz = _sig("ego_certify_horizontal", C.c_int, C.c_void_p, _d, _d, _d,
                       C.c_double, C.c_double, _d)
 _certify_above = _sig("ego_certify_above", C.c_int, C.c_void_p, C.c_double, C.c_double, C.c_double,
                       C.c_double, C.c_double, _d)
+try:    # THREE-VALUED verdicts (1 CERTIFIED / 0 UNKNOWN / -1 REFUTED); absent in a stale pre-2026-07 .so
+    _certify_horiz3 = _sig("ego_certify_horizontal3", C.c_int, C.c_void_p, _d, _d, _d, C.c_double, C.c_double,
+                           C.c_double, C.c_double, _d)
+    _certify_above3 = _sig("ego_certify_above3", C.c_int, C.c_void_p, C.c_double, C.c_double, C.c_double,
+                           C.c_double, C.c_double, _d)
+except AttributeError:
+    _certify_horiz3 = _certify_above3 = None
 _destroy = _sig("ego_destroy", None, C.c_void_p)
 
 
@@ -59,7 +66,15 @@ class EGOPlanner:
 
     def replan(self, start, vel, acc, goal, goal_vel=(0, 0, 0), random_poly=False):
         _a, sp = _p(start); _b, sv = _p(vel); _c, sa = _p(acc); _d2, gp = _p(goal); _e, gv = _p(goal_vel)
-        ok = _replan(self._h, sp, sv, sa, gp, gv, 1 if self._poly_init else 1, 1 if random_poly else 0)
+        # HONEST warm-start plumbing (audit 6/27: the old `1 if self._poly_init else 1` always sent 1
+        # -- warm start was dead code wearing a live expression). Default STAYS polynomial init
+        # (identical behavior, all numbers stand); EGO_WARMSTART=1 opts into warm starts, now safe
+        # behind the capi empty-local_data_ fallback guard.
+        import os as _os
+        warm_ok = _os.environ.get("EGO_WARMSTART") == "1" and not self._poly_init
+        ok = _replan(self._h, sp, sv, sa, gp, gv, 0 if warm_ok else 1, 1 if random_poly else 0)
+        if ok:
+            self._poly_init = False
         return bool(ok)
 
     def duration(self): return float(_duration(self._h))
@@ -98,6 +113,28 @@ class EGOPlanner:
         ok = _certify_above(self._h, float(z_clear), float(t_hi), float(v_eff_z), float(delta),
                             float(bez_pad), C.byref(margin))
         return bool(ok), float(margin.value)
+
+    def certify_horizontal3(self, obs_c0, R, obs_vel=(0, 0, 0), obs_acc=(0, 0, 0), t_hi=-1.0, v_eff=0.0, delta=0.0):
+        """Three-valued AROUND verdict: ('certified'|'refuted'|'unknown', margin). 'refuted' = the horizontal
+        keep-out is PROVABLY entered on a sub-interval (truly blocked); 'unknown' = not proven either way
+        (envelope too loose / budget exhausted -- the only verdict a deeper budget could still certify).
+        Raises if ego_capi.so is stale (pre-3-valued); rebuild it rather than silently degrading."""
+        if _certify_horiz3 is None:
+            raise RuntimeError("ego_capi.so is stale: rebuild it (missing ego_certify_horizontal3)")
+        _a, c0 = _p(obs_c0); _b, vv = _p(obs_vel); _c, aa = _p(obs_acc)
+        margin = C.c_double(0.0)
+        s = _certify_horiz3(self._h, c0, vv, aa, float(R), float(t_hi), float(v_eff), float(delta), C.byref(margin))
+        return ("certified" if s > 0 else "refuted" if s < 0 else "unknown"), float(margin.value)
+
+    def certify_above3(self, z_clear, t_hi=-1.0, v_eff_z=0.0, delta=0.0, bez_pad=1e-9):
+        """Three-valued OVER verdict: ('certified'|'refuted'|'unknown', margin). 'refuted' = p_z provably
+        drops below the clearance floor somewhere in the window."""
+        if _certify_above3 is None:
+            raise RuntimeError("ego_capi.so is stale: rebuild it (missing ego_certify_above3)")
+        margin = C.c_double(0.0)
+        s = _certify_above3(self._h, float(z_clear), float(t_hi), float(v_eff_z), float(delta),
+                            float(bez_pad), C.byref(margin))
+        return ("certified" if s > 0 else "refuted" if s < 0 else "unknown"), float(margin.value)
 
     def __del__(self):
         try: _destroy(self._h)

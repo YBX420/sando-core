@@ -1,0 +1,74 @@
+{
+ "schema": "sando-scenario-v1",
+ "name": "fast_overtake",
+ "description": "Rear-approach stressor: a fast vehicle comes from BEHIND the drone along the corridor and overtakes with small lateral offset, timed to pass mid-flight; a crossing pedestrian ahead forces the drone off the centerline at the same moment. Stresses KF on high closing speed from astern + the certificate on a mover whose keep-out sweeps THROUGH the corridor axis. HONESTY: replay_core perception is range-gated (14 m, no cone), so the drone 'sees' the rear approach; the true blind-rear semantics need the cone-gated render harness / future realistic front-end.",
+ "map": {
+  "seed": null
+ },
+ "drone": {
+  "start": [
+   0.0,
+   0.0,
+   1.5
+  ],
+  "goal": [
+   22.0,
+   0.0,
+   1.5
+  ],
+  "cruise_z": 1.5,
+  "max_vel": 8.0,
+  "max_acc": 6.0
+ },
+ "statics": [],
+ "movers": [
+  {
+   "cls": "vehicle",
+   "asset": null,
+   "spawn_t": "$spawn_t",
+   "path": [
+    [
+     -14.0,
+     1.6
+    ],
+    [
+     30.0,
+     1.6
+    ]
+   ],
+   "speed": {
+    "v0": 4.0,
+    "v1": "$v_pass",
+    "a": 2.0
+   },
+   "hold_end": false
+  },
+  {
+   "cls": "pedestrian",
+   "spawn_t": 0.0,
+   "path": [
+    [
+     14.0,
+     -4.0
+    ],
+    [
+     14.0,
+     4.0
+    ]
+   ],
+   "speed": 1.1,
+   "hold_end": true
+  }
+ ],
+ "params": {
+  "spawn_t": {
+   "value": 0.5,
+   "jitter": 0.5
+  },
+  "v_pass": {
+   "value": 9.0,
+   "jitter": 2.0
+  }
+ },
+ "t_max": 25.0
+}
