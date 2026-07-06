@@ -187,6 +187,38 @@ int main() {
                 above_pad.margin, above_lo.margin, pad ? "OK" : "FAIL");
   }
 
+  // ---- deg-1 (straight-line) graft: low-degree segments must be ELEVATED and truly checked, NOT skipped.
+  // Regression for the false-certify where an all-deg-1 trajectory skipped every segment -> worst_hi=-inf
+  // -> {certified=true, margin=+inf} (a straight line through an obstacle "certified" with infinite margin).
+  {
+    bcert::BSeg seg;
+    seg.bern = { Eigen::Vector3d(0, 0, 1.5), Eigen::Vector3d(30, 0, 1.5) };  // deg-1: two endpoints on [0,3]
+    seg.t0 = 0.0; seg.dur = 3.0;
+    std::vector<bcert::BSeg> line = { seg };
+    // UNSAFE: obstacle sphere sits ON the line (centre 15,0,1.5) -> must NOT certify (was false-certified).
+    auto thru = bcert::certify_segments_vs_sphere(line, Eigen::Vector3d(15, 0, 1.5), Z, Z, 1.0);
+    ++ncase;
+    bool ok_thru = !thru.certified;
+    if (!ok_thru) ++fails;
+    std::printf("deg1 line THROUGH obstacle : cert=%d margin=%+.3e (must be cert=0)  %s\n",
+                (int)thru.certified, thru.margin, ok_thru ? "OK" : "FAIL false-certify");
+    // SAFE: obstacle 9 m off the line -> must certify with positive margin (elevation kept it non-vacuous).
+    auto clear = bcert::certify_segments_vs_sphere(line, Eigen::Vector3d(15, 9, 1.5), Z, Z, 1.0);
+    ++ncase;
+    bool ok_clear = clear.certified && clear.margin > 0.0;
+    if (!ok_clear) ++fails;
+    std::printf("deg1 line CLEAR of obstacle : cert=%d margin=%+.3e (must be cert=1)  %s\n",
+                (int)clear.certified, clear.margin, ok_clear ? "OK" : "FAIL vacuous");
+    // GUARD: no segment enforced (empty trajectory) -> nothing proven -> must NOT certify.
+    std::vector<bcert::BSeg> none;
+    auto empty = bcert::certify_segments_vs_sphere(none, Z, Z, Z, 1.0);
+    ++ncase;
+    bool ok_empty = !empty.certified;
+    if (!ok_empty) ++fails;
+    std::printf("empty traj (nothing enforced) : cert=%d (must be cert=0)  %s\n",
+                (int)empty.certified, ok_empty ? "OK" : "FAIL");
+  }
+
   std::printf("\n[bernstein_cert] %d cases, %d fail\n", ncase, fails);
   if (fails == 0) std::printf("ALL PASS\n");
   return fails == 0 ? 0 : 1;

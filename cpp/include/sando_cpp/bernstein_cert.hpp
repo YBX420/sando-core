@@ -215,6 +215,8 @@ inline Verdict certify_traj_vs_sphere(const MinjerkTraj& tr, const Eigen::Vector
     const double sw = seg_worst(Suse, R2, 0, maxdepth);
     if (sw > worst_hi) worst_hi = sw;
   }
+  if (worst_hi == -std::numeric_limits<double>::infinity())
+    return {false, 0.0};   // no segment enforced (tr.M==0 or all beyond t_hi) -> nothing proven -> NOT certified
   certified = (worst_hi <= 0.0);
   return {certified, -worst_hi};
 }
@@ -291,7 +293,7 @@ inline double g_seg_worst(const std::vector<Iv>& S, const Iv& R2, int depth, int
 // Needed once the tube radius rho(t) grows with time (deg-2 rho^2) so R^2 is no longer a constant:
 // the deficit must be formed BEFORE de Casteljau subdivision (subdividing a fixed R^2 against S is only
 // valid for a constant tube).  hull = max_k b_hi_k; subdivide b (sound convex combos) and recurse.
-inline double g_seg_worst_deficit(const std::vector<Iv>& b, int depth, int maxdepth) {
+inline double g_seg_worst_deficit(const std::vector<Iv>& b, int depth, int maxdepth, bool* refuted = nullptr) {
   // hull = max(coeff.hi) is an UPPER bound on the segment's sup deficit; lo_min = min(coeff.lo) is a guaranteed
   // LOWER bound on every value (Bernstein convex-hull property: value(t) in [min coeff, max coeff]).
   double hull = -std::numeric_limits<double>::infinity();
@@ -300,9 +302,15 @@ inline double g_seg_worst_deficit(const std::vector<Iv>& b, int depth, int maxde
   // early-exit, SOUND both ways: hull<=0 => sup<=0 (this segment is safe); lo_min>0 => the deficit is provably
   // POSITIVE everywhere => sup>0 (NOT certifiable, e.g. a ground candidate vs a fly-OVER plane) -> stop now
   // instead of subdividing to maxdepth (this is what made certify_above ~2000x slower than certify_horizontal).
-  if (hull <= 0.0 || lo_min > 0.0 || depth >= maxdepth) return hull;
+  // lo_min>0 on this (sub-)interval is also the REFUTATION WITNESS for the three-valued verdict: the deficit is
+  // provably positive on a whole sub-interval => the proof obligation is genuinely violated ("truly blocked"),
+  // vs. hull>0 with no witness = envelope too loose / budget exhausted (UNKNOWN). Optional out-param only;
+  // refuted=nullptr keeps every existing caller byte-identical.
+  if (lo_min > 0.0) { if (refuted) *refuted = true; return hull; }
+  if (hull <= 0.0 || depth >= maxdepth) return hull;
   std::vector<Iv> L, R; g_subdiv(b, L, R);
-  return std::max(g_seg_worst_deficit(L, depth + 1, maxdepth), g_seg_worst_deficit(R, depth + 1, maxdepth));
+  return std::max(g_seg_worst_deficit(L, depth + 1, maxdepth, refuted),
+                  g_seg_worst_deficit(R, depth + 1, maxdepth, refuted));
 }
 
 // Whole committed PIECEWISE-BERNSTEIN trajectory (any degree per segment) vs ONE sphere obstacle whose
@@ -324,7 +332,7 @@ inline Verdict certify_segments_vs_sphere(const std::vector<BSeg>& segs, const E
                                           const Eigen::Vector3d& vel, const Eigen::Vector3d& acc,
                                           double R, double t_hi_in = std::numeric_limits<double>::infinity(),
                                           int maxdepth = 16, double v_eff = 0.0, double delta = 0.0,
-                                          int n_axes = 3) {
+                                          int n_axes = 3, bool* refuted = nullptr) {
   // rho^2(t) = A t^2 + Bp t + Cp, all carried as outward-rounded intervals for soundness.
   const Iv r0_iv = iv_pt(R), v_iv = iv_pt(v_eff), d_iv = iv_pt(delta), two = iv_pt(2.0);
   const Iv A_iv  = iv_mul(v_iv, v_iv);                                   // v_eff^2
@@ -338,10 +346,14 @@ inline Verdict certify_segments_vs_sphere(const std::vector<BSeg>& segs, const E
   double worst_hi = -std::numeric_limits<double>::infinity();
   for (const auto& sg : segs) {
     const int n = static_cast<int>(sg.bern.size()) - 1;
-    if (n < 2) continue;                                  // need degree >= 2 for the deg-2 obstacle poly
+    if (n < 0) continue;                                  // empty segment: no control points
     const double t0 = sg.t0, dur = sg.dur, seg_hi = t0 + dur;
     if (t0 >= t_hi || dur <= 0.0) continue;
-    std::vector<Iv> S(2 * n + 1, Iv{0.0, 0.0});
+    const int m = n < 2 ? 2 : n;                          // working degree >= 2 for the deg-2 obstacle poly.
+                                                          // Low-degree segments (a straight-line deg-1 graft)
+                                                          // are ELEVATED soundly via g_elevate, not skipped:
+                                                          // skipping left worst_hi=-inf -> false certify+inf.
+    std::vector<Iv> S(2 * m + 1, Iv{0.0, 0.0});
     for (int coord = 0; coord < n_axes; ++coord) {
       const double c0c = c0(coord), vc = vel(coord), ac = acc(coord);
       Iv g0 = iv_add(iv_add(iv_pt(c0c), iv_mul(iv_pt(vc), iv_pt(t0))),
@@ -349,30 +361,34 @@ inline Verdict certify_segments_vs_sphere(const std::vector<BSeg>& segs, const E
       Iv g1 = iv_mul(iv_pt(dur), iv_add(iv_pt(vc), iv_mul(iv_pt(ac), iv_pt(t0))));
       Iv g2 = iv_mul(iv_pt(0.5 * ac), iv_mul(iv_pt(dur), iv_pt(dur)));
       std::vector<Iv> o = {g0, iv_add(g0, iv_mul(iv_rat(1, 2), g1)), iv_add(iv_add(g0, g1), g2)};  // deg 2
-      while (static_cast<int>(o.size()) - 1 < n) o = g_elevate(o);     // elevate obstacle poly to deg n
-      std::vector<Iv> w(n + 1);
-      for (int k = 0; k <= n; ++k) w[k] = iv_sub(iv_pt(sg.bern[k](coord)), o[k]);
-      std::vector<Iv> Sc = g_square(w);                                // deg 2n
-      for (int k = 0; k <= 2 * n; ++k) S[k] = iv_add(S[k], Sc[k]);
+      while (static_cast<int>(o.size()) - 1 < m) o = g_elevate(o);     // elevate obstacle poly to deg m
+      std::vector<Iv> w(n + 1);                                        // position control points as intervals
+      for (int k = 0; k <= n; ++k) w[k] = iv_pt(sg.bern[k](coord));
+      while (static_cast<int>(w.size()) - 1 < m) w = g_elevate(w);     // elevate position to deg m (sound)
+      for (int k = 0; k <= m; ++k) w[k] = iv_sub(w[k], o[k]);          // relative position P - o (deg m)
+      std::vector<Iv> Sc = g_square(w);                                // deg 2m
+      for (int k = 0; k <= 2 * m; ++k) S[k] = iv_add(S[k], Sc[k]);
     }
-    // tube rho^2 as a deg-2 Bernstein poly on this segment (t = t0 + s*dur), elevated to deg 2n
+    // tube rho^2 as a deg-2 Bernstein poly on this segment (t = t0 + s*dur), elevated to deg 2m
     const Iv t0_iv = iv_pt(t0), dur_iv = iv_pt(dur);
     const Iv q0 = iv_add(iv_add(iv_mul(A_iv, iv_mul(t0_iv, t0_iv)), iv_mul(Bp_iv, t0_iv)), Cp_iv); // rho^2(t0)
     const Iv q1 = iv_mul(iv_add(iv_mul(two, iv_mul(A_iv, t0_iv)), Bp_iv), dur_iv);                 // (2A t0 + Bp) dur
     const Iv q2 = iv_mul(A_iv, iv_mul(dur_iv, dur_iv));                                            // A dur^2
     std::vector<Iv> Q = {q0, iv_add(q0, iv_mul(iv_rat(1, 2), q1)), iv_add(iv_add(q0, q1), q2)};    // deg 2
-    while (static_cast<int>(Q.size()) - 1 < 2 * n) Q = g_elevate(Q);  // elevate tube poly to deg 2n
-    // deficit b = rho^2 - S (deg 2n), ASSEMBLED before subdivision; clip to trusted horizon, hull
-    std::vector<Iv> b(2 * n + 1);
-    for (int k = 0; k <= 2 * n; ++k) b[k] = iv_sub(Q[k], S[k]);
+    while (static_cast<int>(Q.size()) - 1 < 2 * m) Q = g_elevate(Q);  // elevate tube poly to deg 2m
+    // deficit b = rho^2 - S (deg 2m), ASSEMBLED before subdivision; clip to trusted horizon, hull
+    std::vector<Iv> b(2 * m + 1);
+    for (int k = 0; k <= 2 * m; ++k) b[k] = iv_sub(Q[k], S[k]);
     if (seg_hi > t_hi) {
       double s_cut = (t_hi - t0) / dur;
       if (s_cut > 1.0) s_cut = 1.0; else if (s_cut < 0.0) s_cut = 0.0;
       b = g_left_subcurve(b, s_cut);
     }
-    const double sw = g_seg_worst_deficit(b, 0, maxdepth);
+    const double sw = g_seg_worst_deficit(b, 0, maxdepth, refuted);
     if (sw > worst_hi) worst_hi = sw;
   }
+  if (worst_hi == -std::numeric_limits<double>::infinity())
+    return {false, 0.0};   // no segment enforced in [0,t_hi] -> nothing proven -> NOT certified (sound)
   return {worst_hi <= 0.0, -worst_hi};
 }
 
@@ -391,7 +407,8 @@ inline Verdict certify_segments_vs_sphere(const std::vector<BSeg>& segs, const E
 inline Verdict certify_segments_above_plane(const std::vector<BSeg>& segs, double z_clear,
                                             double t_hi_in = std::numeric_limits<double>::infinity(),
                                             int maxdepth = 16, double v_eff_z = 0.0,
-                                            double delta = 0.0, double bez_pad = 0.0) {
+                                            double delta = 0.0, double bez_pad = 0.0,
+                                            bool* refuted = nullptr) {
   double t_end = 0.0;
   for (const auto& sg : segs) t_end = std::max(t_end, sg.t0 + sg.dur);
   const double t_hi = std::min(t_hi_in, t_end);
@@ -418,9 +435,11 @@ inline Verdict certify_segments_above_plane(const std::vector<BSeg>& segs, doubl
       if (s_cut > 1.0) s_cut = 1.0; else if (s_cut < 0.0) s_cut = 0.0;
       b = g_left_subcurve(b, s_cut);
     }
-    const double sw = g_seg_worst_deficit(b, 0, maxdepth);
+    const double sw = g_seg_worst_deficit(b, 0, maxdepth, refuted);
     if (sw > worst_hi) worst_hi = sw;
   }
+  if (worst_hi == -std::numeric_limits<double>::infinity())
+    return {false, 0.0};   // no segment enforced (empty / all n<1 / dur<=0 / beyond t_hi) -> NOT certified (sound)
   return {worst_hi <= 0.0, -worst_hi};
 }
 

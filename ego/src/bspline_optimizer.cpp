@@ -188,12 +188,20 @@ namespace ego_planner
         cps_.flag_temp[j] = false;
 
       // step 2
+      // got_intersection_id = last j whose base point was ACTUALLY pushed. Two latent UBs fixed here
+      // (deterministic segfault on the scripted `crossers` scenario, present since upstream EGO-Planner):
+      //  (1) the old `if (got_intersection_id >= 0)` used the STALE id from an earlier j, so a j with NO
+      //      fresh intersection read the UNINITIALIZED intersection_point (garbage length / NaN);
+      //  (2) flag_temp[j] was set true BEFORE the length>1e-5 check, so a degenerate intersection left
+      //      flag_temp[j]=true with base_point[j] EMPTY -- step 3's chain copy then calls .back() on an
+      //      empty vector (the crash). flag_temp[j] must be set ONLY together with an actual push.
       int got_intersection_id = -1;
       for (int j = segment_ids[i].first + 1; j < segment_ids[i].second; ++j)
       {
         Eigen::Vector3d ctrl_pts_law(cps_.points.col(j + 1) - cps_.points.col(j - 1)), intersection_point;
         int Astar_id = a_star_pathes[i].size() / 2, last_Astar_id; // Let "Astar_id = id_of_the_most_far_away_Astar_point" will be better, but it needs more computation
         double val = (a_star_pathes[i][Astar_id] - cps_.points.col(j)).dot(ctrl_pts_law), last_val = val;
+        bool fresh_intersection = false;
         while (Astar_id >= 0 && Astar_id < (int)a_star_pathes[i].size())
         {
           last_Astar_id = Astar_id;
@@ -215,17 +223,17 @@ namespace ego_planner
 
             //cout << "i=" << i << " j=" << j << " Astar_id=" << Astar_id << " last_Astar_id=" << last_Astar_id << " intersection_point = " << intersection_point.transpose() << endl;
 
-            got_intersection_id = j;
+            fresh_intersection = true;
             break;
           }
         }
 
-        if (got_intersection_id >= 0)
+        if (fresh_intersection)
         {
-          cps_.flag_temp[j] = true;
           double length = (intersection_point - cps_.points.col(j)).norm();
           if (length > 1e-5)
           {
+            cps_.flag_temp[j] = true; // set ONLY with the push below (the a-loop always pushes once)
             for (double a = length; a >= 0.0; a -= grid_map_->getResolution())
             {
               occ = grid_map_->getInflateOccupancy((a / length) * intersection_point + (1 - a / length) * cps_.points.col(j));
@@ -239,7 +247,12 @@ namespace ego_planner
                 break;
               }
             }
+            got_intersection_id = j;
           }
+          else
+            cps_.flag_temp[j] = true;  // degenerate intersection: EXCLUDE this cp from the step-3 chain copy
+                                       // (old behaviour) but push nothing -- the step-3 empty-neighbour
+                                       // guards make flagged-but-empty safe (no .back() UB).
         }
       }
 
@@ -282,18 +295,18 @@ namespace ego_planner
         }
       }
 
-      //step 3
+      //step 3  (defence-in-depth: never .back() an empty neighbour -- skip instead, the chain just stops)
       if (got_intersection_id >= 0)
       {
         for (int j = got_intersection_id + 1; j <= final_segment_ids[i].second; ++j)
-          if (!cps_.flag_temp[j])
+          if (!cps_.flag_temp[j] && !cps_.base_point[j - 1].empty())
           {
             cps_.base_point[j].push_back(cps_.base_point[j - 1].back());
             cps_.direction[j].push_back(cps_.direction[j - 1].back());
           }
 
         for (int j = got_intersection_id - 1; j >= final_segment_ids[i].first; --j)
-          if (!cps_.flag_temp[j])
+          if (!cps_.flag_temp[j] && !cps_.base_point[j + 1].empty())
           {
             cps_.base_point[j].push_back(cps_.base_point[j + 1].back());
             cps_.direction[j].push_back(cps_.direction[j + 1].back());
@@ -754,13 +767,16 @@ namespace ego_planner
         for (int j = segment_ids[i].first; j <= segment_ids[i].second; ++j)
           cps_.flag_temp[j] = false;
 
-        // step 2
+        // step 2 -- same two UB fixes as initControlPoints (stale got_intersection_id read the
+        // uninitialized intersection_point; flag_temp set without a matching base_point push).
+        // got_intersection_id now = last j whose base point was ACTUALLY pushed.
         int got_intersection_id = -1;
         for (int j = segment_ids[i].first + 1; j < segment_ids[i].second; ++j)
         {
           Eigen::Vector3d ctrl_pts_law(cps_.points.col(j + 1) - cps_.points.col(j - 1)), intersection_point;
           int Astar_id = a_star_pathes[i].size() / 2, last_Astar_id; // Let "Astar_id = id_of_the_most_far_away_Astar_point" will be better, but it needs more computation
           double val = (a_star_pathes[i][Astar_id] - cps_.points.col(j)).dot(ctrl_pts_law), last_val = val;
+          bool fresh_intersection = false;
           while (Astar_id >= 0 && Astar_id < (int)a_star_pathes[i].size())
           {
             last_Astar_id = Astar_id;
@@ -782,17 +798,17 @@ namespace ego_planner
                    (ctrl_pts_law.dot(cps_.points.col(j) - a_star_pathes[i][Astar_id]) / ctrl_pts_law.dot(a_star_pathes[i][Astar_id] - a_star_pathes[i][last_Astar_id])) // = t
                   );
 
-              got_intersection_id = j;
+              fresh_intersection = true;
               break;
             }
           }
 
-          if (got_intersection_id >= 0)
+          if (fresh_intersection)
           {
-            cps_.flag_temp[j] = true;
             double length = (intersection_point - cps_.points.col(j)).norm();
             if (length > 1e-5)
             {
+              cps_.flag_temp[j] = true; // set ONLY with the push below (the a-loop always pushes once)
               for (double a = length; a >= 0.0; a -= grid_map_->getResolution())
               {
                 bool occ = grid_map_->getInflateOccupancy((a / length) * intersection_point + (1 - a / length) * cps_.points.col(j));
@@ -806,26 +822,26 @@ namespace ego_planner
                   break;
                 }
               }
+              got_intersection_id = j;
             }
             else
-            {
-              got_intersection_id = -1;
-            }
+              cps_.flag_temp[j] = true;  // degenerate: exclude from step-3 chain (old behaviour), no push;
+                                         // empty-neighbour guards below keep it safe.
           }
         }
 
-        //step 3
+        //step 3  (defence-in-depth: never .back() an empty neighbour -- skip instead)
         if (got_intersection_id >= 0)
         {
           for (int j = got_intersection_id + 1; j <= segment_ids[i].second; ++j)
-            if (!cps_.flag_temp[j])
+            if (!cps_.flag_temp[j] && !cps_.base_point[j - 1].empty())
             {
               cps_.base_point[j].push_back(cps_.base_point[j - 1].back());
               cps_.direction[j].push_back(cps_.direction[j - 1].back());
             }
 
           for (int j = got_intersection_id - 1; j >= segment_ids[i].first; --j)
-            if (!cps_.flag_temp[j])
+            if (!cps_.flag_temp[j] && !cps_.base_point[j + 1].empty())
             {
               cps_.base_point[j].push_back(cps_.base_point[j + 1].back());
               cps_.direction[j].push_back(cps_.direction[j + 1].back());

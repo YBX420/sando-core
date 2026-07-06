@@ -6,9 +6,16 @@ using namespace Eigen;
 AStar::~AStar()
 {
     for (int i = 0; i < POOL_SIZE_(0); i++)
+    {
         for (int j = 0; j < POOL_SIZE_(1); j++)
+        {
             for (int k = 0; k < POOL_SIZE_(2); k++)
                 delete GridNodeMap_[i][j][k];
+            delete[] GridNodeMap_[i][j];
+        }
+        delete[] GridNodeMap_[i];
+    }
+    delete[] GridNodeMap_;
 }
 
 void AStar::initGridMap(GridMap::Ptr occ_map, const Eigen::Vector3i pool_size)

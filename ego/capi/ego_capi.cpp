@@ -72,6 +72,9 @@ void ego_update_cloud(void* h, double* pts, int n, double* cam) {
 int ego_replan(void* h, double* sp, double* sv, double* sa, double* gp, double* gv,
                int poly_init, int random_poly) {
   auto* m = (EGOPlannerManager*)h;
+  // warm-start guard (audit 6/27): a warm start with NO committed trajectory (or a consumed one)
+  // reads uninitialized local_data_ -> UB. Fall back to polynomial init instead of trusting it.
+  if (poly_init == 0 && m->local_data_.duration_ <= 1e-6) poly_init = 1;
   bool ok = m->reboundReplan(Eigen::Vector3d(sp[0],sp[1],sp[2]), Eigen::Vector3d(sv[0],sv[1],sv[2]),
                              Eigen::Vector3d(sa[0],sa[1],sa[2]), Eigen::Vector3d(gp[0],gp[1],gp[2]),
                              Eigen::Vector3d(gv[0],gv[1],gv[2]), poly_init != 0, random_poly != 0);
@@ -145,6 +148,39 @@ int ego_certify_above(void* h, double z_clear, double t_hi, double v_eff_z, doub
   auto v = sando::bcert::certify_segments_above_plane(segs, z_clear, th, /*maxdepth*/16, v_eff_z, delta, bez_pad);
   if (margin_out) *margin_out = v.margin;
   return v.certified ? 1 : 0;
+}
+
+// THREE-VALUED verdicts (NEW symbols; the two-valued ego_certify_* above keep their exact old ABI).
+// Return: 1 = CERTIFIED (proof holds over the whole window), -1 = REFUTED (the deficit is provably positive
+// on a sub-interval => the keep-out is GENUINELY violated, "truly blocked"), 0 = UNKNOWN (hull > 0 but no
+// refutation witness: envelope too loose or subdivision budget exhausted). Same interval math, the lo_min>0
+// early-exit that already existed is exported as the refutation witness -- soundness untouched, cost free.
+// UNKNOWN is the only verdict where spending a deeper maxdepth / tighter envelope could still flip to certified.
+int ego_certify_horizontal3(void* h, double* c0, double* vel, double* acc, double R, double t_hi,
+                            double v_eff, double delta, double* margin_out) {
+  auto* m = (EGOPlannerManager*)h;
+  auto segs = build_segs(m);
+  if (segs.empty()) { if (margin_out) *margin_out = -1.0; return 0; }   // nothing committed -> UNKNOWN
+  const double th = (t_hi > 0.0) ? t_hi : std::numeric_limits<double>::infinity();
+  bool refuted = false;
+  auto v = sando::bcert::certify_segments_vs_sphere(
+      segs, Eigen::Vector3d(c0[0], c0[1], c0[2]), Eigen::Vector3d(vel[0], vel[1], vel[2]),
+      Eigen::Vector3d(acc[0], acc[1], acc[2]), R, th, /*maxdepth*/16, v_eff, delta, /*n_axes*/2, &refuted);
+  if (margin_out) *margin_out = v.margin;
+  return v.certified ? 1 : (refuted ? -1 : 0);
+}
+
+int ego_certify_above3(void* h, double z_clear, double t_hi, double v_eff_z, double delta,
+                       double bez_pad, double* margin_out) {
+  auto* m = (EGOPlannerManager*)h;
+  auto segs = build_segs(m);
+  if (segs.empty()) { if (margin_out) *margin_out = -1.0; return 0; }   // nothing committed -> UNKNOWN
+  const double th = (t_hi > 0.0) ? t_hi : std::numeric_limits<double>::infinity();
+  bool refuted = false;
+  auto v = sando::bcert::certify_segments_above_plane(segs, z_clear, th, /*maxdepth*/16, v_eff_z, delta,
+                                                      bez_pad, &refuted);
+  if (margin_out) *margin_out = v.margin;
+  return v.certified ? 1 : (refuted ? -1 : 0);
 }
 
 void ego_destroy(void* h) { delete (EGOPlannerManager*)h; }
