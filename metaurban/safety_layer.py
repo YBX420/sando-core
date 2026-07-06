@@ -160,3 +160,61 @@ def evade_setpoint(p_d, movers_xy, max_vel, dt, ztop, gdir):
                           min(0.4 * max_vel * dt, max(0.0, ztop - p_d[2]))])
     vel = np.array([away[0] * max_vel, away[1] * max_vel, 0.0])
     return pos, vel
+
+
+def maneuver_decide_sticky(ego, p_d, v_d, a_d, goal, ztop, clear_fn, state,
+                           cruise_z=CRUISE_Z, horizon=HORIZON, straight_clip=None,
+                           dwell_ticks=3, clear_fn_strict=None):
+    """Event-triggered smoothing wrapper around maneuver_decide (SMOOTH=1; anti-chatter).
+
+    The per-tick tournament re-picks the first-certified candidate from scratch, so when two
+    candidates certify marginally the winner flip-flops tick to tick (seed12: 24 switches,
+    spchurn 69). Here the INCUMBENT maneuver keeps flying while it still certifies; the full
+    tournament runs only on EVENTS:
+      * incumbent cert fails  -> immediate full tournament (safety path identical to before);
+      * every `dwell_ticks`   -> probe an UPGRADE (higher-preference kind, e.g. back to straight),
+        accepted only through the STRICT gate (clear_fn_strict = tube inflated by an extra delta)
+        so a marginal certificate cannot yank the drone out of a detour it just committed to.
+    'evade' is never sticky. Same contract as maneuver_decide: ego ends holding a CERTIFIED plan.
+    state: dict persisted by the caller across ticks; keys kind/age."""
+    p_d = np.asarray(p_d, float); goal = np.asarray(goal, float)
+    gxy = goal[:2] - p_d[:2]; dist = float(np.linalg.norm(gxy))
+    gdir = gxy / dist if dist > 1e-6 else np.array([1.0, 0.0])
+    L = min(horizon, max(dist, 1.0))
+
+    def _gsub(kind):
+        if kind == "straight":
+            return (np.array([goal[0], goal[1], cruise_z]) if straight_clip is None
+                    else np.array([*(p_d[:2] + gdir * min(straight_clip, dist)), cruise_z]))
+        ang = {"around_l": PHI, "around_r": -PHI}.get(kind)
+        if ang is not None:
+            return np.array([*(p_d[:2] + L * _rot(gdir, ang)), cruise_z])
+        if kind == "over":
+            return np.array([goal[0], goal[1], ztop])
+        if kind == "climb":
+            return np.array([p_d[0], p_d[1], ztop])
+        return None
+
+    PREF = ("straight", "around_l", "around_r", "over", "climb")
+    inc = state.get("kind")
+    # WORLD-FROZEN sub-goal: the incumbent's carrot is fixed at commit time. Recomputing it every
+    # tick (v1) made lateral carrots ROTATE with the drone -> spiral wandering (fast_canyon +10s).
+    gs_inc = state.get("gsub")
+    if inc in PREF and gs_inc is not None and float(np.linalg.norm(gs_inc[:2] - p_d[:2])) < 1.5:
+        inc = None                                            # carrot reached -> re-decide
+    if inc in PREF and gs_inc is not None:
+        state["age"] = state.get("age", 0) + 1
+        if state["age"] >= dwell_ticks and inc != "straight":
+            state["age"] = 0                                  # probe cadence: once per dwell window
+            strict = clear_fn_strict or clear_fn
+            for uk in PREF[:PREF.index(inc)]:
+                gs = _gsub(uk)
+                if ego.replan(p_d, v_d, a_d, gs) and ego.duration() > 1e-3 and strict():
+                    state.update(kind=uk, gsub=gs, age=0)
+                    return uk
+        if ego.replan(p_d, v_d, a_d, gs_inc) and ego.duration() > 1e-3 and clear_fn():
+            return inc                                        # incumbent retry toward FROZEN carrot
+    kind = maneuver_decide(ego, p_d, v_d, a_d, goal, ztop, clear_fn,
+                           cruise_z=cruise_z, horizon=horizon, straight_clip=straight_clip)
+    state.update(kind=kind, gsub=_gsub(kind), age=0)
+    return kind

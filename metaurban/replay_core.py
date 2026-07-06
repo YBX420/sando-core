@@ -31,6 +31,11 @@ _HARV_EP = [0]
 
 # ---- geometry / dynamics ----
 DT = 0.30; TAU = 0.75; DELTA = DT
+# SMOOTH=1: event-triggered maneuver smoothing (sticky incumbent + dwell-gated strict upgrades);
+# default OFF -> byte-identical frozen behaviour (regress_frozen_ours.py guards this).
+SMOOTH = os.environ.get("SMOOTH", "0") == "1"
+SMOOTH_DWELL = int(os.environ.get("SMOOTH_DWELL", "3"))
+SMOOTH_MARGIN = float(os.environ.get("SMOOTH_MARGIN", "0.15"))   # extra delta(s) on the upgrade gate
 CRUISE_Z = 1.5; Z_CEIL = 4.6
 R_DRONE = 0.25
 MEAS = 0.07
@@ -238,6 +243,7 @@ def run_replay(movers, ep, mode="ours", calib=None, predict=True, max_vel=3.0, m
     _hd_cmd = [None]     # yaw-to-path: cone follows LAST tick's commanded set-point direction
     min_clr = 1e18; max_z = start[2]; reached = False
     counts = {k: 0 for k in ("straight", "around_l", "around_r", "over", "climb", "evade", "native", "sando")}
+    _stick = {}                                      # SMOOTH=1 incumbent-maneuver state (kind/age)
     rta = dict(certified_ticks=0, violations=0)      # RTA failure rate: cert-passed tick followed by
     #                                                  a clearance violation within the SAME trust window
     hist = []
@@ -410,7 +416,13 @@ def run_replay(movers, ep, mode="ours", calib=None, predict=True, max_vel=3.0, m
                             if not (math.hypot(pp[0] - cc[0], pp[1] - cc[1]) >= rho or pp[2] >= zc):
                                 return False
                     return True
-            kind = SL.maneuver_decide(ego, p_d, v_d, a_d, goal, ztop, clear_fn, cruise_z=CRUISE_Z, horizon=HORIZON)
+            if SMOOTH and cont_cert:
+                _strict = lambda: SL.cert_clear(ego, cyl, tau=TAU, delta=DELTA + SMOOTH_MARGIN)
+                kind = SL.maneuver_decide_sticky(ego, p_d, v_d, a_d, goal, ztop, clear_fn, _stick,
+                                                 cruise_z=CRUISE_Z, horizon=HORIZON,
+                                                 dwell_ticks=SMOOTH_DWELL, clear_fn_strict=_strict)
+            else:
+                kind = SL.maneuver_decide(ego, p_d, v_d, a_d, goal, ztop, clear_fn, cruise_z=CRUISE_Z, horizon=HORIZON)
             if kind != "evade":
                 rr = ego.eval(min(DT, max(ego.duration() - 1e-3, 0.0)))
                 if rr is not None:
