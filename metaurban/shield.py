@@ -21,7 +21,10 @@ _TS = np.arange(0.0, TAU + 1e-9, 0.05)
 
 _here = os.path.dirname(os.path.abspath(__file__))
 _calib = json.load(open(os.path.join(os.path.dirname(_here), "out", "conformal", "calib.json")))
-_lv = _calib["groups"]["all"]["levels"]["0.05"]
+_EPS = os.environ.get("SHIELD_EPS", "0.05")   # certified miss level: 0.05 default; "0.1" = the
+#   looser CERTIFIED dial (q 1.054->0.466, ped keep-out ~1.7->1.1 m). Still theorem-backed --
+#   never hand-edit q; pick a calibrated level.
+_lv = _calib["groups"]["all"]["levels"][_EPS]
 Q0, VEFF = float(_lv["q_conformal"]), float(_lv["v_eff"])
 TUBE = Q0 + VEFF * _TS                                    # precomputed tube radius per sample time
 
