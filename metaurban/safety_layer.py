@@ -59,16 +59,24 @@ def build_cylinders(movers, calib, predict=True, track_margin=0.0, calib_v2=None
     track_margin: plan->flown tracking allowance (audit #9-2 2026-07-07: the renderer certs carry
     MAN_TRACK=0.473 but the headless DYN arms certified the PLANNED spline with NO margin while the
     quad FLIES up to ~delta_track away -- 'flown == certified' hole). Kinematic arms pass 0."""
+    use_plates = os.environ.get("PLATES", "0") == "1"
     cyl = []; ztop = CRUISE_Z
     for mv in movers:
-        (c0, vel, acc, r_obs, h, cls), age = (mv[:6], (mv[6] if len(mv) > 6 else None))
+        (c0, vel, acc, r_obs, h, cls) = mv[:6]
+        age = mv[6] if len(mv) > 6 else None
+        coast = mv[7] if len(mv) > 7 else None
         if calib_v2 is not None:
-            ent = calib_v2.get(cls) or dict(mature=(1e6, 0.0), young=(1e6, 0.0))
+            ent = calib_v2.get(cls) or dict(mature=(1e6, 0.0), young=(1e6, 0.0), plates=[])
             if age is not None and age < age_min:
                 q, veff = ent["young"]
                 vel = np.zeros(3); acc = np.zeros(3)   # young plate: FROZEN centre + fat growth
             else:
                 q, veff = ent["mature"]
+                if use_plates and age is not None:
+                    for (lo, hi, co, pq, pv) in ent.get("plates", []):
+                        if lo <= age <= hi and (co is None or coast is None or int(co) == int(coast)):
+                            q, veff = pq, pv
+                            break
         else:
             q, veff = calib.get(cls, calib["_all"])
         vv = np.asarray(vel, float).copy(); aa = np.asarray(acc, float).copy()
@@ -392,10 +400,13 @@ def load_calib_v2(eps=0.05):
             out[cls] = dict(mature=(1e6, 0.0), young=(1e6, 0.0), status="UNCALIBRATED")
             continue
         yy = rep.get("young", {}).get(cls, {}).get(str(eps))
+        plates = [(int(d["age_lo"]), int(d["age_hi"]), d.get("coast"),
+                   float(d["q_conformal"]), float(d["v_eff"]))
+                  for d in (lv.get("plates") or {}).values()]
         out[cls] = dict(mature=(float(lv["q_conformal"]), float(lv["v_eff"])),
                         young=((float(yy["q0y"]), float(yy["growth"])) if yy
                                else (float(lv["q_conformal"]), float(lv["v_eff"]))),
-                        status=lv.get("status", "ok"))
+                        plates=plates, status=lv.get("status", "ok"))
     out["_meta"] = dict(sha=rep.get("provenance", {}).get("config_sha"), eps=eps)
     return out
 

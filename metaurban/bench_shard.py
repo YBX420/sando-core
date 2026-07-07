@@ -6,7 +6,7 @@ import os
 import sys
 
 ap = argparse.ArgumentParser()
-ap.add_argument("--config", choices=["ours_v2", "ours_legacy", "native"], required=True)
+ap.add_argument("--config", choices=["ours_v2", "ours_legacy", "native", "gt_thin"], required=True)
 ap.add_argument("--shard", type=int, required=True)
 ap.add_argument("--nshard", type=int, default=4)
 ap.add_argument("--out", required=True)
@@ -15,7 +15,7 @@ args = ap.parse_args()
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, HERE); os.chdir(HERE)
 if args.config == "ours_v2":
     os.environ["CALIB_V2"] = "1"; os.environ["CALIB_EPS"] = "0.10"
-os.environ["PERCEPT"] = "realistic"
+os.environ["PERCEPT"] = "gt" if args.config == "gt_thin" else "realistic"
 
 import replay_core as RC
 import scenario_lib as SLB
@@ -24,6 +24,10 @@ CFG = json.load(open("out/conformal/calib_v2_config.json"))
 POOL = sorted(CFG["scenario_pool"])[args.shard::args.nshard]
 SEEDS = (11, 42, 77, 123, 999)
 mode = "native" if args.config == "native" else "ours"
+# gt_thin = oracle counterfactual: omniscient perception + near-zero tube. Residual evades under
+# near-perfect knowledge are PHYSICALLY NECESSARY; the gap vs ours_v2 = tube-width artifacts
+# (the provably-superfluous share of emergency interventions).
+CAL_OVR = ({c: (0.05, 0.1) for c in ("pedestrian", "vehicle", "animal", "static")} | {"_all": (0.05, 0.1), "static": (0.05, 0.0)})     if args.config == "gt_thin" else None
 out = open(args.out, "a")
 for scn_name in POOL:
     f = (f"scenarios/{scn_name}.json" if os.path.exists(f"scenarios/{scn_name}.json")
@@ -34,7 +38,7 @@ for scn_name in POOL:
     for sd in SEEDS:
         os.environ["PERCEPT_SEED"] = str(sd)
         try:
-            r = RC.run_replay(movers, ep, mode=mode, record=False,
+            r = RC.run_replay(movers, ep, mode=mode, record=False, calib=CAL_OVR,
                               max_vel=float(scn["drone"].get("max_vel", 3.0)))
             cnt = r.get("counts", {})
             emerg = int(cnt.get("evade", 0)) + int(cnt.get("cret", 0))

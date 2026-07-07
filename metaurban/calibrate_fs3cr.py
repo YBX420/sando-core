@@ -30,26 +30,28 @@ def load(name, fields8=False):
         d = out
     return d
 
-# design domain = vehA + ALL retired folds (spec: anything not the live quantile/test folds)
-_design = ["vehA", "foldB", "test"]
-if os.path.exists("out/conformal/harvest_foldB4_v2.npy"):
-    _live_B, _live_T = "foldB4", "test4"
-    _design += ["foldB2", "test2", "foldB3", "test3"]
-elif os.path.exists("out/conformal/harvest_foldB3_v2.npy"):
-    _live_B, _live_T = "foldB3", "test3"
-    _design += ["foldB2", "test2"]
-else:
-    _live_B, _live_T = "foldB2", "test2"
-A = [load(n) for n in _design]
-B2 = load(_live_B); T2 = load(_live_T)
-print(f"[folds] live quantile={_live_B} test={_live_T}  design={_design}")
-assert "qual" in B2.dtype.names and "qual" in T2.dtype.names
-
-AGE_BINS = ((4, 6), (7, 12), (13, 10**9))          # mature age plates (b_bucket buckets; 13+ was
-#   covered at 1.0 under the flat tube = massively over-wide there -> thinning lives in the bins)
+# theta3: shapes from designC ONLY (fresh, coast-labelled, 197k rows -- retired-mix artifacts
+# like the phantom ped-13+ 4.35 plate are flushed); live folds = B5/T5 (fresh pre-registered).
+import glob as _g
 
 
-def rows_of(ds, cls, mature=None, bin_=None):
+def load_sharded(name):
+    fs = sorted(_g.glob(f"out/conformal/harvest_{name}_v2_s*.npy")) or         [f"out/conformal/harvest_{name}_v2.npy"]
+    return np.concatenate([np.load(f) for f in fs])
+
+
+A = [load_sharded("designC")]
+B2 = load_sharded("foldB5"); T2 = load_sharded("test5")
+print(f"[folds] theta3: design=designC({len(A[0])} rows) live=foldB5 test=test5")
+assert "coast" in A[0].dtype.names and "qual" in B2.dtype.names
+
+# theta3 plates (evidence: Claim A trial 2026-07-07 -- coast fattens residuals +40-50% at ages
+# 4-12, NO effect at 13+; the old 13+ fat plate was a retired-data artifact):
+PLATES = (("M46f", 4, 6, 0), ("M46c", 4, 6, 1), ("M712f", 7, 12, 0), ("M712c", 7, 12, 1),
+          ("M13", 13, 10**9, None))
+
+
+def rows_of(ds, cls, mature=None, bin_=None, coast=None):
     out = []
     for d in ds:
         m = d["cls"] == cls
@@ -59,6 +61,8 @@ def rows_of(ds, cls, mature=None, bin_=None):
             m &= d["age"] >= AGE_MIN
         elif mature is False:
             m &= (d["age"] >= 2) & (d["age"] < AGE_MIN)
+        if coast is not None and "coast" in d.dtype.names:
+            m &= d["coast"] == coast
         out.append(d[m])
     return np.concatenate(out) if out else np.array([])
 
@@ -67,9 +71,9 @@ def theil_sen(xs, ys):
           if xs[j] > xs[i]]
     return float(np.median(sl)) if sl else 0.0
 
-def shape(cls, mature=True, force_slope=None, bin_=None):
+def shape(cls, mature=True, force_slope=None, bin_=None, coast=None):
     """(b, v, sigma, n_rows) from design-domain rows; q90(Delta) envelope + Theil-Sen slope."""
-    r = rows_of(A, cls, mature, bin_=bin_)
+    r = rows_of(A, cls, mature, bin_=bin_, coast=coast)
     if len(r) < 200:
         return None
     ds = sorted(set(np.round(r["d"], 2).tolist()))
@@ -99,9 +103,9 @@ for c in CLASSES:
     y = shape(c, mature=False, force_slope=0.0)          # young arm: frozen residual, deterministic growth
     if y: young[c] = y
     if s:
-        for lo, hi in AGE_BINS:
-            bs = shape(c, force_slope=(0.0 if c == "static" else None), bin_=(lo, hi))
-            binshapes[(c, lo)] = bs if (bs and bs["n"] >= 500) else dict(s)   # thin data -> inherit flat
+        for tag, lo, hi, co in PLATES:
+            bs = shape(c, force_slope=(0.0 if c == "static" else None), bin_=(lo, hi), coast=co)
+            binshapes[(c, tag)] = bs if (bs and bs["n"] >= 500) else dict(s)  # thin data -> inherit flat
 print("[shapes]", {k: {kk: round(vv, 3) for kk, vv in v.items()} for k, v in shapes.items()})
 print("[young ]", {k: {kk: round(vv, 3) for kk, vv in v.items()} for k, v in young.items()})
 
@@ -117,8 +121,8 @@ def flight_scores(D):
         for c in set(D["cls"][m0].tolist()):
             if c not in shapes:
                 continue
-            arms = [("Y", young.get(c), None)] +                    [(f"B{lo}", binshapes.get((c, lo)), (lo, hi)) for lo, hi in AGE_BINS]
-            for arm, sh, rng in arms:
+            arms = [("Y", young.get(c), None, None)] +                    [(tag, binshapes.get((c, tag)), (lo, hi), co) for tag, lo, hi, co in PLATES]
+            for arm, sh, rng, co in arms:
                 if sh is None:
                     continue
                 m = m0 & (D["cls"] == c) & (D["qual"] == 1)
@@ -126,6 +130,8 @@ def flight_scores(D):
                     m &= (D["age"] >= 2) & (D["age"] < AGE_MIN)
                 else:
                     m &= (D["age"] >= rng[0]) & (D["age"] <= rng[1])
+                    if co is not None and "coast" in D.dtype.names:
+                        m &= D["coast"] == co
                 if not m.sum():
                     continue
                 gr = VCAP.get(c, 0.0) if arm == "Y" else sh["v"]
@@ -158,12 +164,13 @@ for eps in (0.05, 0.10):
         eta = (VCAP.get(c, 0.0) + CFG["VCAP_PRED"].get(c, 0.0) + sh["v"]) * H / 2
         g["levels"][str(eps)] = dict(q_conformal=round(sh["b"] + qhat * sh["sigma"] + eta, 4),
                                      v_eff=round(sh["v"], 4), status=flag)
-        for lo, hi in AGE_BINS:
-            bs = binshapes.get((c, lo))
+        for tag, lo, hi, co in PLATES:
+            bs = binshapes.get((c, tag))
             if bs:
                 eta_b = (VCAP.get(c, 0.0) + CFG["VCAP_PRED"].get(c, 0.0) + bs["v"]) * H / 2
-                g["levels"][str(eps)].setdefault("bins", {})[f"{lo}"] = dict(
-                    q_conformal=round(bs["b"] + qhat * bs["sigma"] + eta_b, 4), v_eff=round(bs["v"], 4))
+                g["levels"][str(eps)].setdefault("plates", {})[tag] = dict(
+                    q_conformal=round(bs["b"] + qhat * bs["sigma"] + eta_b, 4), v_eff=round(bs["v"], 4),
+                    age_lo=lo, age_hi=min(hi, 999), coast=co)
         if c in young:
             yy = young[c]
             res["young"].setdefault(c, {})[str(eps)] = dict(

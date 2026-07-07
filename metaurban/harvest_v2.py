@@ -18,7 +18,10 @@ import sys
 import zlib
 
 ap = argparse.ArgumentParser()
-ap.add_argument("--mode", choices=["foldB", "test", "vehA", "foldB2", "test2", "foldB3", "test3", "foldB4", "test4"], required=True)
+ap.add_argument("--mode", choices=["foldB", "test", "vehA", "foldB2", "test2", "foldB3", "test3",
+                                   "foldB4", "test4", "designC", "foldB5", "test5"], required=True)
+ap.add_argument("--shard", type=int, default=0)
+ap.add_argument("--nshard", type=int, default=1)
 args = ap.parse_args()
 
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, HERE); os.chdir(HERE)
@@ -37,7 +40,7 @@ import numpy as np
 import replay_core as RC
 import scenario_lib as SLB
 
-POOL = CFG["scenario_pool"]
+POOL = sorted(CFG["scenario_pool"])[args.shard::args.nshard]
 if args.mode == "foldB":
     jobs = [(n, CFG["SEEDS_FOLDB"][n]) for n in POOL]
 elif args.mode == "foldB2":
@@ -54,6 +57,13 @@ elif args.mode == "foldB4":
     jobs = [(n, CFG["SEEDS_FOLDB4"][n]) for n in POOL]
 elif args.mode == "test4":
     jobs = [(n, s) for n in POOL for s in CFG["SEEDS_TEST4"][n]]
+elif args.mode == "designC":   # theta3 shape data with coast column (design domain, fresh 1e8 seeds)
+    import zlib as _z
+    jobs = [(n, 100_000_000 + _z.crc32(f"{n}|C{k}".encode()) % 9_000_000) for n in POOL for k in range(4)]
+elif args.mode == "foldB5":
+    jobs = [(n, CFG["SEEDS_FOLDB5"][n]) for n in POOL]
+elif args.mode == "test5":
+    jobs = [(n, s) for n in POOL for s in CFG["SEEDS_TEST5"][n]]
 else:  # vehA: design-domain vehicle boost (veh_cal x22 + street x6 fresh-A seeds)
     veh = [n for n in POOL if n.startswith("veh_cal")]
     street = [n for n in POOL if n.startswith("street_")]
@@ -62,8 +72,9 @@ else:  # vehA: design-domain vehicle boost (veh_cal x22 + street x6 fresh-A seed
            [(n, 30_000_000 + zlib.crc32(f"{n}|A{k}".encode()) % 9_000_000)
             for n in street for k in range(6)]
 
-out_npy = f"out/conformal/harvest_{args.mode}_v2.npy"
-out_man = f"out/conformal/harvest_{args.mode}_v2.manifest.jsonl"
+sfx = f"_s{args.shard}" if args.nshard > 1 else ""
+out_npy = f"out/conformal/harvest_{args.mode}_v2{sfx}.npy"
+out_man = f"out/conformal/harvest_{args.mode}_v2{sfx}.manifest.jsonl"
 rows_all, ep = [], 0
 man = open(out_man, "w")
 man.write(json.dumps(dict(config_sha=_sha, mode=args.mode, n_jobs=len(jobs))) + "\n"); man.flush()
@@ -97,7 +108,7 @@ RC.PERCEPT_HARVEST = None; RC.PERCEPT_A2 = None
 man.close()
 
 data = np.array(rows_all, dtype=[("d", "f4"), ("e", "f4"), ("age", "i4"), ("cls", "U12"),
-                                 ("ep", "i4"), ("dd", "f4"), ("scn", "U40"), ("qual", "i4")])
+                                 ("ep", "i4"), ("dd", "f4"), ("scn", "U40"), ("qual", "i4"), ("coast", "i4")])
 np.save(out_npy, data)
 # scenario-aliasing fingerprints (ruling #17)
 fps = {}

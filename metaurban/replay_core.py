@@ -54,7 +54,12 @@ CRET_GLIDE = os.environ.get("CRET_GLIDE", "0") == "1"   # task#7: on 'evade', tr
 CRET_GLIDE_SMIN = float(os.environ.get("CRET_GLIDE_SMIN", "0.10"))
 VERDICT3_LOG = os.environ.get("VERDICT3_LOG", "0") == "1"
 CALIB_V2 = os.environ.get("CALIB_V2", "0") == "1"
-V_CAP = os.environ.get("V_CAP", "0") == "1"   # task#4: planner-side braking-envelope speed cap
+V_CAP = os.environ.get("V_CAP", "0") == "1"
+PING = os.environ.get("PING", "0") == "1"   # 终末嗡鸣 v0: when a track is NEAR, split the tick into
+#   3x0.1s sub-chunks -- re-perceive (variable-dt KF) + re-certify each chunk (delta=0.1 -> thinner
+#   tube), re-decide ONLY on cert failure (event-driven). Perception must speed up WITH the cert
+#   (re-anchoring without fresh observations would fake-shrink the tube -- the honesty rule).
+PING_NEAR = float(os.environ.get("PING_NEAR", "5.0"))   # task#4: planner-side braking-envelope speed cap
 #   v <= SL.v_cap(FOV_R, max_acc, DT) -- honest 'don't outrun the sensor' dial, default OFF   # FS3C-R era switch: SL loader (static/animal keys,
 #   fail-closed semantics) + code-level static stationarity in cylinders. Flips WHOLESALE with the
 #   new calib at Stage-C validation; default OFF = frozen benchmark behaviour.
@@ -466,7 +471,8 @@ def run_replay(movers, ep, mode="ours", calib=None, predict=True, max_vel=3.0, m
                             resid = float(np.hypot(*(pos_l(gi, t + dh) - pred)))
                             PERCEPT_HARVEST.append((float(dh), resid, int(tr.trk.n),
                                                     str(tr.cls), int(_HARV_EP[0]), d_drone)
-                                                   + ((_HARV_SCN[0], int(_QUAL_MEMO.get(gi, True)))
+                                                   + ((_HARV_SCN[0], int(_QUAL_MEMO.get(gi, True)),
+                                                       int(tr.trk.miss > 0))          # coast flag (theta3)
                                                       if _HARV_V2 else ()))
             else:
                 percepts = [(trackers[i], dets[i], movers.m[i]["r"], movers.m[i]["h"], movers.m[i]["cls"])
@@ -487,7 +493,8 @@ def run_replay(movers, ep, mode="ours", calib=None, predict=True, max_vel=3.0, m
                 c0, vv, aa = trk.state()
                 if PRED_MODEL == "cv":
                     aa = np.zeros(3)                     # CV deployment: cert polynomial matches the CV-calibrated tube
-                mlist.append((c0, vv, aa, r_o, h_o, cls_o, int(getattr(trk, "n", 99))))
+                mlist.append((c0, vv, aa, r_o, h_o, cls_o, int(getattr(trk, "n", 99)),
+                              int(getattr(trk, "miss", 0) > 0)))
             cyl, ztop = SL.build_cylinders(mlist, calib, predict=predict,
                                            track_margin=(float(os.environ.get("DYN_TRACK", "0.473"))
                                                          if dynamics else 0.0),
@@ -525,6 +532,49 @@ def run_replay(movers, ep, mode="ours", calib=None, predict=True, max_vel=3.0, m
                     p_ref = np.asarray(rr[0], float)
                     v_ref = _v2s * np.asarray(rr[1], float)
                     a_ref = _v2s * _v2s * np.asarray(rr[2], float)
+                if (PING and cont_cert and percept_fe is not None and not dynamics and flier is None
+                        and kind != "evade"):
+                    _near = any(float(np.hypot(*(np.asarray(tr.xy[:2], float) - p_d[:2]))) < PING_NEAR
+                                for tr in ptracks if tr.trk.ready)
+                    if _near:
+                        # terminal buzz: fly the tick in 3 sub-chunks with fresh perception + re-cert
+                        _sub = DT / 3.0
+                        _p_sub = np.asarray(p_d, float).copy()
+                        for _j in (1, 2):
+                            _rrj = ego.eval(min(_v2s * _sub * _j, max(ego.duration() - 1e-3, 0.0)))
+                            if _rrj is not None:
+                                _p_sub = np.asarray(_rrj[0], float)
+                            _tj = t + _sub * _j
+                            _gt_j = [(pos_l(i, _tj), movers.m[i]["r"], movers.m[i]["h"],
+                                      movers.m[i]["cls"]) for i in idx if movers.present(i, _tj)]
+                            _hd_j = _hd_cmd[0] if _hd_cmd[0] is not None else gdir
+                            _ptr_j = percept_fe.step(_p_sub[:2], _hd_j, _gt_j, dt=_sub)
+                            _ml_j = []
+                            for _tr in _ptr_j:
+                                if not _tr.trk.ready:
+                                    continue
+                                _c0j, _vvj, _aaj = _tr.trk.state()
+                                if PRED_MODEL == "cv":
+                                    _aaj = np.zeros(3)
+                                _ml_j.append((_c0j, _vvj, _aaj, _tr.r, _tr.h, _tr.cls,
+                                              int(_tr.trk.n), int(_tr.trk.miss > 0)))
+                            _cyl_j, _zt_j = SL.build_cylinders(_ml_j, calib, predict=predict,
+                                                               calib_v2=calib_v2)
+                            if not SL.cert_clear(ego, _cyl_j, tau=TAU, delta=_sub):
+                                # certificate broke mid-tick: event-driven re-decision NOW
+                                kind, _v2s = SL.maneuver_decide_v2(
+                                    ego, _p_sub, v_ref, a_ref, goal, _zt_j, _cyl_j, _stick,
+                                    cruise_z=CRUISE_Z, horizon=HORIZON, delta=_sub)
+                                if kind in ("around_l2", "around_r2"):
+                                    kind = kind[:-1]
+                                if kind != "evade":
+                                    _rrn = ego.eval(min(_v2s * (DT - _sub * _j),
+                                                        max(ego.duration() - 1e-3, 0.0)))
+                                    if _rrn is not None:
+                                        p_ref = np.asarray(_rrn[0], float)
+                                        v_ref = _v2s * np.asarray(_rrn[1], float)
+                                        a_ref = _v2s * _v2s * np.asarray(_rrn[2], float)
+                                break
             elif idx:
                 _glid = False
                 if CRET_GLIDE and cont_cert:
