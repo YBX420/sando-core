@@ -322,11 +322,18 @@ def maneuver_decide_v2(ego, p_d, v_d, a_d, goal, ztop, cyl, state,
     def _ok_plan():
         return extra_gate() if extra_gate is not None else True
 
+    _tau_speed = os.environ.get("TAU_SPEED", "0") == "1"
+
     def _cert_at(s, strict=False):
         dd = d + (strict_margin if strict else 0.0)
+        # TAU_SPEED=1: brake-safety trust window -- the certificate must cover one decision tick
+        # plus the STOP from the committed speed (v=3s, a=6 -> t_stop=s/2). Full speed keeps the
+        # frozen 0.75s; a crawl honestly needs only ~0.38s, so its tube grows half as much: the
+        # "even standing still is uncertifiable" flicker ticks become certifiable slow progress.
+        t_c = min(tau, 0.30 + 0.5 * s + 0.05) if _tau_speed else tau
         if s >= 0.999:
-            return cert_clear(ego, cyl, tau=tau, delta=dd)
-        return cert_clear_warp(ego, cyl, s, tau=tau, delta=dd)
+            return cert_clear(ego, cyl, tau=t_c, delta=dd)
+        return cert_clear_warp(ego, cyl, s, tau=t_c, delta=dd)
 
     def _best_s(smax=1.0, strict=False):
         """Fastest certified speed for the CURRENT ego spline, scanning the grid down from smax."""
