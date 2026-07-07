@@ -12,6 +12,7 @@ Cloud-building and execution (3-D static scene + quad dynamics in render vs move
 stay caller-specific -- that is the legitimate scenario/realism difference, not the avoidable code drift.
 """
 import os, json
+import math
 import numpy as np
 
 # ---- canonical geometry / cert window (the SAME numbers headless replay_core used) ----
@@ -397,3 +398,13 @@ def load_calib_v2(eps=0.05):
                         status=lv.get("status", "ok"))
     out["_meta"] = dict(sha=rep.get("provenance", {}).get("config_sha"), eps=eps)
     return out
+
+
+def v_cap(d_free, a_max, t_react=0.30, margin=1.0):
+    """Braking-envelope speed cap (task#4, memo #10): the fastest v such that reaction distance +
+    braking distance fits inside the perceived free distance:  v*t_react + v^2/(2a) <= d_free-margin.
+    Closed form: v = -a*t + sqrt(a^2 t^2 + 2 a (d_free - margin)).  'Don't outrun your sensor' as an
+    explicit, planner-side dial (all candidates planned at the same cap -- no executor warp flip)."""
+    d = max(float(d_free) - float(margin), 0.0)
+    a, t = float(a_max), float(t_react)
+    return max(0.0, -a * t + math.sqrt(a * a * t * t + 2.0 * a * d))

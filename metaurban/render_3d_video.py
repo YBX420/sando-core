@@ -518,7 +518,11 @@ if args.ego:
     # EGO_VMAX env override: lower v_max so the drone does not OUTRUN its forward cone (8m cone / 8 m/s = ~1s lookahead
     # -> fast-flight-into-late-detected-obstacle collisions). A reaction-feasible cap is the stable global half of the
     # speed-FOV coupling (the per-tick _path_free_dist warp is the dynamic half).
-    ego.set_params(max_vel=float(os.environ.get("EGO_VMAX", PLN.get("v_max", 6.0))),
+    _vmax_req = float(os.environ.get("EGO_VMAX", PLN.get("v_max", 6.0)))
+    if os.environ.get("V_CAP", "0") == "1":
+        import safety_layer as _SLc
+        _vmax_req = min(_vmax_req, _SLc.v_cap(args.fov_range, PLN.get("a_max", 10.0), REPLAN_DT))
+    ego.set_params(max_vel=_vmax_req,
                    max_acc=float(PLN.get("a_max", 10.0)),
                    ctrl_pt_dist=0.5, horizon=EGO_HOR,
                    l_collision=0.8, dist0=max(0.4, float(par.drone_radius) + 0.2))

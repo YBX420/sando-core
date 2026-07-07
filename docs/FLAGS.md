@@ -21,3 +21,8 @@
 | `RADIUS_CONSIST` | 0 | full=封廊否决;dsafe 单独赢(evade-14%),与 SMOOTH 冲突,#6 后裁决 |
 | `VERDICT3_LOG` | off | 纯诊断(evade 拍三值判决入 hist) |
 | `PERCEPT*` / `PRED_MODEL` / `EGO_TRACK` 等 | 冻结值 | 部署在环标定绑定,动=重标 |
+
+## v_cap(task#4,2026-07-07)
+| 开关 | 默认 | 判决 |
+|---|---|---|
+| `V_CAP` | off | 刹车包线限速 v·t+v²/2a≤d_F−m(SL.v_cap);v≤7 惰性(两侧全等),**v=9 净赢**(fast_canyon reach 2/3→3/3、t −27%);高速世界建议开 |

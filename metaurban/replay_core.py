@@ -53,7 +53,9 @@ CRET_GLIDE = os.environ.get("CRET_GLIDE", "0") == "1"   # task#7: on 'evade', tr
 #   mover-speed-limited freezes into certified slow progress. Default OFF = frozen behaviour.
 CRET_GLIDE_SMIN = float(os.environ.get("CRET_GLIDE_SMIN", "0.10"))
 VERDICT3_LOG = os.environ.get("VERDICT3_LOG", "0") == "1"
-CALIB_V2 = os.environ.get("CALIB_V2", "0") == "1"   # FS3C-R era switch: SL loader (static/animal keys,
+CALIB_V2 = os.environ.get("CALIB_V2", "0") == "1"
+V_CAP = os.environ.get("V_CAP", "0") == "1"   # task#4: planner-side braking-envelope speed cap
+#   v <= SL.v_cap(FOV_R, max_acc, DT) -- honest 'don't outrun the sensor' dial, default OFF   # FS3C-R era switch: SL loader (static/animal keys,
 #   fail-closed semantics) + code-level static stationarity in cylinders. Flips WHOLESALE with the
 #   new calib at Stage-C validation; default OFF = frozen benchmark behaviour.
 DECIDE = os.environ.get("DECIDE", "v1")   # "v1" frozen tournament | "v2" unified direction-x-speed
@@ -256,6 +258,11 @@ def run_replay(movers, ep, mode="ours", calib=None, predict=True, max_vel=3.0, m
     else:
         infl = 0.3 if mode == "native" else float(os.environ.get("REP_OURS_INFL", 0.45))
         ego = EGOPlanner(map_origin=(-40, -40, -1), map_size=(80, 80, 8), res=0.2, inflation=infl)
+        if V_CAP:
+            _vc = SL.v_cap(FOV_R, max_acc, DT)
+            if _vc < max_vel:
+                print(f"[v_cap] max_vel {max_vel:.1f} -> {_vc:.2f} (FOV_R={FOV_R}, a={max_acc})", flush=True)
+            max_vel = min(max_vel, _vc)
         ego.set_params(max_vel=max_vel, max_acc=max_acc, horizon=HORIZON)
     last_rt = 0.0
     sando_path = None          # SANDO's last committed path; replan periodically + EXECUTE it (not replan every tick)
