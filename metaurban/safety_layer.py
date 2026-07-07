@@ -303,6 +303,39 @@ def cert_clear_warp(ego, cyl, s, tau=TAU, delta=None):
     return True
 
 
+def cert_clear_margin(ego, cyl, tau=TAU, delta=None):
+    """Margin sister of cert_clear: (ok, m) where m ~ metres of surplus clearance beyond the
+    certified floor (min over movers; deficit-squared margins normalised by 2R). inf when no cyl."""
+    d = tau if delta is None else delta
+    ok_all, m_min = True, float("inf")
+    for (c0, vv, aa, R, zc, veff) in cyl:
+        hp, mp = ego.certify_horizontal(obs_c0=c0, R=R, obs_vel=vv, obs_acc=aa, t_hi=tau, v_eff=veff, delta=d)
+        hc, mc = ego.certify_horizontal(obs_c0=c0, R=R, obs_vel=(0, 0, 0), t_hi=tau, v_eff=veff, delta=d)
+        vo, mv = ego.certify_above(z_clear=zc, t_hi=tau, v_eff_z=0.0, delta=d)
+        ok = (hp and hc) or vo
+        ok_all &= ok
+        if not ok:
+            return False, -1.0
+        branch = max(min(float(mp), float(mc)), float(mv)) / max(2.0 * float(R), 1e-6)
+        m_min = min(m_min, branch)
+    return ok_all, m_min
+
+
+def cert_clear_warp_margin(ego, cyl, s, tau=TAU, delta=None):
+    """Margin sister of cert_clear_warp (retime margins x s back to world scale)."""
+    d = (tau if delta is None else delta)
+    s = float(s)
+    m_min = float("inf")
+    for (c0, vv, aa, R, zc, veff) in cyl:
+        hp, mp = ego.certify_horizontal(obs_c0=c0, R=R, obs_vel=tuple(np.asarray(vv, float) / s),
+                                        obs_acc=(0, 0, 0), t_hi=s * tau, v_eff=veff / s, delta=d * s)
+        vo, mv = ego.certify_above(z_clear=zc, t_hi=s * tau, v_eff_z=0.0, delta=d * s)
+        if not (hp or vo):
+            return False, -1.0
+        m_min = min(m_min, s * max(float(mp), float(mv)) / max(2.0 * float(R), 1e-6))
+    return True, m_min
+
+
 def maneuver_decide_v2(ego, p_d, v_d, a_d, goal, ztop, cyl, state,
                        cruise_z=CRUISE_Z, horizon=HORIZON, straight_clip=None,
                        tau=TAU, delta=None, speeds=None,  # default (1.0,0.6,0.3); 0.3 ABSORBS evades (without it evade 40->106)
@@ -428,8 +461,11 @@ def maneuver_decide_v2(ego, p_d, v_d, a_d, goal, ztop, cyl, state,
             if _soar else
             ("straight", "around_l", "around_r", "around_l2", "around_r2", "over", "climb"))
     if _esc_hot:
+        # escape family first; WITHIN the family no paternal ordering -- the speed-lexicographic
+        # rank decides (user ruling 2026-07-08: "if both certify, the faster gear arrives faster
+        # and still wins"; a laterals-first reorder was tried and was a verified no-op anyway)
         _escf = tuple(k for k in ("soar", "around_l2", "around_r2", "over") if k in DIRS)
-        DIRS = _escf + tuple(k for k in DIRS if k not in _escf)   # escape family first, this tick only
+        DIRS = _escf + tuple(k for k in DIRS if k not in _escf)
     inc, inc_s = state.get("kind"), float(state.get("s", 1.0))
     gs_inc = state.get("gsub")
     if carrot == "angle" and inc in DIRS:
@@ -475,14 +511,25 @@ def maneuver_decide_v2(ego, p_d, v_d, a_d, goal, ztop, cyl, state,
         # LEXICOGRAPHIC rank (speed first): a full-speed detour beats ANY slowdown -- pure
         # window-progress scoring is myopic (slow-and-straight outscores fast-but-sideways over
         # 0.75 s, then stays slow: harness time +45%). Slowdowns only beat evade.
-        if (s_ok, sc) > (best[1], best[2]):
+        if os.environ.get("SAFETY_BAND", "0") == "1":
+            # GapWeave S2 (user band ruling: surplus clearance beyond floor+0.5m is WASTE -- trade
+            # it for straightness/speed): quantized-progress ties broken by SMALLER excess margin.
+            _tc = min(tau, 0.30 + 0.5 * s_ok + 0.05) if _tau_speed else tau
+            _dd = d
+            _mok, _m = (cert_clear_margin(ego, cyl, tau=_tc, delta=_dd) if s_ok >= 0.999
+                        else cert_clear_warp_margin(ego, cyl, s_ok, tau=_tc, delta=_dd))
+            _excess = max(0.0, (_m if np.isfinite(_m) else 5.0) - 0.5)
+            key = (s_ok, round(sc / 0.15), -min(_excess, 5.0))
+            if key > (best[1], best[2], best[3] if len(best) > 3 else -1e9):
+                best = (dk, s_ok, round(sc / 0.15), -min(_excess, 5.0))
+        elif (s_ok, sc) > (best[1], best[2]):
             best = (dk, s_ok, sc)
         if dk == "straight" and s_ok >= 0.999:
             break                                           # full-speed straight certified: done
     if best[0] is None:
         state.update(kind=None, gsub=None, s=1.0, age=0)
         return "evade", 0.0
-    dk, s_ok, _sc = best
+    dk, s_ok = best[0], best[1]
     gs = _gsub(dk)
     if last_replanned != dk:
         ego.replan(p_d, v_d, a_d, gs)                       # restore the WINNER's spline (loop clobbered ego)
