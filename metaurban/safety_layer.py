@@ -60,6 +60,8 @@ def build_cylinders(movers, calib, predict=True, track_margin=0.0, calib_v2=None
     MAN_TRACK=0.473 but the headless DYN arms certified the PLANNED spline with NO margin while the
     quad FLIES up to ~delta_track away -- 'flown == certified' hole). Kinematic arms pass 0."""
     use_plates = os.environ.get("PLATES", "0") == "1"
+    agemin_ped = int(os.environ.get("AGEMIN_PED", "0")) or age_min   # ped early maturity (age2-3
+    #   q95 covered by the mature tube at every horizon, designC 2026-07-07) -- gated exploratory
     cyl = []; ztop = CRUISE_Z
     for mv in movers:
         (c0, vel, acc, r_obs, h, cls) = mv[:6]
@@ -67,7 +69,8 @@ def build_cylinders(movers, calib, predict=True, track_margin=0.0, calib_v2=None
         coast = mv[7] if len(mv) > 7 else None
         if calib_v2 is not None:
             ent = calib_v2.get(cls) or dict(mature=(1e6, 0.0), young=(1e6, 0.0), plates=[])
-            if age is not None and age < age_min:
+            _amin = agemin_ped if cls == "pedestrian" else age_min
+            if age is not None and age < _amin:
                 q, veff = ent["young"]
                 vel = np.zeros(3); acc = np.zeros(3)   # young plate: FROZEN centre + fat growth
             else:
