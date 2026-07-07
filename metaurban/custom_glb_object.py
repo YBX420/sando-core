@@ -110,6 +110,15 @@ def make_drone_class(class_name, span=1.1, body=0.34, rotor_r=0.24, height=0.28,
                     _prim(_SPH, rotor_r * 2, rotor_r * 2, 0.05, sx, sy, height * 0.32, rotor_col)
             _prim(_BOX, body * 0.55, 0.10, 0.08, body * 0.78, 0, 0.02, nose_col)  # red nose -> +X forward (heading 0)
             self._model = root
+            try:
+                import os as _os
+                from panda3d.core import BitMask32
+                if _os.environ.get("DRONE_COLLIDE", "0") != "1":   # debug: reproduce the glitch
+                    self.body.setIntoCollideMask(BitMask32.allOff())   # visual marker ONLY: a kinematic
+                #   teleporting body that still collides launches grazed dynamic agents (the flying-
+                #   bicycle glitch, 2026-07-08); clearance accounting is ours, not Bullet's
+            except Exception:
+                pass
 
         @property
         def WIDTH(self): return self._w

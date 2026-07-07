@@ -1425,6 +1425,10 @@ def fov_cloud(p_drone, heading, t_sim):
 
     for oid, cls, pos, vel, size in native_objects():
         if cls == "static": continue
+        if os.environ.get("MU_ANOM", "0") == "1":
+            _sp_a = float(np.hypot(vel[0], vel[1]))
+            if _sp_a > 12.0 or abs(float(pos[2]) if len(np.atleast_1d(pos)) > 2 else 0.0) > 2.5:
+                print(f"[MU-ANOM] t={t_sim:.1f} {cls} oid={oid} |v|={_sp_a:.1f} z={float(pos[2]) if len(np.atleast_1d(pos))>2 else 0:.1f}", flush=True)
         _p = _eta_pos(pos, vel) if _eta_on else pos
         if _seen(p3(_p, size[2] * 0.5)) or (_eta_on and _seen(p3(pos, size[2] * 0.5))):
             chunks.append(np.asarray(_voxel_box(_p, size), float))
