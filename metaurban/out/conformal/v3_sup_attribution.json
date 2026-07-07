@@ -1,0 +1,52 @@
+[
+ {
+  "sup": 3.475,
+  "scn": "wall_and_crosser",
+  "ep": 18
+ },
+ {
+  "sup": 3.164,
+  "scn": "speed_sweep",
+  "ep": 12
+ },
+ {
+  "sup": 2.809,
+  "scn": "gauntlet",
+  "ep": 2
+ },
+ {
+  "sup": 1.623,
+  "scn": "street_busy_s2_alt1",
+  "ep": 13
+ },
+ {
+  "sup": 1.618,
+  "scn": "gen_pool_05",
+  "ep": 3
+ },
+ {
+  "sup": 1.617,
+  "scn": "crossers",
+  "ep": 1
+ },
+ {
+  "sup": 1.612,
+  "scn": "gen_pool_11",
+  "ep": 5
+ },
+ {
+  "sup": 1.525,
+  "scn": "crowd_dense",
+  "ep": 1
+ },
+ {
+  "sup": 1.444,
+  "scn": "street_busy_s2",
+  "ep": 13
+ },
+ {
+  "sup": 1.372,
+  "scn": "veh_cal_1",
+  "ep": 16
+ }
+]
