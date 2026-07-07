@@ -1041,6 +1041,10 @@ PHI_MAN = np.radians(25.0)   # ground around-L/R deflection angle for the maneuv
 EGO_CCF = os.environ.get("EGO_CCF", "0") == "1"                 # Certified Commitment Function: hold the committed detour
 EGO_CCF_WARP = os.environ.get("EGO_CCF_WARP", "1") == "1"       # the YIELD-behind speed-warp restoration (the novelty half);
 EGO_MAN_RELEASE = int(os.environ.get("EGO_MAN_RELEASE", "5"))  # ticks 'straight' must stay certified before releasing a commit
+EGO_CRET_HOLD = os.environ.get("EGO_CRET_HOLD", "0") == "1"
+EGO_CRET_SMIN = float(os.environ.get("EGO_CRET_SMIN", "0.10"))  # CRET glide floor (below the slip EGO_S_MIN)     # task#3 CRET-hold: before an instant hover, re-try the
+#   STRAIGHT plan at a certified RETIME (constant-slip identity; tournament only certified s=1). Certified glide
+#   replaces stop-go; the caller's brake-fast/release-slow slew keeps the deceleration smooth. Default OFF.
 # HCT-D tracking-tube HARVEST: TRACK_HARVEST=1 logs per sub-step (window, delta=||flown-planned||, hodograph
 # features ||v||,||a||,lateral-accel) so a split-conformal tracking tube kappa*g can be calibrated off-line.
 _TRACKH = os.environ.get("TRACK_HARVEST") == "1"
@@ -1287,12 +1291,14 @@ def ego_maneuver_replan(p_d, v_d, a_d, cur_wp, t_sim):
     # sides -- and re-opens the tournament only when the committed side is INFEASIBLE at every speed. It returns to
     # goal-direct only after 'straight' has certified for EGO_MAN_RELEASE consecutive ticks (debounce kills the
     # straight<->around flip). Switch trigger = the hard certificate's feasibility, NOT a goal-ward speed deadband.
-    def _committed_warp():
-        """Fastest re-timing s in [EGO_S_MIN,1] for which the COMMITTED (already-replanned) B-spline certifies vs every
+    def _committed_warp(smin=None):
+        """Fastest re-timing s in [smin,1] for which the COMMITTED (already-replanned) B-spline certifies vs every
         predicted mover (sound substitution obs_vel=v/s, t_hi=s*TAU, v_eff=VEFF/s, delta=DT*s; the re-timed predicted
-        cert is the slip-behind-sound one -- no frozen-at-current variant, which would forbid every yield). 0.0 if none."""
+        cert is the slip-behind-sound one -- no frozen-at-current variant, which would forbid every yield). 0.0 if none.
+        smin: floor (default EGO_S_MIN); CRET-hold passes a LOWER floor -- a certified crawl beats a freeze."""
+        smin = EGO_S_MIN if smin is None else float(smin)
         s = 1.0
-        while s >= EGO_S_MIN - 1e-9:
+        while s >= smin - 1e-9:
             ok = True
             for (_oid, c3, vel, r_obs, d_safe) in movers:
                 R = r_obs + MAN_DSAFE + MAN_QCONF + MAN_TRACK
@@ -1351,6 +1357,14 @@ def ego_maneuver_replan(p_d, v_d, a_d, cur_wp, t_sim):
             elif (ego.replan(p_d, v_d, a_d, np.array([p_d[0], p_d[1], z_top]))
                     and ego.duration() > 1e-3 and cert_clear() and static_clear() and mover_clear_flown()):
                 chosen = "climb"                                  # certified vertical escape
+            elif (EGO_CRET_HOLD
+                    and ego.replan(p_d, v_d, a_d, np.array([p_d[0] + gdir[0] * L, p_d[1] + gdir[1] * L, CRUISE_Z]))
+                    and ego.duration() > 1e-3 and static_clear()
+                    and (_cret_s := _committed_warp(smin=EGO_CRET_SMIN)) >= EGO_CRET_SMIN - 1e-9):
+                # CRET-hold: a certified SLOW glide along the straight plan exists (full-speed candidates
+                # all failed, but the slip-retime identity certifies s<1). Fly it instead of freezing;
+                # man_g carries the certified warp and the g-slew smooths the deceleration.
+                chosen = "cret"; man_g = float(_cret_s)
             else:
                 chosen = "hold"                                   # uncertifiable -> brake/hover, do NOT fly uncertified
         _MAN_STATE["sub"] = _ang if chosen in ("around_l", "around_r") else None
