@@ -1150,7 +1150,8 @@ def _man_cloud(p_d, heading, t_sim, movers):
         dp = np.array([c3[0] - p_d[0], c3[1] - p_d[1]])
         dv = np.array([vel[0], vel[1]]) - v_nom
         dvn = float(dv @ dv)
-        tcpa = float(np.clip(-(dp @ dv) / dvn, 0.0, MAN_PLANHI)) if dvn > 1e-6 else 0.0
+        tcpa = (float(np.clip(-(dp @ dv) / dvn, 0.0, MAN_PLANHI)) if dvn > 1e-6 else 0.0) \
+            if os.environ.get("CPA_OFF", "0") != "1" else 0.0   # ablation arm: dodge-the-past
         R = r_obs + MAN_DSAFE; head = 2.0 * c3[2]
         # GT fov_cloud only voxelises a coarse mover box, so it needs BOTH the current and the predicted keep-out
         # ring. The D435i depth ALREADY paints the mover's current front surface densely; stacking a 0.8 m ring on
