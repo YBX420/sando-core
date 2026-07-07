@@ -1,0 +1,6 @@
+s7X gap=+83 reach=1 coll=0
+s12CS gap=+1 reach=1 coll=0
+s3X gap=-54 reach=1 coll=0
+s21CS gap=+292 reach=0 coll=1
+s5S gap=+51 reach=1 coll=0
+s15X gap=+86 reach=1 coll=0

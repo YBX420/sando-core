@@ -395,8 +395,21 @@ def maneuver_decide_v2(ego, p_d, v_d, a_d, goal, ztop, cyl, state,
     _esc_on = os.environ.get("ESC_TRIG", "0") == "1"
     _esc_hot = False
     if _esc_on and cyl:
+        # v2 signal (directional projection): only movers that squeeze the FORWARD corridor count --
+        # inside the +-70deg goal cone AND with relative velocity pointing at the drone. A pedestrian
+        # passing behind must not scramble the escape family.
+        _gxy0 = goal[:2] - p_d[:2]
+        _gd0 = _gxy0 / max(float(np.linalg.norm(_gxy0)), 1e-6)
+        def _squeezes(c):
+            _d = np.asarray(c[0][:2], float) - np.asarray(p_d[:2], float)
+            _dn = float(np.linalg.norm(_d))
+            if _dn < 1e-6 or float(np.hypot(c[1][0], c[1][1])) <= 0.3:
+                return False
+            if float(_d @ _gd0) / _dn < 0.34:              # outside the forward cone (~70deg half)
+                return False
+            return float(np.asarray(c[1][:2], float) @ (-_d / _dn)) > 0.2   # closing on the drone
         _g = min((float(np.hypot(c[0][0] - p_d[0], c[0][1] - p_d[1])) - float(c[3])
-                  for c in cyl if float(np.hypot(c[1][0], c[1][1])) > 0.3), default=1e9)
+                  for c in cyl if _squeezes(c)), default=1e9)
         _gh = state.setdefault("g_hist", [])
         _gh.append(_g)
         del _gh[:-4]
@@ -536,7 +549,21 @@ def maneuver_decide_v2(ego, p_d, v_d, a_d, goal, ztop, cyl, state,
         state["s_prev"] = s
         return kind, s
     i_w, i_p = grid.index(s), grid.index(sp)
-    s_c = grid[i_p + max(-1, min(1, i_w - i_p))]
+    _dwell = int(os.environ.get("SPEED_DWELL", "0"))
+    if _dwell > 0 and i_w < i_p:                      # winner is FASTER (grid is descending)
+        # upgrade dwell: a marginal cert that flips each tick makes the gear flap (one pitch event
+        # per flap). Only release upward after the faster gear has won _dwell consecutive ticks;
+        # braking (slower) stays IMMEDIATE -- the sound direction is never delayed.
+        _cnt = state.get("up_cnt", 0) + 1
+        state["up_cnt"] = _cnt
+        if _cnt < _dwell:
+            s_c = sp                                   # hold current gear (re-certified below)
+        else:
+            state["up_cnt"] = 0
+            s_c = grid[i_p + max(-1, min(1, i_w - i_p))]
+    else:
+        state["up_cnt"] = 0
+        s_c = grid[i_p + max(-1, min(1, i_w - i_p))]
     if s_c != s:
         d = (delta if delta is not None else 0.0)
         t_c = min(tau, 0.30 + 0.5 * s_c + 0.05) if os.environ.get("TAU_SPEED", "0") == "1" else tau
