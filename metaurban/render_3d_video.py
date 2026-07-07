@@ -524,7 +524,8 @@ EGO_VEFF_SLIP = float(os.environ.get("EGO_VEFF", 0.25))   # KF-residual tube (co
 EGO_SLIP_DSAFE = float(os.environ.get("EGO_SLIPDSAFE", 0.2))   # SLIP standoff: tight like native (cert guarantees
                                                               # it, so never collides). User-tunable; only no-collision matters.
 if args.ego:
-    ego = EGOPlanner(map_origin=(-200, -200, -1), map_size=(400, 400, 8), res=0.2, inflation=0.3)
+    _zsz = float(os.environ.get("OVER_Z", 0)) + 1.0 if os.environ.get("OVER_Z") else 8.0
+    ego = EGOPlanner(map_origin=(-200, -200, -1), map_size=(400, 400, max(8.0, _zsz)), res=0.2, inflation=0.3)
     # EGO_VMAX env override: lower v_max so the drone does not OUTRUN its forward cone (8m cone / 8 m/s = ~1s lookahead
     # -> fast-flight-into-late-detected-obstacle collisions). A reaction-feasible cap is the stable global half of the
     # speed-FOV coupling (the per-tick _path_free_dist warp is the dynamic half).
@@ -576,7 +577,9 @@ def _dt_into(sando, _cache, tid, size, pos, vel, label, t_sim, z=None):
     sando.add_traj(d, t_sim)
 
 
-Z_CEIL = float(PLN.get("z_max", 6.0)) + 0.5    # only voxelise static structure up to where the drone can fly
+Z_CEIL = max(float(PLN.get("z_max", 6.0)), float(os.environ.get("OVER_Z", 0.0))) + 0.5   # OVER_Z lifts
+#   the flight ceiling (user 2026-07-08: unlimited transit z, mission-controlled GOAL z -> crowds
+#   escaped over the top instead of held)
 
 
 def build_static_field():
@@ -1168,10 +1171,21 @@ def _man_cloud(p_d, heading, t_sim, movers):
         # optimise fails -> stall. With d435i, feed ONLY the PREDICTED (t_cpa) ring (where the mover WILL be, which
         # depth can't see yet); the current-position d_safe is still enforced by cert_clear()'s static-mover check.
         leads = (tcpa,) if args.d435i else (0.0, tcpa)
+        _eta = os.environ.get("ETA_FEED", "0") == "1"
+        _qv = PERCLASS_CONF.get(d_safe, (MAN_QCONF, MAN_VEFF))
         for lead in leads:                                        # current + closest-approach predicted footprint
             cx, cy = c3[0] + vel[0] * lead, c3[1] + vel[1] * lead
-            ring = [[cx + R * np.cos(a), cy + R * np.sin(a), z]
-                    for a in np.linspace(0, 2 * np.pi, 10, endpoint=False) for z in np.linspace(0.3, head, 3)]
+            R_l = R
+            if _eta and lead > 0.0:
+                # GapWeave S1 (time-matched feed radius): the planner must avoid the ring the
+                # CERTIFICATE will demand at arrival time -- q + v_eff*(t_view+delta), capped, plus
+                # the band offset so the unconstrained optimum sits at floor+0.25 (plan once,
+                # certify once; the plan-small/cert-big mismatch was the recurring kill->hold chain).
+                R_l = min(R + _qv[0] + _qv[1] * (min(lead, REPLAN_DT) + REPLAN_DT), R + 2.6) + 0.25
+            _n_th = max(10, int(np.ceil(2 * np.pi * R_l / 0.5)))   # gap-free ring at any radius
+            ring = [[cx + R_l * np.cos(a), cy + R_l * np.sin(a), z]
+                    for a in np.linspace(0, 2 * np.pi, _n_th, endpoint=False)
+                    for z in np.linspace(0.3, head, 3)]
             pts.append(np.asarray(ring, float))
     return np.concatenate([p for p in pts if len(p)], axis=0)
 

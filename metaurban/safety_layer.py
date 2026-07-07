@@ -250,6 +250,12 @@ def maneuver_decide_sticky(ego, p_d, v_d, a_d, goal, ztop, clear_fn, state,
         ang = {"around_l": PHI, "around_r": -PHI}.get(kind)
         if ang is not None:
             return np.array([*(p_d[:2] + L * _rot(gdir, ang)), cruise_z])
+        if kind == "soar":
+            # CLIMB-FORWARD (vector composition, vertical edition): keep goal-ward progress WHILE
+            # ascending just above the certified columns -- the graceful crowd-escape that pure
+            # 'climb' (freeze-and-rise) and far-high 'over' both miss. Goal z stays controlled by
+            # the mission; this is a transit carrot only.
+            return np.array([*(p_d[:2] + gdir * (0.6 * L)), ztop])
         if kind == "over":
             return np.array([goal[0], goal[1], ztop])
         if kind == "climb":
@@ -338,6 +344,12 @@ def maneuver_decide_v2(ego, p_d, v_d, a_d, goal, ztop, cyl, state,
         ang = {"around_l": PHI, "around_r": -PHI, "around_l2": 2 * PHI, "around_r2": -2 * PHI}.get(kind)
         if ang is not None:
             return np.array([*(p_d[:2] + L * _rot(gdir, ang)), cruise_z])
+        if kind == "soar":
+            # CLIMB-FORWARD (vector composition, vertical edition): keep goal-ward progress WHILE
+            # ascending just above the certified columns -- the graceful crowd-escape that pure
+            # 'climb' (freeze-and-rise) and far-high 'over' both miss. Goal z stays controlled by
+            # the mission; this is a transit carrot only.
+            return np.array([*(p_d[:2] + gdir * (0.6 * L)), ztop])
         if kind == "over":
             return np.array([goal[0], goal[1], ztop])
         if kind == "climb":
@@ -375,7 +387,13 @@ def maneuver_decide_v2(ego, p_d, v_d, a_d, goal, ztop, cyl, state,
             return -1e9
         return float(np.dot(np.asarray(rr[0], float)[:2] - p_d[:2], gdir))
 
-    DIRS = ("straight", "around_l", "around_r", "around_l2", "around_r2", "over", "climb")
+    _soar = os.environ.get("SOAR", "0") == "1"
+    _soar_eager = os.environ.get("SOAR_EAGER", "0") == "1"
+    DIRS = (("straight", "around_l", "around_r", "soar", "around_l2", "around_r2", "over", "climb")
+            if (_soar and _soar_eager) else
+            ("straight", "around_l", "around_r", "around_l2", "around_r2", "soar", "over", "climb")
+            if _soar else
+            ("straight", "around_l", "around_r", "around_l2", "around_r2", "over", "climb"))
     inc, inc_s = state.get("kind"), float(state.get("s", 1.0))
     gs_inc = state.get("gsub")
     if carrot == "angle" and inc in DIRS:
