@@ -38,7 +38,8 @@ class PerceptCfg:
     def __init__(self, fov_deg=45.0, fov_range=10.0, sigma0=0.05, sigma_k=0.01,
                  p_miss0=0.05, p_miss_k=0.15, occlusion=True, gate_m=1.2, ttl_ticks=8, dt=0.1,
                  fp_rate=0.0, cls_err=0.0, size_err=0.05):
-        self.fov_deg = float(fov_deg)          # cone HALF-angle (matches render_3d_video --fov_deg)
+        self.fov_deg = min(float(fov_deg), 180.0)   # cone HALF-angle; >180 would make cos_lim>cos(180)
+        #   and the dot-product gate reject EVERYTHING (fov=360 = accidental total blindness, 2026-07-08)
         self.fov_range = float(fov_range)      # detection range (m)
         self.sigma0 = float(sigma0)            # centre-position noise at 0 m
         self.sigma_k = float(sigma_k)          # noise growth per metre

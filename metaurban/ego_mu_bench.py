@@ -74,7 +74,17 @@ for ep in range(args.episodes):
                                          max(np.linalg.norm((goal3 - p3)[:2]), 1e-6))
             v_cmd = np.asarray(vel[:2], float)
         else:
-            rr = ego.eval(min(s * DT, max(ego.duration() - 1e-3, 0.0)))
+            # executor parity with replay_core: the incumbent path is NOT replanned every tick, so
+            # the reference must be taken s*DT ahead of the NEAREST point on the committed spline
+            # (naive eval at absolute t=s*DT pins a zero-speed start to the spline origin forever --
+            # the ep7 perpetual-stall bug, 2026-07-08).
+            dur = max(ego.duration() - 1e-3, 0.0)
+            ts = np.linspace(0.0, dur, 25)
+            pts = [ego.eval(float(t)) for t in ts]
+            dists = [np.linalg.norm(np.asarray(r[0][:2], float) - env.p) if r is not None else 1e9
+                     for r in pts]
+            t_near = float(ts[int(np.argmin(dists))])
+            rr = ego.eval(min(t_near + s * DT, dur))
             p_ref = np.asarray(rr[0][:2], float) if rr is not None else env.goal
             v_cmd = (p_ref - env.p) / DT
         sp = float(np.linalg.norm(v_cmd))

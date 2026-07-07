@@ -159,6 +159,27 @@ class MetaUrbanNavEnv(gym.Env):
         start_w = ctr - axis * half
         goal_w = ctr + axis * half
 
+        # SPAWN LEGALITY (2026-07-08): the corridor endpoints can land INSIDE a static prop/building
+        # (clearance<0 at t=0 -> insta-collision before any decision) -- walk each endpoint inward
+        # along the corridor axis until it has breathing room. Benchmark-grade worlds must not
+        # execute the drone at birth.
+        def _clr_at(q):
+            best = 1e18
+            for xy_w, r, _h, _c, _v in self._movers:
+                best = min(best, float(np.linalg.norm(xy_w - q)) - r - 0.25)
+            return best
+        for _sgn, _name in ((+1.0, "start"), (-1.0, "goal")):
+            q = start_w if _name == "start" else goal_w
+            step = axis * _sgn * 1.0
+            for _ in range(12):
+                if _clr_at(q) >= 0.6:
+                    break
+                q = q + step
+            if _name == "start":
+                start_w = q
+            else:
+                goal_w = q
+
         self.org = ctr.copy()
         self.p = start_w - self.org
         self.goal = goal_w - self.org
