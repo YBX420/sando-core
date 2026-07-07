@@ -218,3 +218,19 @@ def maneuver_decide_sticky(ego, p_d, v_d, a_d, goal, ztop, clear_fn, state,
                            cruise_z=cruise_z, horizon=horizon, straight_clip=straight_clip)
     state.update(kind=kind, gsub=_gsub(kind), age=0)
     return kind
+
+
+def cert_clear_warp(ego, cyl, s, tau=TAU, delta=None):
+    """Constant-slip RETIME certification of the committed spline at warp s<=1 -- the headless twin
+    of the renderer's slip-behind identity (sound substitution obs_vel=v/s, t_hi=s*tau, v_eff=veff/s,
+    delta=d*s). Predicted-only: the frozen-at-current conjunct of cert_clear would forbid every
+    yield. Statics (vel=0, veff=0) are warp-invariant -- slowing never fixes a static conflict."""
+    d = (tau if delta is None else delta)
+    s = float(s)
+    for (c0, vv, aa, R, zc, veff) in cyl:
+        hp, _ = ego.certify_horizontal(obs_c0=c0, R=R, obs_vel=tuple(np.asarray(vv, float) / s),
+                                       obs_acc=(0, 0, 0), t_hi=s * tau, v_eff=veff / s, delta=d * s)
+        vo, _ = ego.certify_above(z_clear=zc, t_hi=s * tau, v_eff_z=0.0, delta=d * s)
+        if not (hp or vo):
+            return False
+    return True

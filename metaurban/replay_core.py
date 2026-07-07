@@ -39,6 +39,12 @@ SMOOTH_MARGIN = float(os.environ.get("SMOOTH_MARGIN", "0.15"))   # extra delta(s
 # RADIUS_CONSIST=1 (task#2, audit 半径一致化): feed EGO the SAME Delta=0 keep-out the cert gate
 # enforces (r + D_SAFE_H + q0_cls) instead of the bare mover radius -- planning against bare r
 # invites plans the gate must reject -> replan/evade churn. Default OFF = frozen behaviour.
+CRET_GLIDE = os.environ.get("CRET_GLIDE", "0") == "1"   # task#7: on 'evade', try a certified RETIME
+#   glide (SL.cert_clear_warp, slip identity) along a fresh straight plan before fleeing -- converts
+#   mover-speed-limited freezes into certified slow progress. Default OFF = frozen behaviour.
+CRET_GLIDE_SMIN = float(os.environ.get("CRET_GLIDE_SMIN", "0.10"))
+VERDICT3_LOG = os.environ.get("VERDICT3_LOG", "0") == "1"   # log the 3-valued cert verdict on evade
+#   ticks into hist (DNF-seed diagnosis: UNKNOWN -> deepen budget; REFUTED -> genuinely boxed)
 RADIUS_CONSIST = os.environ.get("RADIUS_CONSIST", "0")   # "0" off | "1" full (r+d_safe+q) | "dsafe" (r+d_safe only:
 #   align the DETERMINISTIC standoff, leave the stochastic tube q to the gate -- full alignment with the
 #   placeholder q=1.054 seals corridors at the PLANNING level (A/B 2026-07-07: evade 64->87, time +12s))
@@ -261,7 +267,7 @@ def run_replay(movers, ep, mode="ours", calib=None, predict=True, max_vel=3.0, m
     p_d = start.copy(); v_d = np.zeros(3); a_d = np.zeros(3)
     _hd_cmd = [None]     # yaw-to-path: cone follows LAST tick's commanded set-point direction
     min_clr = 1e18; max_z = start[2]; reached = False
-    counts = {k: 0 for k in ("straight", "around_l", "around_r", "over", "climb", "evade", "native", "sando")}
+    counts = {k: 0 for k in ("straight", "around_l", "around_r", "over", "climb", "evade", "cret", "native", "sando")}
     _stick = {}                                      # SMOOTH=1 incumbent-maneuver state (kind/age)
     rta = dict(certified_ticks=0, violations=0)      # RTA failure rate: cert-passed tick followed by
     #                                                  a clearance violation within the SAME trust window
@@ -456,12 +462,32 @@ def run_replay(movers, ep, mode="ours", calib=None, predict=True, max_vel=3.0, m
                 if rr is not None:
                     p_ref, v_ref, a_ref = (np.asarray(x, float) for x in rr)
             elif idx:
-                # realistic mode flees only what it TRACKS (fleeing an unseen mover would be omniscient);
-                # with nothing tracked evade_setpoint falls back to fleeing along gdir.
-                flee = ([tuple(d) for (_t, d, *_r) in percepts] if percept_fe is not None
-                        else [dets[i] for i in idx])
-                pos, vel = SL.evade_setpoint(p_d, flee, max_vel, DT, ztop, gdir)
-                p_ref, v_ref, a_ref = pos, vel, np.zeros(3)
+                _glid = False
+                if CRET_GLIDE and cont_cert:
+                    # CRET-glide: the tournament certified candidates at FULL speed only. Replan
+                    # straight and scan certified retimes s<1 (slip identity) -- a certified crawl
+                    # toward the goal beats a blind flee. Statics are warp-invariant, so this only
+                    # converts mover-speed-limited freezes (the honest population).
+                    gsub = np.array([goal[0], goal[1], CRUISE_Z])
+                    if ego.replan(p_d, v_d, a_d, gsub) and ego.duration() > 1e-3:
+                        for _s in (0.8, 0.6, 0.4, 0.25, CRET_GLIDE_SMIN):
+                            if _s < CRET_GLIDE_SMIN - 1e-9:
+                                break
+                            if SL.cert_clear_warp(ego, cyl, _s, tau=TAU, delta=DELTA):
+                                rr = ego.eval(min(_s * DT, max(ego.duration() - 1e-3, 0.0)))
+                                if rr is not None:
+                                    p_ref = np.asarray(rr[0], float)
+                                    v_ref = _s * np.asarray(rr[1], float)
+                                    a_ref = _s * _s * np.asarray(rr[2], float)
+                                    kind = "cret"; _glid = True
+                                break
+                if not _glid:
+                    # realistic mode flees only what it TRACKS (fleeing an unseen mover would be
+                    # omniscient); with nothing tracked evade_setpoint falls back to fleeing along gdir.
+                    flee = ([tuple(d) for (_t, d, *_r) in percepts] if percept_fe is not None
+                            else [dets[i] for i in idx])
+                    pos, vel = SL.evade_setpoint(p_d, flee, max_vel, DT, ztop, gdir)
+                    p_ref, v_ref, a_ref = pos, vel, np.zeros(3)
             counts[kind] = counts.get(kind, 0) + 1
 
         # apply the set-point: real PX4 SITL (flier) > local quadrotor model (dynamics) > teleport (optimistic)
@@ -484,7 +510,7 @@ def run_replay(movers, ep, mode="ours", calib=None, predict=True, max_vel=3.0, m
         _dcmd = np.asarray(p_ref, float)[:2] - p_d[:2]
         if float(np.hypot(*_dcmd)) > 0.15:
             _hd_cmd[0] = _dcmd.copy()      # look where you are COMMANDED to go (real quads yaw-to-path)
-        if kind in ("straight", "around_l", "around_r", "over", "climb"):
+        if kind in ("straight", "around_l", "around_r", "over", "climb", "cret"):
             rta["certified_ticks"] += 1
             if tick_clr < 1e17 and tick_clr < 0.0:
                 rta["violations"] += 1               # flew a CERT-PASSED plan into a violation
@@ -492,13 +518,22 @@ def run_replay(movers, ep, mode="ours", calib=None, predict=True, max_vel=3.0, m
             tick_cb(dict(tick=tick, t=t, p=p_d.copy(), kind=kind,
                          clr=(tick_clr if tick_clr < 1e17 else None)))
         if record:
-            hist.append(dict(tick=tick, t=round(t, 2), clr=round(tick_clr, 3) if tick_clr < 1e17 else None,
+            _v3 = None
+            if VERDICT3_LOG and kind == "evade" and cont_cert:
+                try:
+                    _v3 = SL.cert_verdict3(ego, cyl, tau=TAU, delta=DELTA)
+                except Exception:
+                    _v3 = "err"
+            hist.append(dict(tick=tick, t=round(t, 2),
+                             clr=round(tick_clr, 3) if tick_clr < 1e17 else None,
                              kind=kind, z=round(float(p_d[2]), 2),
                              p=[round(float(p_d[0]), 2), round(float(p_d[1]), 2)],
                              pref=[round(float(p_ref[0]), 2), round(float(p_ref[1]), 2)],
                              dgoal=round(float(np.linalg.norm(p_d[:2] - goal[:2])), 2),
                              a=round(float(np.linalg.norm(a_d)), 4), v=round(float(np.linalg.norm(v_d)), 4),
                              ax=round(float(a_d[0]), 4), ay=round(float(a_d[1]), 4)))
+            if _v3 is not None:
+                hist[-1]["v3"] = _v3                   # only stamped when VERDICT3_LOG fires: default hist shape frozen
         dgoal = float(np.linalg.norm(p_d[:2] - goal[:2]))
         if dgoal < 0.8:
             reached = True; break
