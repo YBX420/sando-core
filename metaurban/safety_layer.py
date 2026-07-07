@@ -234,3 +234,118 @@ def cert_clear_warp(ego, cyl, s, tau=TAU, delta=None):
         if not (hp or vo):
             return False
     return True
+
+
+def maneuver_decide_v2(ego, p_d, v_d, a_d, goal, ztop, cyl, state,
+                       cruise_z=CRUISE_Z, horizon=HORIZON, straight_clip=None,
+                       tau=TAU, delta=None, speeds=(1.0, 0.6, 0.3),  # 0.3 kept: it ABSORBS evades (without it evade 40->106); the time cost is the honest price of persistence
+                       dwell_ticks=3, strict_margin=0.15):
+    """UNIFIED tournament (task#8): candidates = (direction x speed) grid, ONE implementation for
+    both the headless benchmark and (stage-2) the renderer. Absorbs the four bolt-on speed
+    governors (slip / CCF-warp / CRET / FOVCAP): speed is a first-class tournament dimension, so
+    "yield behind a crosser" is just the (same-direction, s<1) candidate winning -- not a fallback
+    patch firing after the full-speed-only tournament already failed.
+
+    Directions: straight, +-PHI, +-2PHI, over, climb (one ego.replan each -- the expensive node).
+    Speeds: s=1 certified by cert_clear (frozen-at-current conjunct kept: full-speed semantics
+    unchanged); s<1 by cert_clear_warp (slip identity, predicted-only -- the renderer's yield rule).
+    Score: goal-ward progress of the RETIMED flight over the trust window, so a fast detour can
+    honestly beat a slow straight. Anti-chatter built in (world-frozen incumbent + dwell-gated
+    strict upgrades + one-grid-step speed release). Returns (kind, s); 'evade' when nothing
+    certifies at any (direction, speed) -- caller flees, s meaningless.
+    state: caller-persisted dict (kind / gsub / s / age)."""
+    d = (tau if delta is None else delta)
+    p_d = np.asarray(p_d, float); goal = np.asarray(goal, float)
+    gxy = goal[:2] - p_d[:2]; dist = float(np.linalg.norm(gxy))
+    gdir = gxy / dist if dist > 1e-6 else np.array([1.0, 0.0])
+    L = min(horizon, max(dist, 1.0))
+
+    def _gsub(kind):
+        if kind == "straight":
+            return (np.array([goal[0], goal[1], cruise_z]) if straight_clip is None
+                    else np.array([*(p_d[:2] + gdir * min(straight_clip, dist)), cruise_z]))
+        ang = {"around_l": PHI, "around_r": -PHI, "around_l2": 2 * PHI, "around_r2": -2 * PHI}.get(kind)
+        if ang is not None:
+            return np.array([*(p_d[:2] + L * _rot(gdir, ang)), cruise_z])
+        if kind == "over":
+            return np.array([goal[0], goal[1], ztop])
+        if kind == "climb":
+            return np.array([p_d[0], p_d[1], ztop])
+        return None
+
+    def _cert_at(s, strict=False):
+        dd = d + (strict_margin if strict else 0.0)
+        if s >= 0.999:
+            return cert_clear(ego, cyl, tau=tau, delta=dd)
+        return cert_clear_warp(ego, cyl, s, tau=tau, delta=dd)
+
+    def _best_s(smax=1.0, strict=False):
+        """Fastest certified speed for the CURRENT ego spline, scanning the grid down from smax."""
+        for s in speeds:
+            if s > smax + 1e-9:
+                continue
+            if _cert_at(s, strict):
+                return s
+        return 0.0
+
+    def _progress(s):
+        rr = ego.eval(min(s * tau, max(ego.duration() - 1e-3, 0.0)))
+        if rr is None:
+            return -1e9
+        return float(np.dot(np.asarray(rr[0], float)[:2] - p_d[:2], gdir))
+
+    DIRS = ("straight", "around_l", "around_r", "around_l2", "around_r2", "over", "climb")
+    inc, inc_s = state.get("kind"), float(state.get("s", 1.0))
+    gs_inc = state.get("gsub")
+    if inc in DIRS and gs_inc is not None and float(np.linalg.norm(gs_inc[:2] - p_d[:2])) < 1.5:
+        inc = None                                          # carrot reached -> re-decide
+
+    # --- incumbent retry (anti-chatter): keep flying the committed carrot at the fastest certified
+    #     speed; release speed upward one grid step per tick (brake fast, release slow).
+    if inc in DIRS and gs_inc is not None:
+        state["age"] = state.get("age", 0) + 1
+        if state["age"] >= dwell_ticks and inc != "straight":
+            state["age"] = 0                                # dwell-gated STRICT upgrade probe
+            for uk in DIRS[:DIRS.index(inc)]:
+                gs = _gsub(uk)
+                if ego.replan(p_d, v_d, a_d, gs) and ego.duration() > 1e-3:
+                    s_up = _best_s(strict=True)
+                    if s_up >= max(inc_s, speeds[-1]) - 1e-9 and s_up > 0.0:
+                        # upgrade must be certified-with-margin AND not slower than the incumbent
+                        state.update(kind=uk, gsub=gs, s=s_up)
+                        return uk, s_up
+        if ego.replan(p_d, v_d, a_d, gs_inc) and ego.duration() > 1e-3:
+            idx = max(0, speeds.index(inc_s) - 1) if inc_s in speeds else 0
+            s_now = _best_s(smax=speeds[idx])               # may rise ONE grid step above last tick
+            if s_now > 0.0:
+                state["s"] = s_now
+                return inc, s_now
+
+    # --- full grid: replan per direction (expensive), scan speeds (cheap), score retimed progress
+    best = (None, 0.0, -1e9)
+    last_replanned = None
+    for dk in DIRS:
+        gs = _gsub(dk)
+        if not (ego.replan(p_d, v_d, a_d, gs) and ego.duration() > 1e-3):
+            continue
+        last_replanned = dk
+        s_ok = _best_s()
+        if s_ok <= 0.0:
+            continue
+        sc = _progress(s_ok)
+        # LEXICOGRAPHIC rank (speed first): a full-speed detour beats ANY slowdown -- pure
+        # window-progress scoring is myopic (slow-and-straight outscores fast-but-sideways over
+        # 0.75 s, then stays slow: harness time +45%). Slowdowns only beat evade.
+        if (s_ok, sc) > (best[1], best[2]):
+            best = (dk, s_ok, sc)
+        if dk == "straight" and s_ok >= 0.999:
+            break                                           # full-speed straight certified: done
+    if best[0] is None:
+        state.update(kind=None, gsub=None, s=1.0, age=0)
+        return "evade", 0.0
+    dk, s_ok, _sc = best
+    gs = _gsub(dk)
+    if last_replanned != dk:
+        ego.replan(p_d, v_d, a_d, gs)                       # restore the WINNER's spline (loop clobbered ego)
+    state.update(kind=dk, gsub=gs, s=s_ok, age=0)
+    return dk, s_ok

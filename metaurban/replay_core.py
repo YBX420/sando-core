@@ -43,7 +43,9 @@ CRET_GLIDE = os.environ.get("CRET_GLIDE", "0") == "1"   # task#7: on 'evade', tr
 #   glide (SL.cert_clear_warp, slip identity) along a fresh straight plan before fleeing -- converts
 #   mover-speed-limited freezes into certified slow progress. Default OFF = frozen behaviour.
 CRET_GLIDE_SMIN = float(os.environ.get("CRET_GLIDE_SMIN", "0.10"))
-VERDICT3_LOG = os.environ.get("VERDICT3_LOG", "0") == "1"   # log the 3-valued cert verdict on evade
+VERDICT3_LOG = os.environ.get("VERDICT3_LOG", "0") == "1"
+DECIDE = os.environ.get("DECIDE", "v1")   # "v1" frozen tournament | "v2" unified direction-x-speed
+#   grid (SL.maneuver_decide_v2: speed as a first-class dimension, built-in commitment; task#8)   # log the 3-valued cert verdict on evade
 #   ticks into hist (DNF-seed diagnosis: UNKNOWN -> deepen budget; REFUTED -> genuinely boxed)
 RADIUS_CONSIST = os.environ.get("RADIUS_CONSIST", "0")   # "0" off | "1" full (r+d_safe+q) | "dsafe" (r+d_safe only:
 #   align the DETERMINISTIC standoff, leave the stochastic tube q to the gate -- full alignment with the
@@ -450,7 +452,13 @@ def run_replay(movers, ep, mode="ours", calib=None, predict=True, max_vel=3.0, m
                             if not (math.hypot(pp[0] - cc[0], pp[1] - cc[1]) >= rho or pp[2] >= zc):
                                 return False
                     return True
-            if SMOOTH and cont_cert:
+            _v2s = 1.0
+            if DECIDE == "v2" and cont_cert:
+                kind, _v2s = SL.maneuver_decide_v2(ego, p_d, v_d, a_d, goal, ztop, cyl, _stick,
+                                                   cruise_z=CRUISE_Z, horizon=HORIZON, delta=DELTA)
+                if kind in ("around_l2", "around_r2"):
+                    kind = kind[:-1]                        # counts/HUD keep the l/r bucket names
+            elif SMOOTH and cont_cert:
                 _strict = lambda: SL.cert_clear(ego, cyl, tau=TAU, delta=DELTA + SMOOTH_MARGIN)
                 kind = SL.maneuver_decide_sticky(ego, p_d, v_d, a_d, goal, ztop, clear_fn, _stick,
                                                  cruise_z=CRUISE_Z, horizon=HORIZON,
@@ -458,9 +466,11 @@ def run_replay(movers, ep, mode="ours", calib=None, predict=True, max_vel=3.0, m
             else:
                 kind = SL.maneuver_decide(ego, p_d, v_d, a_d, goal, ztop, clear_fn, cruise_z=CRUISE_Z, horizon=HORIZON)
             if kind != "evade":
-                rr = ego.eval(min(DT, max(ego.duration() - 1e-3, 0.0)))
+                rr = ego.eval(min(_v2s * DT, max(ego.duration() - 1e-3, 0.0)))
                 if rr is not None:
-                    p_ref, v_ref, a_ref = (np.asarray(x, float) for x in rr)
+                    p_ref = np.asarray(rr[0], float)
+                    v_ref = _v2s * np.asarray(rr[1], float)
+                    a_ref = _v2s * _v2s * np.asarray(rr[2], float)
             elif idx:
                 _glid = False
                 if CRET_GLIDE and cont_cert:
