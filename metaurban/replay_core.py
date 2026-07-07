@@ -39,7 +39,12 @@ PERCEPT_A2 = None                 # set to dict(miss_ticks=0, qual_ticks=0) by t
 _QUAL_MEMO = {}                   # per-tick mover-index -> future-reach qualification (theta2)
 
 # ---- geometry / dynamics ----
-DT = 0.30; TAU = 0.75; DELTA = DT
+DT = 0.30; TAU = 0.75
+DELTA = float(os.environ.get("DELTA_OVR", DT))   # anchor-staleness charge in the tube v_eff*(t+DELTA).
+#   Historical DT=0.30 assumed the decision consumes LAST tick's tracks; this loop perceives, decides
+#   and commits within the SAME tick (anchor fresh, ~7ms compute), so the calibration-consistent
+#   charge is ~pipeline latency. DELTA_OVR=0.05 = honest thinning candidate (audit 2026-07-07); the
+#   harvest Delta axis is measured FROM the anchor, matching this semantics exactly.
 # SMOOTH=1: event-triggered maneuver smoothing (sticky incumbent + dwell-gated strict upgrades);
 # default OFF -> byte-identical frozen behaviour (regress_frozen_ours.py guards this).
 SMOOTH = os.environ.get("SMOOTH", "0") == "1"
@@ -59,7 +64,9 @@ PING = os.environ.get("PING", "0") == "1"   # 终末嗡鸣 v0: when a track is N
 #   3x0.1s sub-chunks -- re-perceive (variable-dt KF) + re-certify each chunk (delta=0.1 -> thinner
 #   tube), re-decide ONLY on cert failure (event-driven). Perception must speed up WITH the cert
 #   (re-anchoring without fresh observations would fake-shrink the tube -- the honesty rule).
-PING_NEAR = float(os.environ.get("PING_NEAR", "5.0"))   # task#4: planner-side braking-envelope speed cap
+PING_NEAR = float(os.environ.get("PING_NEAR", "5.0"))
+PING_DECIDE = os.environ.get("PING_DECIDE", "0") == "1"   # v1: when near, re-DECIDE every sub-chunk
+#   (fresh 0.1s anchor + thin delta at the tournament itself), not only on cert failure   # task#4: planner-side braking-envelope speed cap
 #   v <= SL.v_cap(FOV_R, max_acc, DT) -- honest 'don't outrun the sensor' dial, default OFF   # FS3C-R era switch: SL loader (static/animal keys,
 #   fail-closed semantics) + code-level static stationarity in cylinders. Flips WHOLESALE with the
 #   new calib at Stage-C validation; default OFF = frozen benchmark behaviour.
@@ -560,8 +567,8 @@ def run_replay(movers, ep, mode="ours", calib=None, predict=True, max_vel=3.0, m
                                               int(_tr.trk.n), int(_tr.trk.miss > 0)))
                             _cyl_j, _zt_j = SL.build_cylinders(_ml_j, calib, predict=predict,
                                                                calib_v2=calib_v2)
-                            if not SL.cert_clear(ego, _cyl_j, tau=TAU, delta=_sub):
-                                # certificate broke mid-tick: event-driven re-decision NOW
+                            if PING_DECIDE or not SL.cert_clear(ego, _cyl_j, tau=TAU, delta=_sub):
+                                # v1: proactive sub-cadence decision / v0: cert broke mid-tick
                                 kind, _v2s = SL.maneuver_decide_v2(
                                     ego, _p_sub, v_ref, a_ref, goal, _zt_j, _cyl_j, _stick,
                                     cruise_z=CRUISE_Z, horizon=HORIZON, delta=_sub)

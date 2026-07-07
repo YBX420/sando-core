@@ -1,0 +1,209 @@
+{
+ "provenance": {
+  "spec": "FS3C-R theta2",
+  "config_sha": "779ab1f213bd889b",
+  "n_foldB2_flights": 34,
+  "date": "2026-07-07",
+  "mondrian": "per-class ranks on foldB5 (EXPLORATORY; confirm on fresh B6/T6)"
+ },
+ "groups": {
+  "pedestrian": {
+   "levels": {
+    "0.05": {
+     "q_conformal": 5.2795,
+     "v_eff": 1.0193,
+     "status": "ok_zero_slack",
+     "bins": {
+      "4": {
+       "q_conformal": 1.6419,
+       "v_eff": 1.0342
+      },
+      "7": {
+       "q_conformal": 2.1912,
+       "v_eff": 0.8941
+      },
+      "13": {
+       "q_conformal": 8.0366,
+       "v_eff": 1.5288
+      }
+     }
+    },
+    "0.1": {
+     "q_conformal": 1.856,
+     "v_eff": 1.0193,
+     "status": "ok",
+     "bins": {
+      "4": {
+       "q_conformal": 1.0766,
+       "v_eff": 1.0342
+      },
+      "7": {
+       "q_conformal": 1.363,
+       "v_eff": 0.8941
+      },
+      "13": {
+       "q_conformal": 4.3546,
+       "v_eff": 1.5288
+      }
+     }
+    }
+   }
+  },
+  "vehicle": {
+   "levels": {
+    "0.05": {
+     "q_conformal": 2.6414,
+     "v_eff": 0.9536,
+     "status": "ok_zero_slack",
+     "bins": {
+      "4": {
+       "q_conformal": 2.7129,
+       "v_eff": 1.0417
+      },
+      "7": {
+       "q_conformal": 1.7442,
+       "v_eff": 0.7753
+      },
+      "13": {
+       "q_conformal": 1.6984,
+       "v_eff": 0.4319
+      }
+     }
+    },
+    "0.1": {
+     "q_conformal": 1.8025,
+     "v_eff": 0.9536,
+     "status": "ok",
+     "bins": {
+      "4": {
+       "q_conformal": 1.8503,
+       "v_eff": 1.0417
+      },
+      "7": {
+       "q_conformal": 1.3656,
+       "v_eff": 0.7753
+      },
+      "13": {
+       "q_conformal": 1.3409,
+       "v_eff": 0.4319
+      }
+     }
+    }
+   }
+  },
+  "animal": {
+   "levels": {
+    "0.05": {
+     "status": "UNCALIBRATED"
+    },
+    "0.1": {
+     "status": "UNCALIBRATED"
+    }
+   }
+  },
+  "static": {
+   "levels": {
+    "0.05": {
+     "q_conformal": 0.3352,
+     "v_eff": 0.0,
+     "status": "ok_zero_slack",
+     "bins": {
+      "4": {
+       "q_conformal": 0.3261,
+       "v_eff": 0.0
+      },
+      "7": {
+       "q_conformal": 0.3486,
+       "v_eff": 0.0
+      },
+      "13": {
+       "q_conformal": 0.3747,
+       "v_eff": 0.0
+      }
+     }
+    },
+    "0.1": {
+     "q_conformal": 0.2659,
+     "v_eff": 0.0,
+     "status": "ok",
+     "bins": {
+      "4": {
+       "q_conformal": 0.2568,
+       "v_eff": 0.0
+      },
+      "7": {
+       "q_conformal": 0.2793,
+       "v_eff": 0.0
+      },
+      "13": {
+       "q_conformal": 0.2859,
+       "v_eff": 0.0
+      }
+     }
+    }
+   }
+  }
+ },
+ "young": {
+  "pedestrian": {
+   "0.05": {
+    "q0y": 2.3937,
+    "growth": 2.2
+   },
+   "0.1": {
+    "q0y": 1.9975,
+    "growth": 2.2
+   }
+  },
+  "vehicle": {
+   "0.05": {
+    "q0y": 19.6677,
+    "growth": 11.0
+   },
+   "0.1": {
+    "q0y": 14.46,
+    "growth": 11.0
+   }
+  },
+  "static": {
+   "0.05": {
+    "q0y": 0.4084,
+    "growth": 0.0
+   },
+   "0.1": {
+    "q0y": 0.3318,
+    "growth": 0.0
+   }
+  }
+ },
+ "flags": [],
+ "validation": {
+  "0.05": {
+   "test2_flight_coverage": 0.9697,
+   "n_test2": 66,
+   "mondrian": "{'pedestrian': (0.969, 65), 'vehicle': (1.0, 15), 'static': (1.0, 6)}"
+  },
+  "0.1": {
+   "test2_flight_coverage": 0.9394,
+   "n_test2": 66,
+   "mondrian": "{'pedestrian': (0.938, 65), 'vehicle': (1.0, 15), 'static': (1.0, 6)}"
+  }
+ },
+ "deployability": {
+  "pedestrian": {
+   "tube@0.3": 2.14,
+   "tube@0.75": 2.6,
+   "tube@1.05": 2.9
+  },
+  "vehicle": {
+   "tube@0.3": 2.93,
+   "tube@0.75": 3.36,
+   "tube@1.05": 3.64
+  },
+  "static": {
+   "tube@0.3": 0.34,
+   "tube@0.75": 0.34,
+   "tube@1.05": 0.34
+  }
+ }
+}
