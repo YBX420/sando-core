@@ -51,18 +51,21 @@ def load_calib(eps=0.05):
     return out
 
 
-def build_cylinders(movers, calib, predict=True):
+def build_cylinders(movers, calib, predict=True, track_margin=0.0):
     """movers: list of (c0(3,), vel(3,), acc(3,), r_obs, head_height, cls) -- vel/acc are the caller's predictor
     output (CV: acc already 0; CA: the KF acceleration). Returns (cyls, ztop) where each cyl is
-    (c0, vel, acc, R, z_clear, v_eff) -- the conformal per-class keep-out the cert is run against."""
+    (c0, vel, acc, R, z_clear, v_eff) -- the conformal per-class keep-out the cert is run against.
+    track_margin: plan->flown tracking allowance (audit #9-2 2026-07-07: the renderer certs carry
+    MAN_TRACK=0.473 but the headless DYN arms certified the PLANNED spline with NO margin while the
+    quad FLIES up to ~delta_track away -- 'flown == certified' hole). Kinematic arms pass 0."""
     cyl = []; ztop = CRUISE_Z
     for (c0, vel, acc, r_obs, h, cls) in movers:
         q, veff = calib.get(cls, calib["_all"])
         vv = np.asarray(vel, float).copy(); aa = np.asarray(acc, float).copy()
         if not predict:
             vv = np.zeros(3); aa = np.zeros(3)
-        R = float(r_obs) + R_DRONE + D_SAFE_H + q
-        zc = float(h) + REACH_PAD + R_DRONE + D_SAFE_V + q
+        R = float(r_obs) + R_DRONE + D_SAFE_H + q + track_margin
+        zc = float(h) + REACH_PAD + R_DRONE + D_SAFE_V + q + track_margin
         cyl.append((np.asarray(c0, float), vv, aa, R, zc, veff)); ztop = max(ztop, zc + 0.2)
     return cyl, min(Z_CEIL, ztop)
 

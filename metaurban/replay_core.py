@@ -437,7 +437,9 @@ def run_replay(movers, ep, mode="ours", calib=None, predict=True, max_vel=3.0, m
                 if PRED_MODEL == "cv":
                     aa = np.zeros(3)                     # CV deployment: cert polynomial matches the CV-calibrated tube
                 mlist.append((c0, vv, aa, r_o, h_o, cls_o))
-            cyl, ztop = SL.build_cylinders(mlist, calib, predict=predict)
+            cyl, ztop = SL.build_cylinders(mlist, calib, predict=predict,
+                                           track_margin=(float(os.environ.get("DYN_TRACK", "0.473"))
+                                                         if dynamics else 0.0))
             if cont_cert:
                 clear_fn = lambda: SL.cert_clear(ego, cyl, tau=TAU, delta=DELTA)
             else:
