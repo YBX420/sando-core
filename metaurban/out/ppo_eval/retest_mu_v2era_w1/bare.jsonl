@@ -1,0 +1,101 @@
+{"config_fingerprint": {"SHIELD_EPS": "", "SHIELD_PERCLASS": "", "DECIDE": "", "SMOOTH": "", "RADIUS_CONSIST": "", "CRET_GLIDE": "", "CALIB_V2": "1", "PERCEPT": "", "PERCEPT_SEED": "", "PRED_MODEL": "", "DYN_TRACK": ""}, "model": "out/ppo_planner_mu", "n_ep": 100, "seed": 8777}
+{"ep": 1, "reached": true, "collided": false, "min_clr": 0.149}
+{"ep": 2, "reached": false, "collided": true, "min_clr": -0.18, "culprit": {"cls": "static", "r": 0.5, "in_track": true, "track_dist": 0.11, "n_ready": 8, "n_live": 8, "bearing_deg": -76.8, "in_cone": false, "speed": 0.0, "decision": "no-shield"}}
+{"ep": 3, "reached": true, "collided": false, "min_clr": 0.369}
+{"ep": 4, "reached": true, "collided": false, "min_clr": 5.744}
+{"ep": 5, "reached": false, "collided": true, "min_clr": -2.075, "culprit": {"cls": "vehicle", "r": 2.87, "in_track": false, "track_dist": 17.8, "n_ready": 1, "n_live": 2, "bearing_deg": 116.5, "in_cone": false, "speed": 8.33, "decision": "no-shield"}}
+{"ep": 6, "reached": true, "collided": false, "min_clr": 3.497}
+{"ep": 7, "reached": false, "collided": true, "min_clr": -0.07, "culprit": {"cls": "static", "r": 0.22, "in_track": true, "track_dist": 0.04, "n_ready": 6, "n_live": 6, "bearing_deg": -46.9, "in_cone": false, "speed": 0.0, "decision": "no-shield"}}
+{"ep": 8, "reached": true, "collided": false, "min_clr": 0.577}
+{"ep": 9, "reached": true, "collided": false, "min_clr": 10.693}
+{"ep": 10, "reached": true, "collided": false, "min_clr": 13.694}
+{"ep": 11, "reached": true, "collided": false, "min_clr": 9.387}
+{"ep": 12, "reached": true, "collided": false, "min_clr": 2.14}
+{"ep": 13, "reached": true, "collided": false, "min_clr": 4.543}
+{"ep": 14, "reached": false, "collided": false, "min_clr": 9.645}
+{"ep": 15, "reached": true, "collided": false, "min_clr": 4.81}
+{"ep": 16, "reached": true, "collided": false, "min_clr": 6.654}
+{"ep": 17, "reached": false, "collided": true, "min_clr": -0.116, "culprit": {"cls": "static", "r": 0.22, "in_track": true, "track_dist": 0.12, "n_ready": 6, "n_live": 7, "bearing_deg": -40.3, "in_cone": true, "speed": 0.0, "decision": "no-shield"}}
+{"ep": 18, "reached": false, "collided": false, "min_clr": 1.162}
+{"ep": 19, "reached": false, "collided": true, "min_clr": -0.131, "culprit": {"cls": "vehicle", "r": 2.3, "in_track": true, "track_dist": 2.44, "n_ready": 7, "n_live": 8, "bearing_deg": 49.2, "in_cone": false, "speed": 8.33, "decision": "no-shield"}}
+{"ep": 20, "reached": false, "collided": true, "min_clr": -0.304, "culprit": {"cls": "vehicle", "r": 2.3, "in_track": true, "track_dist": 1.06, "n_ready": 2, "n_live": 3, "bearing_deg": -24.6, "in_cone": true, "speed": 0.03, "decision": "no-shield"}}
+{"ep": 21, "reached": false, "collided": true, "min_clr": -0.739, "culprit": {"cls": "vehicle", "r": 2.3, "in_track": true, "track_dist": 0.35, "n_ready": 2, "n_live": 3, "bearing_deg": -54.0, "in_cone": false, "speed": 1.41, "decision": "no-shield"}}
+{"ep": 22, "reached": false, "collided": true, "min_clr": -0.225, "culprit": {"cls": "static", "r": 1.0, "in_track": true, "track_dist": 0.16, "n_ready": 2, "n_live": 2, "bearing_deg": 58.9, "in_cone": false, "speed": 0.0, "decision": "no-shield"}}
+{"ep": 23, "reached": true, "collided": false, "min_clr": 3.143}
+{"ep": 24, "reached": true, "collided": false, "min_clr": 9.492}
+{"ep": 25, "reached": true, "collided": false, "min_clr": 8.598}
+{"ep": 26, "reached": true, "collided": false, "min_clr": 8.365}
+{"ep": 27, "reached": true, "collided": false, "min_clr": 1.795}
+{"ep": 28, "reached": true, "collided": false, "min_clr": 14.382}
+{"ep": 29, "reached": true, "collided": false, "min_clr": 11.75}
+{"ep": 30, "reached": true, "collided": false, "min_clr": 11.487}
+{"ep": 31, "reached": true, "collided": false, "min_clr": 8.354}
+{"ep": 32, "reached": false, "collided": false, "min_clr": 9.645}
+{"ep": 33, "reached": true, "collided": false, "min_clr": 2.419}
+{"ep": 34, "reached": true, "collided": false, "min_clr": 11.2}
+{"ep": 35, "reached": true, "collided": false, "min_clr": 8.828}
+{"ep": 36, "reached": true, "collided": false, "min_clr": 5.244}
+{"ep": 37, "reached": false, "collided": true, "min_clr": -0.278, "culprit": {"cls": "vehicle", "r": 2.87, "in_track": false, "track_dist": 24.17, "n_ready": 2, "n_live": 3, "bearing_deg": -135.5, "in_cone": false, "speed": 8.33, "decision": "no-shield"}}
+{"ep": 38, "reached": true, "collided": false, "min_clr": 0.042}
+{"ep": 39, "reached": true, "collided": false, "min_clr": 9.788}
+{"ep": 40, "reached": true, "collided": false, "min_clr": 9.365}
+{"ep": 41, "reached": true, "collided": false, "min_clr": 4.073}
+{"ep": 42, "reached": true, "collided": false, "min_clr": 10.861}
+{"ep": 43, "reached": true, "collided": false, "min_clr": 8.828}
+{"ep": 44, "reached": true, "collided": false, "min_clr": 5.244}
+{"ep": 45, "reached": true, "collided": false, "min_clr": 2.323}
+{"ep": 46, "reached": true, "collided": false, "min_clr": 10.979}
+{"ep": 47, "reached": true, "collided": false, "min_clr": 8.914}
+{"ep": 48, "reached": true, "collided": false, "min_clr": 5.393}
+{"ep": 49, "reached": false, "collided": true, "min_clr": -0.758, "culprit": {"cls": "vehicle", "r": 2.87, "in_track": false, "track_dist": 29.83, "n_ready": 1, "n_live": 3, "bearing_deg": 49.9, "in_cone": false, "speed": 8.33, "decision": "no-shield"}}
+{"ep": 50, "reached": false, "collided": true, "min_clr": -0.074, "culprit": {"cls": "static", "r": 1.0, "in_track": true, "track_dist": 0.12, "n_ready": 1, "n_live": 1, "bearing_deg": -23.8, "in_cone": true, "speed": 0.0, "decision": "no-shield"}}
+{"ep": 51, "reached": false, "collided": true, "min_clr": -0.249, "culprit": {"cls": "static", "r": 1.0, "in_track": true, "track_dist": 0.08, "n_ready": 1, "n_live": 1, "bearing_deg": -67.8, "in_cone": false, "speed": 0.0, "decision": "no-shield"}}
+{"ep": 52, "reached": true, "collided": false, "min_clr": 0.207}
+{"ep": 53, "reached": true, "collided": false, "min_clr": 1.255}
+{"ep": 54, "reached": true, "collided": false, "min_clr": 18.181}
+{"ep": 55, "reached": true, "collided": false, "min_clr": 8.378}
+{"ep": 56, "reached": true, "collided": false, "min_clr": 13.092}
+{"ep": 57, "reached": true, "collided": false, "min_clr": 3.477}
+{"ep": 58, "reached": true, "collided": false, "min_clr": 9.488}
+{"ep": 59, "reached": true, "collided": false, "min_clr": 8.554}
+{"ep": 60, "reached": true, "collided": false, "min_clr": 8.388}
+{"ep": 61, "reached": false, "collided": true, "min_clr": -1.573, "culprit": {"cls": "vehicle", "r": 2.87, "in_track": true, "track_dist": 2.39, "n_ready": 1, "n_live": 2, "bearing_deg": -25.0, "in_cone": true, "speed": 8.33, "decision": "no-shield"}}
+{"ep": 62, "reached": true, "collided": false, "min_clr": 2.424}
+{"ep": 63, "reached": false, "collided": true, "min_clr": -0.07, "culprit": {"cls": "static", "r": 0.2, "in_track": true, "track_dist": 0.02, "n_ready": 7, "n_live": 7, "bearing_deg": 106.6, "in_cone": false, "speed": 0.0, "decision": "no-shield"}}
+{"ep": 64, "reached": false, "collided": true, "min_clr": -0.079, "culprit": {"cls": "static", "r": 0.98, "in_track": true, "track_dist": 0.08, "n_ready": 8, "n_live": 8, "bearing_deg": -59.1, "in_cone": false, "speed": 0.0, "decision": "no-shield"}}
+{"ep": 65, "reached": false, "collided": true, "min_clr": -0.017, "culprit": {"cls": "vehicle", "r": 1.83, "in_track": false, "track_dist": null, "n_ready": 0, "n_live": 0, "bearing_deg": 103.0, "in_cone": false, "speed": 8.33, "decision": "no-shield"}}
+{"ep": 66, "reached": true, "collided": false, "min_clr": 6.396}
+{"ep": 67, "reached": true, "collided": false, "min_clr": 11.94}
+{"ep": 68, "reached": true, "collided": false, "min_clr": 14.612}
+{"ep": 69, "reached": true, "collided": false, "min_clr": 8.404}
+{"ep": 70, "reached": true, "collided": false, "min_clr": 9.6}
+{"ep": 71, "reached": true, "collided": false, "min_clr": 9.661}
+{"ep": 72, "reached": true, "collided": false, "min_clr": 10.09}
+{"ep": 73, "reached": true, "collided": false, "min_clr": 11.729}
+{"ep": 74, "reached": true, "collided": false, "min_clr": 9.645}
+{"ep": 75, "reached": true, "collided": false, "min_clr": 9.684}
+{"ep": 76, "reached": true, "collided": false, "min_clr": 10.123}
+{"ep": 77, "reached": true, "collided": false, "min_clr": 10.725}
+{"ep": 78, "reached": true, "collided": false, "min_clr": 8.611}
+{"ep": 79, "reached": true, "collided": false, "min_clr": 10.314}
+{"ep": 80, "reached": true, "collided": false, "min_clr": 15.51}
+{"ep": 81, "reached": true, "collided": false, "min_clr": 4.073}
+{"ep": 82, "reached": true, "collided": false, "min_clr": 10.986}
+{"ep": 83, "reached": true, "collided": false, "min_clr": 9.024}
+{"ep": 84, "reached": true, "collided": false, "min_clr": 5.395}
+{"ep": 85, "reached": true, "collided": false, "min_clr": 4.855}
+{"ep": 86, "reached": true, "collided": false, "min_clr": 16.026}
+{"ep": 87, "reached": true, "collided": false, "min_clr": 11.327}
+{"ep": 88, "reached": true, "collided": false, "min_clr": 13.78}
+{"ep": 89, "reached": true, "collided": false, "min_clr": 1.946}
+{"ep": 90, "reached": true, "collided": false, "min_clr": 14.253}
+{"ep": 91, "reached": true, "collided": false, "min_clr": 11.727}
+{"ep": 92, "reached": true, "collided": false, "min_clr": 11.532}
+{"ep": 93, "reached": true, "collided": false, "min_clr": 10.725}
+{"ep": 94, "reached": true, "collided": false, "min_clr": 8.611}
+{"ep": 95, "reached": true, "collided": false, "min_clr": 11.897}
+{"ep": 96, "reached": true, "collided": false, "min_clr": 13.737}
+{"ep": 97, "reached": true, "collided": false, "min_clr": 11.284}
+{"ep": 98, "reached": false, "collided": false, "min_clr": 10.488}
+{"ep": 99, "reached": true, "collided": false, "min_clr": 13.896}
+{"ep": 100, "reached": true, "collided": false, "min_clr": 15.12}
