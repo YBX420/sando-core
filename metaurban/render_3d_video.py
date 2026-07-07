@@ -211,6 +211,15 @@ def plan_route(lap_idx):
         return True
 
     start_xy = ctr - d * (ROUTE_LEN / 2.0); goal_xy = ctr + d * (ROUTE_LEN / 2.0)
+    # MAP-EDGE CLAMP (2026-07-08): a crowd cluster near the scene rim used to shoot the route
+    # endpoints onto the map edge (start y~-60 = flying the void). Pull any endpoint that strays
+    # beyond MAP_R of the walkable anchor (the agent spawn) back along the route axis.
+    _anchor = np.asarray(ctr, float)[:2]   # crowd-cluster centre: it LIVES on the sidewalk network
+    _map_r = float(os.environ.get("MAP_R", 28.0))
+    for _pt, _sgn in ((start_xy, +1.0), (goal_xy, -1.0)):
+        for _ in range(40):
+            if float(np.linalg.norm(_pt - _anchor)) <= _map_r: break
+            _pt += d * _sgn * 2.0
     for _ in range(30):                                      # nudge inward (toward the crowd) until clear
         if _clear(start_xy): break
         start_xy = start_xy + d * 2.0
