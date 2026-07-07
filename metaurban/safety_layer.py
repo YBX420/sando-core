@@ -51,7 +51,7 @@ def load_calib(eps=0.05):
     return out
 
 
-def build_cylinders(movers, calib, predict=True, track_margin=0.0):
+def build_cylinders(movers, calib, predict=True, track_margin=0.0, calib_v2=None, age_min=4):
     """movers: list of (c0(3,), vel(3,), acc(3,), r_obs, head_height, cls) -- vel/acc are the caller's predictor
     output (CV: acc already 0; CA: the KF acceleration). Returns (cyls, ztop) where each cyl is
     (c0, vel, acc, R, z_clear, v_eff) -- the conformal per-class keep-out the cert is run against.
@@ -59,8 +59,17 @@ def build_cylinders(movers, calib, predict=True, track_margin=0.0):
     MAN_TRACK=0.473 but the headless DYN arms certified the PLANNED spline with NO margin while the
     quad FLIES up to ~delta_track away -- 'flown == certified' hole). Kinematic arms pass 0."""
     cyl = []; ztop = CRUISE_Z
-    for (c0, vel, acc, r_obs, h, cls) in movers:
-        q, veff = calib.get(cls, calib["_all"])
+    for mv in movers:
+        (c0, vel, acc, r_obs, h, cls), age = (mv[:6], (mv[6] if len(mv) > 6 else None))
+        if calib_v2 is not None:
+            ent = calib_v2.get(cls) or dict(mature=(1e6, 0.0), young=(1e6, 0.0))
+            if age is not None and age < age_min:
+                q, veff = ent["young"]
+                vel = np.zeros(3); acc = np.zeros(3)   # young plate: FROZEN centre + fat growth
+            else:
+                q, veff = ent["mature"]
+        else:
+            q, veff = calib.get(cls, calib["_all"])
         vv = np.asarray(vel, float).copy(); aa = np.asarray(acc, float).copy()
         if not predict:
             vv = np.zeros(3); aa = np.zeros(3)
@@ -365,3 +374,26 @@ def maneuver_decide_v2(ego, p_d, v_d, a_d, goal, ztop, cyl, state,
         ego.replan(p_d, v_d, a_d, gs)                       # restore the WINNER's spline (loop clobbered ego)
     state.update(kind=dk, gsub=gs, s=s_ok, age=0)
     return dk, s_ok
+
+
+def load_calib_v2(eps=0.05):
+    """FS3C-R consumer: class -> dict(mature=(q0, v_eff), young=(q0y, growth), status).
+    FAIL-CLOSED: an UNCALIBRATED / missing class gets q0=1e6 (nothing near it certifies) and a
+    loud log line -- never a silent optimistic fallback (spec ruling #20 / #13)."""
+    path = os.path.join(_OUTDIR, "calib_v2.json")
+    rep = json.load(open(path))                     # missing file = hard crash, intended
+    out = {}
+    for cls in ("pedestrian", "vehicle", "animal", "static"):
+        lv = rep.get("groups", {}).get(cls, {}).get("levels", {}).get(str(eps), {})
+        if "q_conformal" not in lv:
+            print(f"[calib_v2] class '{cls}' UNCALIBRATED at eps={eps} -> FAIL-CLOSED (uncertifiable)",
+                  flush=True)
+            out[cls] = dict(mature=(1e6, 0.0), young=(1e6, 0.0), status="UNCALIBRATED")
+            continue
+        yy = rep.get("young", {}).get(cls, {}).get(str(eps))
+        out[cls] = dict(mature=(float(lv["q_conformal"]), float(lv["v_eff"])),
+                        young=((float(yy["q0y"]), float(yy["growth"])) if yy
+                               else (float(lv["q_conformal"]), float(lv["v_eff"]))),
+                        status=lv.get("status", "ok"))
+    out["_meta"] = dict(sha=rep.get("provenance", {}).get("config_sha"), eps=eps)
+    return out

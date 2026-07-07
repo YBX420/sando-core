@@ -22,7 +22,7 @@ for sd in range(8):
             tracks = []
             for tr in trs:
                 c0, v0, _acc = tr.trk.state()
-                tracks.append((np.asarray(c0[:2], float), np.asarray(v0[:2], float), float(tr.r), str(tr.cls)))  # KF anchor + cls (FS3C-R #12/#13)
+                tracks.append((np.asarray(c0[:2], float), np.asarray(v0[:2], float), float(tr.r), str(tr.cls), int(tr.trk.n)))  # KF anchor + cls (FS3C-R #12/#13)
             gd = env.goal - env.p
             gd = gd / max(np.linalg.norm(gd), 1e-6)
             v_next, certified, _iv = sh.filter(env.p, env.v, np.asarray(a, float), tracks, gd)

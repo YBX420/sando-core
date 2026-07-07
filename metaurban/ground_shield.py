@@ -10,7 +10,7 @@ the goal, then a straight hard-brake. Same pass/project/brake accounting as Cert
 """
 import numpy as np
 
-from shield import TUBE, _TS, _tube_for, _PERCLASS
+from shield import TUBE, _TS, _tube_for, _PERCLASS, _CALIBV2, _TUBES, _TUBES_Y, _AGE_MIN
 from ground_nav_env import DT, V_MAX, A_MAX, W_MAX
 
 try:
@@ -40,8 +40,14 @@ def arc_safe(p, theta, v, w, tracks):
     for t in tracks:
         c0, vt, r = t[0], t[1], t[2]
         cls = t[3] if len(t) > 3 else None
-        tube = _tube_for(cls) if (_PERCLASS and cls is not None) else TUBE
-        vt = np.zeros(2) if (_PERCLASS and cls == "static") else np.asarray(vt, float)
+        age = t[4] if len(t) > 4 else None
+        if _CALIBV2 and cls is not None:
+            young = age is not None and age < _AGE_MIN
+            tube = (_TUBES_Y if young else _TUBES).get(cls, _TUBES.get("_all", TUBE))
+            vt = np.zeros(2) if (young or cls == "static") else np.asarray(vt, float)
+        else:
+            tube = _tube_for(cls) if (_PERCLASS and cls is not None) else TUBE
+            vt = np.zeros(2) if (_PERCLASS and cls == "static") else np.asarray(vt, float)
         obs = np.asarray(c0, float)[None, :] + vt[None, :] * _TS[:, None]
         if np.any(np.linalg.norm(obs - ego, axis=1) < r + _R_BODY + tube):
             return False
@@ -98,7 +104,7 @@ class GroundShieldedEnv(gym.Wrapper):
         tracks = []
         for tr in trs:
             c0, v0, _ = tr.trk.state()
-            tracks.append((np.asarray(c0[:2], float), np.asarray(v0[:2], float), float(tr.r), str(tr.cls)))  # KF anchor c0, not raw det xy (FS3C-R #12: same anchor as EGO cert + harvest scoring)
+            tracks.append((np.asarray(c0[:2], float), np.asarray(v0[:2], float), float(tr.r), str(tr.cls), int(tr.trk.n)))  # KF anchor c0, not raw det xy (FS3C-R #12: same anchor as EGO cert + harvest scoring)
         gd = env.goal - env.p
         gd = gd / max(float(np.linalg.norm(gd)), 1e-6)
         v_next, w_next, certified, intervened = self.sh.filter(

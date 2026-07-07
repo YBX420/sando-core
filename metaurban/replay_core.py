@@ -235,6 +235,7 @@ def run_replay(movers, ep, mode="ours", calib=None, predict=True, max_vel=3.0, m
     dict(tick, t, p (LOCAL frame; add back org=midpoint(start,goal) for world), kind, clr). Keep it fast;
     it runs inside the control loop."""
     calib = calib or (SL.load_calib() if CALIB_V2 else load_calib())
+    calib_v2 = SL.load_calib_v2() if CALIB_V2 else None
     # work in a LOCAL frame centred on the corridor midpoint: MetaUrban world coords span hundreds of metres,
     # so a global grid would be billions of voxels. Translate everything by -org -> a small local map suffices.
     org = 0.5 * (ep["start"][:2] + ep["goal"][:2])
@@ -479,10 +480,11 @@ def run_replay(movers, ep, mode="ours", calib=None, predict=True, max_vel=3.0, m
                 c0, vv, aa = trk.state()
                 if PRED_MODEL == "cv":
                     aa = np.zeros(3)                     # CV deployment: cert polynomial matches the CV-calibrated tube
-                mlist.append((c0, vv, aa, r_o, h_o, cls_o))
+                mlist.append((c0, vv, aa, r_o, h_o, cls_o, int(getattr(trk, "n", 99))))
             cyl, ztop = SL.build_cylinders(mlist, calib, predict=predict,
                                            track_margin=(float(os.environ.get("DYN_TRACK", "0.473"))
-                                                         if dynamics else 0.0))
+                                                         if dynamics else 0.0),
+                                           calib_v2=calib_v2)
             if cont_cert:
                 clear_fn = lambda: SL.cert_clear(ego, cyl, tau=TAU, delta=DELTA)
             else:

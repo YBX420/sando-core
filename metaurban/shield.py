@@ -31,8 +31,17 @@ TUBE = Q0 + VEFF * _TS                                    # precomputed tube rad
 # SHIELD_PERCLASS=1: per-class tubes via safety_layer.load_calib (same file/semantics as the EGO
 # arm, incl. its static=(0.15, 0.0) stationarity rule). Default OFF = byte-identical legacy tube.
 _PERCLASS = os.environ.get("SHIELD_PERCLASS", "0") == "1"
-_TUBES = {}
-if _PERCLASS:
+_CALIBV2 = os.environ.get("CALIB_V2", "0") == "1"
+_AGE_MIN = 4
+_TUBES, _TUBES_Y = {}, {}
+if _CALIBV2:
+    from safety_layer import load_calib_v2
+    for _c, ent in load_calib_v2(eps=float(os.environ.get("CALIB_EPS", _EPS))).items():
+        if _c == "_meta":
+            continue
+        _q, _ve = ent["mature"]; _TUBES[_c] = _q + _ve * _TS
+        _qy, _gy = ent["young"]; _TUBES_Y[_c] = _qy + _gy * _TS
+elif _PERCLASS:
     from safety_layer import load_calib
     for _c, (_q, _ve) in load_calib(eps=float(_EPS)).items():
         _TUBES[_c] = _q + _ve * _TS
@@ -49,8 +58,14 @@ def action_safe(p, v_cmd, tracks):
     for t in tracks:
         c0, vt, r = t[0], t[1], t[2]
         cls = t[3] if len(t) > 3 else None
-        tube = _tube_for(cls) if (_PERCLASS and cls is not None) else TUBE
-        vt = np.zeros(2) if (_PERCLASS and cls == "static") else np.asarray(vt, float)
+        age = t[4] if len(t) > 4 else None
+        if _CALIBV2 and cls is not None:
+            young = age is not None and age < _AGE_MIN
+            tube = (_TUBES_Y if young else _TUBES).get(cls, _TUBES.get("_all", TUBE))
+            vt = np.zeros(2) if (young or cls == "static") else np.asarray(vt, float)
+        else:
+            tube = _tube_for(cls) if (_PERCLASS and cls is not None) else TUBE
+            vt = np.zeros(2) if (_PERCLASS and cls == "static") else np.asarray(vt, float)
         rel0 = np.asarray(c0, float) - np.asarray(p, float)
         relv = vt - np.asarray(v_cmd, float)
         d = np.linalg.norm(rel0[None, :] + relv[None, :] * _TS[:, None], axis=1)

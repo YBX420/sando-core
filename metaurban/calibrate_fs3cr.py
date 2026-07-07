@@ -159,5 +159,5 @@ for c, sh in shapes.items():
 print("[deployability]", dep)
 res["deployability"] = dep
 
-json.dump(res, open("out/conformal/calib_v2.json", "w"), indent=1)
-print("[calib] wrote out/conformal/calib_v2.json")
+json.dump(res, open(os.path.join("..", "out", "conformal", "calib_v2.json"), "w"), indent=1)
+print("[calib] wrote ../out/conformal/calib_v2.json (SL canonical dir)")
