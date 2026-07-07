@@ -133,7 +133,9 @@ for eps in (0.05, 0.10):
         qhat, flag = float(np.max(list(SB.values()))), "UNDER_CALIBRATED"
         res["flags"].append(f"eps={eps}: n={n} rank {k}>n -> qhat=max, achieved eps={1/(n+1):.3f}")
     else:
-        qhat, flag = float(np.sort(list(SB.values()))[k - 1], ), ("MAX_RANK_WARNING" if k == n else "ok")
+        qhat = float(np.sort(list(SB.values()))[k - 1])
+        flag = "ok_zero_slack" if k == n else "ok"       # k==n is a VALID rank (guarantee holds);
+        #   zero slack just means qhat rides the sample max -- fragile to one new tail flight
     for c in CLASSES:
         g = res["groups"].setdefault(c, {"levels": {}})
         if c == "animal" or c not in shapes:
