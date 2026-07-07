@@ -1424,6 +1424,12 @@ def fov_cloud(p_drone, heading, t_sim):
         return q
 
     for oid, cls, pos, vel, size in native_objects():
+        if os.environ.get("MU_ANOM", "0") == "1":
+            # statics INCLUDED: the sky-bicycle glitch is a PROP spawned at a bad z, class=static --
+            # the first monitor version skipped statics and was blind to it (2026-07-08)
+            _z_a = float(pos[2]) if len(np.atleast_1d(pos)) > 2 else 0.0
+            if _z_a > 2.0 and cls == "static":
+                print(f"[MU-ANOM] t={t_sim:.1f} AIRBORNE-PROP {cls} oid={oid} z={_z_a:.1f}", flush=True)
         if cls == "static": continue
         if os.environ.get("MU_ANOM", "0") == "1":
             _sp_a = float(np.hypot(vel[0], vel[1]))
