@@ -51,10 +51,13 @@ class GroundNavEnv(MetaUrbanNavEnv):
 
     # ---- perception: cone welded to the BODY heading -----------------------
     def _tracks(self):
+        if getattr(self, "_trk_tick", None) == self.tick:   # one KF step per world tick (FS3C-R #12)
+            return self._trk_memo
         cyl = self._cylinders()
         hd = np.array([np.cos(self.theta), np.sin(self.theta)])
         trs = self.pfe.step(self.p, hd, cyl)
-        return [t for t in trs if t.trk.ready], None
+        self._trk_tick, self._trk_memo = self.tick, ([t for t in trs if t.trk.ready], None)
+        return self._trk_memo
 
     def _obs(self):
         trs, _ = self._tracks()

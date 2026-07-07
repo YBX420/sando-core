@@ -174,10 +174,16 @@ class MetaUrbanNavEnv(gym.Env):
 
     # ---- perception (parity with drone_nav_env) ---------------------------
     def _tracks(self):
+        # ONE perception step per WORLD tick (FS3C-R prereq #12): the shield wrapper and _obs both
+        # call _tracks; stepping the KF twice per DT fed it same-world-state update pairs booked
+        # 0.3 s apart -> velocity estimates dragged toward HALF. Memoised on self.tick.
+        if getattr(self, "_trk_tick", None) == self.tick:
+            return self._trk_memo
         cyl = self._cylinders()
         hd = self._hd if np.linalg.norm(self._hd) > 0.2 else (self.goal - self.p)
         trs = self.pfe.step(self.p, hd, cyl)
-        return [t for t in trs if t.trk.ready], None
+        self._trk_tick, self._trk_memo = self.tick, ([t for t in trs if t.trk.ready], None)
+        return self._trk_memo
 
     def _obs(self):
         trs, _ = self._tracks()
