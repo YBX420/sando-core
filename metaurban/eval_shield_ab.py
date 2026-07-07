@@ -65,15 +65,21 @@ def run_arm(name, shielded):
                              seed=args.seed)) + "\n"); jl.flush()
     obs = venv.reset()
     eps, t0 = [], time.time()
+    ep0 = (0, 0, 0)                       # shield counters at EPISODE start (pre is per-step)
     while len(eps) < args.n_ep:
         pre = (sh.n_pass, sh.n_project, sh.n_brake) if sh else (0, 0, 0)
         act, _ = model.predict(obs, deterministic=True)
         obs, r, done, infos = venv.step(act)
         if done[0]:
             i = infos[0]
+            interv = ((sh.n_project - ep0[1]) + (sh.n_brake - ep0[2])) if sh else 0
+            if sh:
+                ep0 = (sh.n_pass, sh.n_project, sh.n_brake)
             rec = dict(ep=len(eps) + 1, reached=bool(i.get("reached")),
                        collided=bool(i.get("collided")),
-                       min_clr=round(float(i.get("min_clr", np.nan)), 3))
+                       min_clr=round(float(i.get("min_clr", np.nan)), 3),
+                       interv=int(interv),
+                       clean=bool(i.get("reached") and not i.get("collided") and interv == 0))
             if i.get("collided") and "culprit" in i:
                 if sh:
                     d = (sh.n_pass - pre[0], sh.n_project - pre[1], sh.n_brake - pre[2])
