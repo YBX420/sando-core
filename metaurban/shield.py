@@ -28,14 +28,33 @@ _lv = _calib["groups"]["all"]["levels"][_EPS]
 Q0, VEFF = float(_lv["q_conformal"]), float(_lv["v_eff"])
 TUBE = Q0 + VEFF * _TS                                    # precomputed tube radius per sample time
 
+# SHIELD_PERCLASS=1: per-class tubes via safety_layer.load_calib (same file/semantics as the EGO
+# arm, incl. its static=(0.15, 0.0) stationarity rule). Default OFF = byte-identical legacy tube.
+_PERCLASS = os.environ.get("SHIELD_PERCLASS", "0") == "1"
+_TUBES = {}
+if _PERCLASS:
+    from safety_layer import load_calib
+    for _c, (_q, _ve) in load_calib(eps=float(_EPS)).items():
+        _TUBES[_c] = _q + _ve * _TS
+
+
+def _tube_for(cls):
+    return _TUBES.get(cls, _TUBES.get("_all", TUBE))
+
 
 def action_safe(p, v_cmd, tracks):
-    """tracks: list of (xy(2,), v(2,), r). True iff constant-velocity motion clears every tube."""
-    for (c0, vt, r) in tracks:
+    """tracks: list of (xy(2,), v(2,), r[, cls]). True iff constant-velocity motion clears every
+    tube. With SHIELD_PERCLASS=1 the 4th element picks the class tube; statics are additionally
+    predicted STATIONARY (their KF v is measurement noise, not motion)."""
+    for t in tracks:
+        c0, vt, r = t[0], t[1], t[2]
+        cls = t[3] if len(t) > 3 else None
+        tube = _tube_for(cls) if (_PERCLASS and cls is not None) else TUBE
+        vt = np.zeros(2) if (_PERCLASS and cls == "static") else np.asarray(vt, float)
         rel0 = np.asarray(c0, float) - np.asarray(p, float)
-        relv = np.asarray(vt, float) - np.asarray(v_cmd, float)
+        relv = vt - np.asarray(v_cmd, float)
         d = np.linalg.norm(rel0[None, :] + relv[None, :] * _TS[:, None], axis=1)
-        if np.any(d < r + 0.25 + 0.10 + TUBE):
+        if np.any(d < r + 0.25 + 0.10 + tube):
             return False
     return True
 

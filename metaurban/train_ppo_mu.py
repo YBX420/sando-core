@@ -58,7 +58,7 @@ class AdaptiveShieldedEnv(gym.Wrapper):
         tracks = []
         for tr in trs:
             c0, v0, _ = tr.trk.state()
-            tracks.append((np.asarray(tr.xy, float), np.asarray(v0[:2], float), float(tr.r)))
+            tracks.append((np.asarray(tr.xy, float), np.asarray(v0[:2], float), float(tr.r), str(tr.cls)))
         gd = env.goal - env.p
         gd = gd / max(np.linalg.norm(gd), 1e-6)
         v_next, certified, intervened = self.sh.filter(env.p, env.v, np.asarray(a, float), tracks, gd)

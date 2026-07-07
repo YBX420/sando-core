@@ -10,7 +10,7 @@ the goal, then a straight hard-brake. Same pass/project/brake accounting as Cert
 """
 import numpy as np
 
-from shield import TUBE, _TS
+from shield import TUBE, _TS, _tube_for, _PERCLASS
 from ground_nav_env import DT, V_MAX, A_MAX, W_MAX
 
 try:
@@ -33,11 +33,17 @@ def _arc(p, theta, v, w):
 
 
 def arc_safe(p, theta, v, w, tracks):
-    """True iff the (v, w) arc clears every track's conformal tube over [0, TAU]."""
+    """True iff the (v, w) arc clears every track's conformal tube over [0, TAU].
+    tracks: (xy, v, r[, cls]) -- with SHIELD_PERCLASS=1 the class picks the tube and statics
+    are predicted stationary (mirrors shield.action_safe)."""
     ego = _arc(np.asarray(p, float), float(theta), float(v), float(w))
-    for (c0, vt, r) in tracks:
-        obs = np.asarray(c0, float)[None, :] + np.asarray(vt, float)[None, :] * _TS[:, None]
-        if np.any(np.linalg.norm(obs - ego, axis=1) < r + _R_BODY + TUBE):
+    for t in tracks:
+        c0, vt, r = t[0], t[1], t[2]
+        cls = t[3] if len(t) > 3 else None
+        tube = _tube_for(cls) if (_PERCLASS and cls is not None) else TUBE
+        vt = np.zeros(2) if (_PERCLASS and cls == "static") else np.asarray(vt, float)
+        obs = np.asarray(c0, float)[None, :] + vt[None, :] * _TS[:, None]
+        if np.any(np.linalg.norm(obs - ego, axis=1) < r + _R_BODY + tube):
             return False
     return True
 
@@ -92,7 +98,7 @@ class GroundShieldedEnv(gym.Wrapper):
         tracks = []
         for tr in trs:
             c0, v0, _ = tr.trk.state()
-            tracks.append((np.asarray(tr.xy, float), np.asarray(v0[:2], float), float(tr.r)))
+            tracks.append((np.asarray(tr.xy, float), np.asarray(v0[:2], float), float(tr.r), str(tr.cls)))
         gd = env.goal - env.p
         gd = gd / max(float(np.linalg.norm(gd)), 1e-6)
         v_next, w_next, certified, intervened = self.sh.filter(

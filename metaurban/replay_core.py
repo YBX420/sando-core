@@ -377,7 +377,15 @@ def run_replay(movers, ep, mode="ours", calib=None, predict=True, max_vel=3.0, m
                         for dh in _HARV_DELTAS:
                             if not movers.present(gi, t + dh):
                                 continue                    # mover leaves the world: nothing to predict
-                            pred = tr.trk.predict([dh], model=PRED_MODEL)[0, :2]
+                            if str(tr.cls) == "static":
+                                # STATIC-STATIONARY predictor (2026-07-07): a static's future = its
+                                # present. Scoring statics with the CV extrapolation charged them
+                                # for KF velocity noise -> mover-sized tubes -> keep-out walls.
+                                # Calibration must match deployment: PERCLASS=1 deploys the same v=0.
+                                c0s, _v, _a = tr.trk.state()
+                                pred = np.asarray(c0s[:2], float)
+                            else:
+                                pred = tr.trk.predict([dh], model=PRED_MODEL)[0, :2]
                             resid = float(np.hypot(*(pos_l(gi, t + dh) - pred)))
                             PERCEPT_HARVEST.append((float(dh), resid, int(tr.trk.n),
                                                     str(tr.cls), int(_HARV_EP[0]), d_drone))
