@@ -36,6 +36,25 @@ DT = 0.30; TAU = 0.75; DELTA = DT
 SMOOTH = os.environ.get("SMOOTH", "0") == "1"
 SMOOTH_DWELL = int(os.environ.get("SMOOTH_DWELL", "3"))
 SMOOTH_MARGIN = float(os.environ.get("SMOOTH_MARGIN", "0.15"))   # extra delta(s) on the upgrade gate
+# RADIUS_CONSIST=1 (task#2, audit 半径一致化): feed EGO the SAME Delta=0 keep-out the cert gate
+# enforces (r + D_SAFE_H + q0_cls) instead of the bare mover radius -- planning against bare r
+# invites plans the gate must reject -> replan/evade churn. Default OFF = frozen behaviour.
+RADIUS_CONSIST = os.environ.get("RADIUS_CONSIST", "0")   # "0" off | "1" full (r+d_safe+q) | "dsafe" (r+d_safe only:
+#   align the DETERMINISTIC standoff, leave the stochastic tube q to the gate -- full alignment with the
+#   placeholder q=1.054 seals corridors at the PLANNING level (A/B 2026-07-07: evade 64->87, time +12s))
+_RC_CAL = None
+
+
+def _plan_r(r, cls=None):
+    global _RC_CAL
+    if RADIUS_CONSIST == "0":
+        return r
+    if RADIUS_CONSIST == "dsafe":
+        return float(r) + SL.D_SAFE_H
+    if _RC_CAL is None:
+        _RC_CAL = SL.load_calib()
+    q, _ve = _RC_CAL.get(cls, _RC_CAL["_all"]) if cls else _RC_CAL["_all"]
+    return float(r) + SL.D_SAFE_H + q
 CRUISE_Z = 1.5; Z_CEIL = 4.6
 R_DRONE = 0.25
 MEAS = 0.07
@@ -284,10 +303,11 @@ def run_replay(movers, ep, mode="ours", calib=None, predict=True, max_vel=3.0, m
                 gt_cyl = [(pos_l(i, t), movers.m[i]["r"], movers.m[i]["h"], movers.m[i]["cls"])
                           for i in idx]
                 for tr in percept_fe.step(p_d[:2], hd, gt_cyl):
-                    cloud += _cyl_cloud([tr.xy[:2]], tr.r, 0.3, tr.h)
+                    cloud += _cyl_cloud([tr.xy[:2]], _plan_r(tr.r, str(tr.cls)), 0.3, tr.h)
             else:
                 for i in near:
-                    cloud += _cyl_cloud([dets[i][:2]], movers.m[i]["r"], 0.3, movers.m[i]["h"])
+                    cloud += _cyl_cloud([dets[i][:2]], _plan_r(movers.m[i]["r"], movers.m[i]["cls"]),
+                                        0.3, movers.m[i]["h"])
             ego.update_cloud(np.asarray(cloud, float) if cloud else np.zeros((0, 3)), p_d)
             if ego.replan(p_d, v_d, a_d, goal) and ego.duration() > 1e-3:
                 r = ego.eval(min(DT, max(ego.duration() - 1e-3, 0.0)))
@@ -397,7 +417,7 @@ def run_replay(movers, ep, mode="ours", calib=None, predict=True, max_vel=3.0, m
             for (trk, dxy, r_o, h_o, _c) in percepts:
                 xy = trk.predict(np.linspace(0, DT, 2), model=PRED_MODEL)[:, :2] if trk.ready \
                     else np.asarray(dxy, float)[None, :2]
-                cloud += _cyl_cloud(xy, r_o, 0.3, h_o)
+                cloud += _cyl_cloud(xy, _plan_r(r_o, str(_c)), 0.3, h_o)
             ego.update_cloud(np.asarray(cloud, float) if cloud else np.zeros((0, 3)), p_d)
 
             # safety_layer decision (NB: the renderer still runs its OWN tournament copy in render_3d_video.py
