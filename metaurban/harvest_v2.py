@@ -19,7 +19,7 @@ import zlib
 
 ap = argparse.ArgumentParser()
 ap.add_argument("--mode", choices=["foldB", "test", "vehA", "foldB2", "test2", "foldB3", "test3",
-                                   "foldB4", "test4", "designC", "foldB5", "test5"], required=True)
+                                   "foldB4", "test4", "designC", "designD", "foldB5", "test5"], required=True)
 ap.add_argument("--shard", type=int, default=0)
 ap.add_argument("--nshard", type=int, default=1)
 args = ap.parse_args()
@@ -58,6 +58,9 @@ elif args.mode == "foldB4":
 elif args.mode == "test4":
     jobs = [(n, s) for n in POOL for s in CFG["SEEDS_TEST4"][n]]
 elif args.mode == "designC":   # theta3 shape data with coast column (design domain, fresh 1e8 seeds)
+    import zlib as _z
+    jobs = [(n, 100_000_000 + _z.crc32(f"{n}|C{k}".encode()) % 9_000_000) for n in POOL for k in range(4)]
+elif args.mode == "designD":   # designC seeds + sigma_v column (evidence-bound young growth check)
     import zlib as _z
     jobs = [(n, 100_000_000 + _z.crc32(f"{n}|C{k}".encode()) % 9_000_000) for n in POOL for k in range(4)]
 elif args.mode == "foldB5":
@@ -108,7 +111,7 @@ RC.PERCEPT_HARVEST = None; RC.PERCEPT_A2 = None
 man.close()
 
 data = np.array(rows_all, dtype=[("d", "f4"), ("e", "f4"), ("age", "i4"), ("cls", "U12"),
-                                 ("ep", "i4"), ("dd", "f4"), ("scn", "U40"), ("qual", "i4"), ("coast", "i4")])
+                                 ("ep", "i4"), ("dd", "f4"), ("scn", "U40"), ("qual", "i4"), ("coast", "i4"), ("sigv", "f4")])
 np.save(out_npy, data)
 # scenario-aliasing fingerprints (ruling #17)
 fps = {}

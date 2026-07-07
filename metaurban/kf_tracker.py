@@ -111,6 +111,15 @@ class MoverTracker:
         return float(np.sqrt(max(px, 0.0) + max(py, 0.0)))
 
     @property
+    def sigma_v(self):
+        """1-sigma horizontal velocity uncertainty (m/s) from the filter covariance. Small = converged;
+        big (fresh birth / long coast) = the velocity is a guess -- certifying its MOVING prediction
+        is corridor poison, the frozen young plate is the honest response."""
+        vx = float(self.fx.P[1, 1]) if self.fx.P is not None else 1e6
+        vy = float(self.fy.P[1, 1]) if self.fy.P is not None else 1e6
+        return float(np.sqrt(max(vx, vy, 0.0)))
+
+    @property
     def ready(self):
         return self.n >= 2                                   # need >=2 obs before v/a are meaningful
 

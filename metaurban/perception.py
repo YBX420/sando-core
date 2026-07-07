@@ -104,6 +104,7 @@ class Track:
         return np.array([c0[0] + v[0] * step, c0[1] + v[1] * step])
 
     def update(self, det, dt=None):
+        _pre = None
         self.cls = det["cls"]; self.r = det["r"]; self.h = det["h"]
         self.xy = np.asarray(det["xy"], float)
         self.miss = 0
@@ -241,8 +242,15 @@ class PerceptionFrontEnd:
                 tr.miss = min(tr.miss, self.cfg.ttl_ticks)   # never expire; freeze instead of coast
                 c0, _v, _a = tr.trk.state()
                 tr.xy = np.asarray(c0[:2], float)
+        _yttl = int(os.environ.get("YOUNG_TTL", "0"))
+        def _ttl(tr):
+            # textbook MOT confirmation: a TENTATIVE track (age<4, velocity unconverged) that starts
+            # missing is 90% clutter/ephemeral/re-born-elsewhere -- but its frozen young plate keeps
+            # growing at VCAP for the full ttl (2.4s) = a phantom poison disc the real mover has long
+            # left. Tentative tracks get a short leash; confirmed tracks keep the full ttl.
+            return (_yttl if (_yttl > 0 and tr.trk.n < 4) else self.cfg.ttl_ticks)
         self.tracks = [tr for tr in self.tracks
-                       if tr.cls == "static" or tr.miss <= self.cfg.ttl_ticks]
+                       if tr.cls == "static" or tr.miss <= _ttl(tr)]
         return self.tracks
 
 

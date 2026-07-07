@@ -479,7 +479,8 @@ def run_replay(movers, ep, mode="ours", calib=None, predict=True, max_vel=3.0, m
                             PERCEPT_HARVEST.append((float(dh), resid, int(tr.trk.n),
                                                     str(tr.cls), int(_HARV_EP[0]), d_drone)
                                                    + ((_HARV_SCN[0], int(_QUAL_MEMO.get(gi, True)),
-                                                       int(tr.trk.miss > 0))          # coast flag (theta3)
+                                                       int(tr.trk.miss > 0),          # coast flag (theta3)
+                                                       float(getattr(tr.trk, "sigma_v", 0.0)))
                                                       if _HARV_V2 else ()))
             else:
                 percepts = [(trackers[i], dets[i], movers.m[i]["r"], movers.m[i]["h"], movers.m[i]["cls"])
@@ -501,7 +502,8 @@ def run_replay(movers, ep, mode="ours", calib=None, predict=True, max_vel=3.0, m
                 if PRED_MODEL == "cv":
                     aa = np.zeros(3)                     # CV deployment: cert polynomial matches the CV-calibrated tube
                 mlist.append((c0, vv, aa, r_o, h_o, cls_o, int(getattr(trk, "n", 99)),
-                              int(getattr(trk, "miss", 0) > 0)))
+                              int(getattr(trk, "miss", 0) > 0),
+                              float(getattr(trk, "nis_ewma", 0.0)), float(getattr(trk, "sigma_v", 0.0))))
             cyl, ztop = SL.build_cylinders(mlist, calib, predict=predict,
                                            track_margin=(float(os.environ.get("DYN_TRACK", "0.473"))
                                                          if dynamics else 0.0),

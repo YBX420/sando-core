@@ -67,10 +67,21 @@ def build_cylinders(movers, calib, predict=True, track_margin=0.0, calib_v2=None
         (c0, vel, acc, r_obs, h, cls) = mv[:6]
         age = mv[6] if len(mv) > 6 else None
         coast = mv[7] if len(mv) > 7 else None
+        nis = mv[8] if len(mv) > 8 else None
+        sigv = mv[9] if len(mv) > 9 else None
         if calib_v2 is not None:
             ent = calib_v2.get(cls) or dict(mature=(1e6, 0.0), young=(1e6, 0.0), plates=[])
             _amin = agemin_ped if cls == "pedestrian" else age_min
-            if age is not None and age < _amin:
+            _nis_th = float(os.environ.get("NIS_GATE", "0"))
+            _zombie = (_nis_th > 0.0 and nis is not None and nis > _nis_th)
+            _sv_th = float(os.environ.get("SIGV_GATE", "0"))
+            if _sv_th > 0.0 and sigv is not None and sigv > _sv_th:
+                _zombie = True     # P-based demotion: NIS can't see a self-aware zombie (coast inflates
+                #   S so NIS stays small); the velocity covariance is the honest convergence signal
+            # NIS zombie filter: a track whose filter self-check (chi2_1 NIS EWMA) is inconsistent
+            # carries a garbage velocity (mis-association / model mismatch) -- certifying its MOVING
+            # prediction poisons corridors worse than the frozen young plate. Demote (fatter=sound).
+            if age is not None and (age < _amin or _zombie):
                 q, veff = ent["young"]
                 vel = np.zeros(3); acc = np.zeros(3)   # young plate: FROZEN centre + fat growth
             else:
