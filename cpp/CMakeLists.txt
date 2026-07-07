@@ -105,3 +105,9 @@ add_test(NAME yaw_smooth COMMAND test_yaw_smooth)
 # the LPF bias converges to the true offset. Strengthens the S3 cert ("flown == certified").
 add_executable(test_seam_exec_state test/test_seam_exec_state.cpp)
 add_test(NAME seam_exec_state COMMAND test_seam_exec_state)
+
+# P54 closure regressions (2026-07-07): the two soundness-bug witnesses promoted to ctest.
+add_executable(test_delta_anchor test/test_delta_anchor.cpp)
+add_test(NAME delta_anchor COMMAND test_delta_anchor)
+add_executable(test_deficit_order test/test_deficit_order.cpp)
+add_test(NAME deficit_order COMMAND test_deficit_order)

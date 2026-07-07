@@ -78,3 +78,7 @@
 4. **投稿前**:精读 SANDO 全文坐实解耦 delta。
 
 **Sources:** SANDO `arXiv:2604.07599` · Conformal Reachability `arXiv:2602.03799` · MA Reachability Calibration `arXiv:2304.00432`
+
+> **P54 闭环(2026-07-07 验尸终审)**:§3 两个 sound bug **均已修@405825b(2026-06-24)**。
+> bug①(τ 锚 t_obs+δ):certify_segments_vs_sphere 按三元组 τ=t_traj+δ 落地(bernstein_cert.hpp L337-342/L373-377),数值 witness 验证翻转边界=r0+v_eff(t_hi+δ);δ≠0 回归已并入 ctest(test_delta_anchor)。遗留:MINCO 专用核无 δ 参数,该路径 δ 须折进 R(已搁置、默认 OFF)。
+> bug②(亏量先组再细分):亏量 b=ρ²−S 于细分前装配、裁剪/细分均作用于 b(L379-387);ctest Block3 + 新增 test_deficit_order 直接覆盖(冻结序实现会当场挂掉:400 例中假证 42、shipped 0)。
