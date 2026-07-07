@@ -45,11 +45,17 @@ B2 = load(_live_B); T2 = load(_live_T)
 print(f"[folds] live quantile={_live_B} test={_live_T}  design={_design}")
 assert "qual" in B2.dtype.names and "qual" in T2.dtype.names
 
-def rows_of(ds, cls, mature=None):
+AGE_BINS = ((4, 6), (7, 12), (13, 10**9))          # mature age plates (b_bucket buckets; 13+ was
+#   covered at 1.0 under the flat tube = massively over-wide there -> thinning lives in the bins)
+
+
+def rows_of(ds, cls, mature=None, bin_=None):
     out = []
     for d in ds:
         m = d["cls"] == cls
-        if mature is True:
+        if bin_ is not None:
+            m &= (d["age"] >= bin_[0]) & (d["age"] <= bin_[1])
+        elif mature is True:
             m &= d["age"] >= AGE_MIN
         elif mature is False:
             m &= (d["age"] >= 2) & (d["age"] < AGE_MIN)
@@ -61,9 +67,9 @@ def theil_sen(xs, ys):
           if xs[j] > xs[i]]
     return float(np.median(sl)) if sl else 0.0
 
-def shape(cls, mature=True, force_slope=None):
+def shape(cls, mature=True, force_slope=None, bin_=None):
     """(b, v, sigma, n_rows) from design-domain rows; q90(Delta) envelope + Theil-Sen slope."""
-    r = rows_of(A, cls, mature)
+    r = rows_of(A, cls, mature, bin_=bin_)
     if len(r) < 200:
         return None
     ds = sorted(set(np.round(r["d"], 2).tolist()))
@@ -84,7 +90,7 @@ def shape(cls, mature=True, force_slope=None):
     sig = float(max(SIG_FLOOR, np.quantile(per_ep, 0.9) - np.quantile(per_ep, 0.5)))
     return dict(b=b, v=v, sigma=sig, n=len(r))
 
-shapes, young = {}, {}
+shapes, young, binshapes = {}, {}, {}
 for c in CLASSES:
     if c == "animal":
         continue
@@ -92,6 +98,10 @@ for c in CLASSES:
     if s: shapes[c] = s
     y = shape(c, mature=False, force_slope=0.0)          # young arm: frozen residual, deterministic growth
     if y: young[c] = y
+    if s:
+        for lo, hi in AGE_BINS:
+            bs = shape(c, force_slope=(0.0 if c == "static" else None), bin_=(lo, hi))
+            binshapes[(c, lo)] = bs if (bs and bs["n"] >= 500) else dict(s)   # thin data -> inherit flat
 print("[shapes]", {k: {kk: round(vv, 3) for kk, vv in v.items()} for k, v in shapes.items()})
 print("[young ]", {k: {kk: round(vv, 3) for kk, vv in v.items()} for k, v in young.items()})
 
@@ -107,15 +117,18 @@ def flight_scores(D):
         for c in set(D["cls"][m0].tolist()):
             if c not in shapes:
                 continue
-            for arm, tab, growth in (("M", shapes, None), ("Y", young, None)):
-                sh = tab.get(c)
+            arms = [("Y", young.get(c), None)] +                    [(f"B{lo}", binshapes.get((c, lo)), (lo, hi)) for lo, hi in AGE_BINS]
+            for arm, sh, rng in arms:
                 if sh is None:
                     continue
                 m = m0 & (D["cls"] == c) & (D["qual"] == 1)
-                m &= (D["age"] >= AGE_MIN) if arm == "M" else ((D["age"] >= 2) & (D["age"] < AGE_MIN))
+                if arm == "Y":
+                    m &= (D["age"] >= 2) & (D["age"] < AGE_MIN)
+                else:
+                    m &= (D["age"] >= rng[0]) & (D["age"] <= rng[1])
                 if not m.sum():
                     continue
-                gr = sh["v"] if arm == "M" else VCAP.get(c, 0.0)
+                gr = VCAP.get(c, 0.0) if arm == "Y" else sh["v"]
                 rsc = (D["e"][m] - gr * D["d"][m] - sh["b"]) / sh["sigma"]
                 best = max(best, float(np.max(rsc))); any_row = True
         if any_row:
@@ -145,6 +158,12 @@ for eps in (0.05, 0.10):
         eta = (VCAP.get(c, 0.0) + CFG["VCAP_PRED"].get(c, 0.0) + sh["v"]) * H / 2
         g["levels"][str(eps)] = dict(q_conformal=round(sh["b"] + qhat * sh["sigma"] + eta, 4),
                                      v_eff=round(sh["v"], 4), status=flag)
+        for lo, hi in AGE_BINS:
+            bs = binshapes.get((c, lo))
+            if bs:
+                eta_b = (VCAP.get(c, 0.0) + CFG["VCAP_PRED"].get(c, 0.0) + bs["v"]) * H / 2
+                g["levels"][str(eps)].setdefault("bins", {})[f"{lo}"] = dict(
+                    q_conformal=round(bs["b"] + qhat * bs["sigma"] + eta_b, 4), v_eff=round(bs["v"], 4))
         if c in young:
             yy = young[c]
             res["young"].setdefault(c, {})[str(eps)] = dict(

@@ -36,9 +36,12 @@ for scn_name in POOL:
         try:
             r = RC.run_replay(movers, ep, mode=mode, record=False,
                               max_vel=float(scn["drone"].get("max_vel", 3.0)))
+            cnt = r.get("counts", {})
+            emerg = int(cnt.get("evade", 0)) + int(cnt.get("cret", 0))
             row = dict(scn=scn_name, seed=sd, cfg=args.config, reached=bool(r["reached"]),
                        collided=bool(r["collided"]), min_clr=round(float(r["min_clr"]), 3),
-                       t=round(float(r["time_s"]), 1))
+                       t=round(float(r["time_s"]), 1), emerg=emerg,
+                       clean=bool(r["reached"] and not r["collided"] and emerg == 0))
         except Exception as e:
             row = dict(scn=scn_name, seed=sd, cfg=args.config, error=type(e).__name__)
         out.write(json.dumps(row) + "\n"); out.flush()
