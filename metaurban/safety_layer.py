@@ -276,7 +276,7 @@ def cert_clear_warp(ego, cyl, s, tau=TAU, delta=None):
 
 def maneuver_decide_v2(ego, p_d, v_d, a_d, goal, ztop, cyl, state,
                        cruise_z=CRUISE_Z, horizon=HORIZON, straight_clip=None,
-                       tau=TAU, delta=None, speeds=(1.0, 0.6, 0.3),  # 0.3 kept: it ABSORBS evades (without it evade 40->106); the time cost is the honest price of persistence
+                       tau=TAU, delta=None, speeds=None,  # default (1.0,0.6,0.3); 0.3 ABSORBS evades (without it evade 40->106)
                        dwell_ticks=3, strict_margin=0.15, extra_gate=None, carrot="frozen"):
     # carrot="frozen": incumbent sub-goal fixed in the WORLD (short-corridor benchmark: moving
     #   carrots spiral, A/B 07-06). carrot="angle": incumbent DEFLECTION re-anchored to the current
@@ -292,9 +292,14 @@ def maneuver_decide_v2(ego, p_d, v_d, a_d, goal, ztop, cyl, state,
     unchanged); s<1 by cert_clear_warp (slip identity, predicted-only -- the renderer's yield rule).
     Score: goal-ward progress of the RETIMED flight over the trust window, so a fast detour can
     honestly beat a slow straight. Anti-chatter built in (world-frozen incumbent + dwell-gated
-    strict upgrades + one-grid-step speed release). Returns (kind, s); 'evade' when nothing
+    strict upgrades + one-grid-step speed release). SPEEDS_CRAWL=1 appends a 0.15 crawl gear:
+    certified slow progress (0.45 m/s -> 0.34m inside the whole trust window) absorbs the 1-3-tick
+    "flicker" evades -- a certified crawl is elegant persistence, not an emergency (dream metric).
+    Returns (kind, s); 'evade' when nothing
     certifies at any (direction, speed) -- caller flees, s meaningless.
     state: caller-persisted dict (kind / gsub / s / age)."""
+    if speeds is None:
+        speeds = (1.0, 0.6, 0.3, 0.15) if os.environ.get("SPEEDS_CRAWL", "0") == "1" else (1.0, 0.6, 0.3)
     d = (tau if delta is None else delta)
     p_d = np.asarray(p_d, float); goal = np.asarray(goal, float)
     gxy = goal[:2] - p_d[:2]; dist = float(np.linalg.norm(gxy))
