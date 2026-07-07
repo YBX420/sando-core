@@ -387,6 +387,26 @@ def maneuver_decide_v2(ego, p_d, v_d, a_d, goal, ztop, cyl, state,
             return -1e9
         return float(np.dot(np.asarray(rr[0], float)[:2] - p_d[:2], gdir))
 
+    # ESCAPE-PRESSURE TRIGGER (ESC_TRIG=1): a closing pocket kills EVERY candidate once shut --
+    # vertical/wide escapes must be taken while they still certify. Signal = the gap to the nearest
+    # MOVING keep-out surface shrinking across consecutive ticks; response = prefer the escape
+    # family THIS tick (soar first, then wide arounds). Preference only: every candidate still has
+    # to pass the certificate, so safety semantics are untouched.
+    _esc_on = os.environ.get("ESC_TRIG", "0") == "1"
+    _esc_hot = False
+    if _esc_on and cyl:
+        _g = min((float(np.hypot(c[0][0] - p_d[0], c[0][1] - p_d[1])) - float(c[3])
+                  for c in cyl if float(np.hypot(c[1][0], c[1][1])) > 0.3), default=1e9)
+        _gh = state.setdefault("g_hist", [])
+        _gh.append(_g)
+        del _gh[:-4]
+        if len(_gh) >= 3:
+            _rate = (_gh[0] - _gh[-1]) / (0.3 * (len(_gh) - 1))
+            _esc_hot = (_g < float(os.environ.get("ESC_G", "2.5"))
+                        and _rate > float(os.environ.get("ESC_RATE", "0.8")))
+        if _esc_hot:
+            state["esc_fired"] = state.get("esc_fired", 0) + 1
+
     _soar = os.environ.get("SOAR", "0") == "1"
     _soar_eager = os.environ.get("SOAR_EAGER", "0") == "1"
     DIRS = (("straight", "around_l", "around_r", "soar", "around_l2", "around_r2", "over", "climb")
@@ -394,6 +414,9 @@ def maneuver_decide_v2(ego, p_d, v_d, a_d, goal, ztop, cyl, state,
             ("straight", "around_l", "around_r", "around_l2", "around_r2", "soar", "over", "climb")
             if _soar else
             ("straight", "around_l", "around_r", "around_l2", "around_r2", "over", "climb"))
+    if _esc_hot:
+        _escf = tuple(k for k in ("soar", "around_l2", "around_r2", "over") if k in DIRS)
+        DIRS = _escf + tuple(k for k in DIRS if k not in _escf)   # escape family first, this tick only
     inc, inc_s = state.get("kind"), float(state.get("s", 1.0))
     gs_inc = state.get("gsub")
     if carrot == "angle" and inc in DIRS:
