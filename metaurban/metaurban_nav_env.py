@@ -42,7 +42,8 @@ REUSE_SCENE_EPISODES = 4           # drone episodes per MetaUrban asset load (am
 # MetaUrban env config: copied verbatim from run_demo.py (the proven headless closed-loop config).
 ENV_CFG = dict(
     crswalk_density=1, object_density=0.4, walk_on_all_regions=False,
-    use_render=False, image_observation=False, manual_control=False, map='X',
+    use_render=False, image_observation=False, manual_control=False,
+    map=os.environ.get("MU_MAP", "X"),
     default_expert=False, drivable_area_extension=55, height_scale=1,
     show_mid_block_map=False, show_ego_navigation=False, debug=False, horizon=10000,
     on_continuous_line_done=False, out_of_route_done=False,

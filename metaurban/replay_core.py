@@ -609,7 +609,10 @@ def run_replay(movers, ep, mode="ours", calib=None, predict=True, max_vel=3.0, m
                     # omniscient); with nothing tracked evade_setpoint falls back to fleeing along gdir.
                     flee = ([tuple(d) for (_t, d, *_r) in percepts] if percept_fe is not None
                             else [dets[i] for i in idx])
-                    pos, vel = SL.evade_setpoint(p_d, flee, max_vel, DT, ztop, gdir)
+                    if os.environ.get("EVADE_BLEND", "0") == "1":
+                        pos, vel = SL.evade_setpoint_blend(p_d, v_d, flee, max_vel, DT, gdir)
+                    else:
+                        pos, vel = SL.evade_setpoint(p_d, flee, max_vel, DT, ztop, gdir)
                     p_ref, v_ref, a_ref = pos, vel, np.zeros(3)
             counts[kind] = counts.get(kind, 0) + 1
 

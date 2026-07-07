@@ -132,7 +132,7 @@ env_cfg = dict(
     sensors=(dict() if args.headless
              else dict(rgb_camera=(RGBCamera, args.w, args.h), d435i_depth=(DepthCamera, 160, 106)) if args.d435i
              else dict(rgb_camera=(RGBCamera, args.w, args.h))),
-    interface_panel=[], manual_control=False, map='X', daytime="12:00",
+    interface_panel=[], manual_control=False, map=os.environ.get("MU_MAP", "X"), daytime="12:00",
     default_expert=False, drivable_area_extension=55, height_scale=1,
     show_mid_block_map=False, show_ego_navigation=False, debug=False, horizon=100000,
     on_continuous_line_done=False, out_of_route_done=False,
@@ -331,6 +331,7 @@ def occ_remember(new_pts, p_d, movers, t_sim=None):
 
 # real quadrotor flight dynamics: SANDO set-points are TRACKED through this (tilt-to-accelerate, momentum)
 quad = Quadrotor()
+_TELEM = [] if os.environ.get("TELEM_OUT") else None   # (t, pitch, roll, speed) per tick
 px4 = None
 if args.px4:
     print("[3dv] --px4: connecting to PX4 SITL via MAVSDK offboard ...", flush=True)
@@ -1848,7 +1849,17 @@ while not quit_now:
                         lat = float(np.linalg.norm(np.cross(sp_vel, sp_acc))) / max(nv, 1e-3)   # centripetal = kappa*v^2
                         _track_rows.append((int(iters), float(np.linalg.norm(quad.p - sp_pos)), nv, na, lat))
                 elif ego_stuck < 3:
-                    quad.step(quad.p, np.zeros(3), np.zeros(3), DT, yaw_ref=yaw_ref)   # transient miss -> hover
+                    _vq = float(np.linalg.norm(quad.v[:2]))
+                    if os.environ.get("HOLD_DECEL", "0") == "1" and _vq > 0.4:
+                        # BRAKING REFERENCE FIELD (graceful stop): the physical stop path is momentum-
+                        # dominated either way; freezing the reference at quad.p just adds a reference
+                        # step the controller answers with a violent pitch-up. Command a decaying
+                        # velocity-aligned reference instead -- same stop, no attitude spike.
+                        _beta = 0.5
+                        quad.step(quad.p + quad.v * DT * _beta, quad.v * _beta, np.zeros(3), DT,
+                                  yaw_ref=yaw_ref)
+                    else:
+                        quad.step(quad.p, np.zeros(3), np.zeros(3), DT, yaw_ref=yaw_ref)   # hover
                 else:
                     # SUSTAINED stuck (surrounded / inside a tree): RECOVERY = climb to clear the canopy and ease
                     # toward the goal instead of freezing. Space above the voxel ceiling is free. Gentle climb.
@@ -1864,6 +1875,9 @@ while not quit_now:
             drone.set_heading_theta(float(quad.yaw))
             if drone_model is not None:
                 _pitch, _roll = quad.tilt_deg(); drone_model.setHpr(0.0, _pitch, _roll)
+            if _TELEM is not None:
+                _tp, _tr = quad.tilt_deg()
+                _TELEM.append((float(t), _tp, _tr, float(np.linalg.norm(quad.v))))
         elif native is not None:
             for _ in range(int(round(REPLAN_DT / DT))):
                 yaw_ref = float(np.arctan2(cur_wp[1] - quad.p[1], cur_wp[0] - quad.p[0]))
@@ -1881,6 +1895,9 @@ while not quit_now:
             drone.set_heading_theta(float(quad.yaw))
             if drone_model is not None:
                 _pitch, _roll = quad.tilt_deg(); drone_model.setHpr(0.0, _pitch, _roll)
+            if _TELEM is not None:
+                _tp2, _tr2 = quad.tilt_deg()
+                _TELEM.append((float(t), _tp2, _tr2, float(np.linalg.norm(quad.v))))
         else:
             for _ in range(int(round(REPLAN_DT / DT))):
                 yaw_ref = float(np.arctan2(cur_wp[1] - quad.p[1], cur_wp[0] - quad.p[0]))   # face current waypoint
@@ -2008,6 +2025,10 @@ while not quit_now:
     _dv = np.diff(_sp) if len(_sp) > 1 else np.zeros(1)
     _revs = int(np.count_nonzero(np.diff(np.sign(_dv)))) if len(_dv) > 1 else 0             # decel<->accel reversals
     _spvar = float(np.sum(np.abs(_dv)))                                                      # total speed churn (energy proxy)
+    if _TELEM is not None:
+        import json as _json
+        _json.dump(_TELEM, open(os.environ["TELEM_OUT"], "w"))
+        print(f"[3dv] telemetry -> {os.environ['TELEM_OUT']} ({len(_TELEM)} ticks)", flush=True)
     print(f"[3dv] lap done. reached={reached} t_goal={t_goal:.1f}s collided={mclr < 0} min_clr={mclr:.3f}m  "
           + "  ".join(f"{k}:{v:.2f}" for k, v in sorted(per_all.items()))
           + (f"  seam_bias_max={seam_bias_max:.3f}m" if args.seam else "")

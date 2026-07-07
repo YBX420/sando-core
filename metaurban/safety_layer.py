@@ -184,6 +184,29 @@ def maneuver_decide(ego, p_d, v_d, a_d, goal, ztop, clear_fn, cruise_z=CRUISE_Z,
     return "evade"
 
 
+def evade_setpoint_blend(p_d, v_d, movers_xy, max_vel, dt, gdir, a_brake=3.0, beta=0.35):
+    """VECTOR-COMPOSED graceful fallback (EVADE_BLEND=1): the previous tick's certificate already
+    covers braking along the committed course (speed-scaled trust window semantics), so the sound
+    and smooth response to 'nothing certifies' is DECELERATE ALONG the current velocity and ADD a
+    bounded away-component -- never overwrite the motion vector with a panic flee/stop."""
+    p_d = np.asarray(p_d, float); v = np.asarray(v_d, float)[:2]
+    sp = float(np.linalg.norm(v))
+    v_dec = v * max(0.0, 1.0 - (a_brake * dt) / max(sp, 1e-6)) if sp > 1e-6 \
+        else np.asarray(gdir, float) * 0.0
+    away = np.zeros(2)
+    if len(movers_xy):
+        nn = min(movers_xy, key=lambda c: np.linalg.norm(np.asarray(c)[:2] - p_d[:2]))
+        d = p_d[:2] - np.asarray(nn)[:2]; n = float(np.linalg.norm(d))
+        if n > 1e-6:
+            away = d / n * min(beta * max_vel, beta * max_vel * (4.0 / max(n, 1.0)))
+    v_cmd = v_dec + away                                   # 加法合成,不覆盖
+    spc = float(np.linalg.norm(v_cmd))
+    if spc > max_vel:
+        v_cmd *= max_vel / spc
+    pos = p_d + np.array([v_cmd[0] * dt, v_cmd[1] * dt, 0.0])
+    return pos, np.array([v_cmd[0], v_cmd[1], 0.0])
+
+
 def evade_setpoint(p_d, movers_xy, max_vel, dt, ztop, gdir):
     """Nothing certified + movers present -> FLEE the nearest mover (never FREEZE into a collision). Returns the
     (pos, vel) set-point the caller should fly this tick."""
@@ -300,6 +323,8 @@ def maneuver_decide_v2(ego, p_d, v_d, a_d, goal, ztop, cyl, state,
     state: caller-persisted dict (kind / gsub / s / age)."""
     if speeds is None:
         speeds = (1.0, 0.6, 0.3, 0.15) if os.environ.get("SPEEDS_CRAWL", "0") == "1" else (1.0, 0.6, 0.3)
+    _slew = os.environ.get("SPEED_SLEW", "0") == "1"       # per-tick one-grid-step speed changes
+    #   (both directions): incremental vector edits, not jumps -- kills speed churn
     d = (tau if delta is None else delta)
     p_d = np.asarray(p_d, float); goal = np.asarray(goal, float)
     gxy = goal[:2] - p_d[:2]; dist = float(np.linalg.norm(gxy))
@@ -445,3 +470,38 @@ def v_cap(d_free, a_max, t_react=0.30, margin=1.0):
     d = max(float(d_free) - float(margin), 0.0)
     a, t = float(a_max), float(t_react)
     return max(0.0, -a * t + math.sqrt(a * a * t * t + 2.0 * a * d))
+
+
+_decide_v2_core = maneuver_decide_v2
+
+
+def maneuver_decide_v2(ego, p_d, v_d, a_d, goal, ztop, cyl, state,
+                       cruise_z=CRUISE_Z, horizon=HORIZON, straight_clip=None,
+                       tau=TAU, delta=None, speeds=None, **kw):
+    """SPEED_SLEW=1 wrapper: the winner speed moves at most ONE grid step per tick from the last
+    flown gear (incremental vector edit, no jumps -> kills speed churn). A slewed gear is a
+    different trajectory-in-time so it must RE-PASS the certificate on the winner plan; if it
+    fails, the winner's certified gear is used unchanged (comfort never trades soundness)."""
+    kind, s = _decide_v2_core(ego, p_d, v_d, a_d, goal, ztop, cyl, state, cruise_z=cruise_z,
+                              horizon=horizon, straight_clip=straight_clip, tau=tau, delta=delta,
+                              speeds=speeds, **kw)
+    if os.environ.get("SPEED_SLEW", "0") != "1" or kind == "evade":
+        state["s_prev"] = s
+        return kind, s
+    grid = list(speeds) if speeds is not None else (
+        [1.0, 0.6, 0.3, 0.15] if os.environ.get("SPEEDS_CRAWL", "0") == "1" else [1.0, 0.6, 0.3])
+    sp = state.get("s_prev")
+    if sp is None or s not in grid or sp not in grid:
+        state["s_prev"] = s
+        return kind, s
+    i_w, i_p = grid.index(s), grid.index(sp)
+    s_c = grid[i_p + max(-1, min(1, i_w - i_p))]
+    if s_c != s:
+        d = (delta if delta is not None else 0.0)
+        t_c = min(tau, 0.30 + 0.5 * s_c + 0.05) if os.environ.get("TAU_SPEED", "0") == "1" else tau
+        ok = cert_clear(ego, cyl, tau=t_c, delta=d) if s_c >= 0.999 else \
+            cert_clear_warp(ego, cyl, s_c, tau=t_c, delta=d)
+        if not ok:
+            s_c = s
+    state["s_prev"] = s_c
+    return kind, s_c
