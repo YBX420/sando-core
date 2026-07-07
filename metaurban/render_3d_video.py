@@ -1035,16 +1035,15 @@ MAN_TRACK = float(os.environ.get("EGO_TRACK", 0.473))  # HCT-D plan->flown TRACK
 # collides where EGO does. Tune via EGO_MANDSAFE.
 MAN_DSAFE = float(os.environ.get("EGO_MANDSAFE", 0.45))
 PHI_MAN = np.radians(25.0)   # ground around-L/R deflection angle for the maneuver tournament
-# CCF EMPIRICALLY RETIRED (2026-06-30, default OFF): net-negative -- froze 2/5 natural seeds (over-commit can't release in
-# clutter), and the L/R-flip it targets is only ~0.7/episode (a non-problem; real churn is functional straight<->around +
-# vertical over/climb/hold, which CCF doesn't touch). Kept gated for reference. See .claude/memory/sando-core-fov-novelty-2026-06.md.
-EGO_CCF = os.environ.get("EGO_CCF", "0") == "1"                 # Certified Commitment Function: hold the committed detour
-EGO_CCF_WARP = os.environ.get("EGO_CCF_WARP", "1") == "1"       # the YIELD-behind speed-warp restoration (the novelty half);
-EGO_MAN_RELEASE = int(os.environ.get("EGO_MAN_RELEASE", "5"))  # ticks 'straight' must stay certified before releasing a commit
-EGO_CRET_HOLD = os.environ.get("EGO_CRET_HOLD", "0") == "1"
-EGO_CRET_SMIN = float(os.environ.get("EGO_CRET_SMIN", "0.10"))  # CRET glide floor (below the slip EGO_S_MIN)     # task#3 CRET-hold: before an instant hover, re-try the
-#   STRAIGHT plan at a certified RETIME (constant-slip identity; tournament only certified s=1). Certified glide
-#   replaces stop-go; the caller's brake-fast/release-slow slew keeps the deceleration smooth. Default OFF.
+# CCF/CRET/FOVCAP speed patches DELETED 2026-07-07 (stage-2): absorbed by SL.maneuver_decide_v2
+# (CCF itself was empirically retired 2026-06-30: froze 2/5 natural seeds; v2's carrot-release +
+# evade mapping + dwell probes address exactly that failure mode -- verified per-seed before the
+# default flip, see commit message).
+EGO_DECIDE = os.environ.get("EGO_DECIDE", "v2")   # unified tournament DEFAULT (stage-2 2026-07-07);
+#   "v1" = frozen legacy tournament kept ONLY for A/B reproduction of pre-unification renders
+#   (one shared implementation with the headless benchmark; absorbs CCF/CRET/FOVCAP speed patches)
+import safety_layer as _SL
+_MAN_V2 = {}
 # HCT-D tracking-tube HARVEST: TRACK_HARVEST=1 logs per sub-step (window, delta=||flown-planned||, hodograph
 # features ||v||,||a||,lateral-accel) so a split-conformal tracking tube kappa*g can be calibrated off-line.
 _TRACKH = os.environ.get("TRACK_HARVEST") == "1"
@@ -1291,50 +1290,38 @@ def ego_maneuver_replan(p_d, v_d, a_d, cur_wp, t_sim):
     # sides -- and re-opens the tournament only when the committed side is INFEASIBLE at every speed. It returns to
     # goal-direct only after 'straight' has certified for EGO_MAN_RELEASE consecutive ticks (debounce kills the
     # straight<->around flip). Switch trigger = the hard certificate's feasibility, NOT a goal-ward speed deadband.
-    def _committed_warp(smin=None):
-        """Fastest re-timing s in [smin,1] for which the COMMITTED (already-replanned) B-spline certifies vs every
-        predicted mover (sound substitution obs_vel=v/s, t_hi=s*TAU, v_eff=VEFF/s, delta=DT*s; the re-timed predicted
-        cert is the slip-behind-sound one -- no frozen-at-current variant, which would forbid every yield). 0.0 if none.
-        smin: floor (default EGO_S_MIN); CRET-hold passes a LOWER floor -- a certified crawl beats a freeze."""
-        smin = EGO_S_MIN if smin is None else float(smin)
-        s = 1.0
-        while s >= smin - 1e-9:
-            ok = True
-            for (_oid, c3, vel, r_obs, d_safe) in movers:
-                R = r_obs + MAN_DSAFE + MAN_QCONF + MAN_TRACK
-                hp, _ = ego.certify_horizontal(obs_c0=c3, R=R, obs_vel=tuple(np.asarray(vel, float) / s),
-                                               t_hi=s * EGO_TAU_TRUST, v_eff=MAN_VEFF / s, delta=REPLAN_DT * s)
-                vo, _ = ego.certify_above(z_clear=2.0 * c3[2] + MAN_REACH_PAD + MAN_DSAFE_V + MAN_QCONF + MAN_TRACK,
-                                          t_hi=s * EGO_TAU_TRUST, delta=REPLAN_DT * s)
-                if not (hp or vo):
-                    ok = False; break
-            if ok:
-                return s
-            s -= EGO_S_STEP
-        return 0.0
-
+    # (_committed_warp DELETED 2026-07-07: orphaned after CCF/CRET removal; the retime
+    #  identity lives on in SL.cert_clear_warp + maneuver_decide_v2's speed grid.)
     def _straight_clear():
         return (ego.replan(p_d, v_d, a_d, np.array([p_d[0] + gdir[0] * L, p_d[1] + gdir[1] * L, CRUISE_Z]))
                 and ego.duration() > 1e-3 and cert_clear() and static_clear() and mover_clear_flown())
 
+    if EGO_DECIDE == "v2":
+        _cyl = []
+        for (_oid, c3, vel, r_obs, d_safe) in movers:
+            q_c, veff_c = PERCLASS_CONF.get(d_safe, (MAN_QCONF, MAN_VEFF))
+            _cyl.append((np.asarray(c3, float), np.array([float(vel[0]), float(vel[1]), 0.0]),
+                         np.zeros(3), r_obs + MAN_DSAFE + q_c + MAN_TRACK,
+                         2.0 * float(c3[2]) + MAN_REACH_PAD + MAN_DSAFE_V + q_c + MAN_TRACK, veff_c))
+        kind, s_v2 = _SL.maneuver_decide_v2(
+            ego, p_d, v_d, a_d, np.asarray(cur_wp, float), z_top, _cyl, _MAN_V2,
+            cruise_z=CRUISE_Z, horizon=L, straight_clip=EGO_HOR,
+            tau=EGO_TAU_TRUST, delta=REPLAN_DT, carrot="angle",
+            speeds=(1.0, 0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3),   # CCF-granularity warp grid (cert is 7us)
+            extra_gate=lambda: static_clear() and mover_clear_flown())
+        if kind in ("around_l2", "around_r2"):
+            kind = kind[:-1]
+        if kind == "evade":
+            kind = "hold"                       # renderer semantics: never blind-flee into buildings
+        dur = ego.duration()
+        pts = [ego.eval(u)[0] for u in np.linspace(0, dur, 24)] if (kind != "hold" and dur > 1e-3) else None
+        return kind, pts, (float(s_v2) if kind != "hold" else 1.0)
+
     chosen = None; man_g = 1.0
-    _cknd = _MAN_STATE.get("kind"); _csub = _MAN_STATE.get("sub")
-    if EGO_CCF and _cknd in ("around_l", "around_r") and _csub is not None:
-        gsub_c = np.array([*(p_d[:2] + L * rot(gdir, _csub)), CRUISE_Z])     # SAME angular detour, re-anchored to now
-        if ego.replan(p_d, v_d, a_d, gsub_c) and ego.duration() > 1e-3 and static_clear():
-            if cert_clear() and mover_clear_flown():
-                chosen = _cknd; man_g = 1.0                                  # committed side still clears at full speed
-            elif EGO_CCF_WARP:
-                _s = _committed_warp()                                       # try to YIELD behind the crosser, don't flip
-                if _s >= EGO_S_MIN - 1e-9:
-                    chosen = _cknd; man_g = float(_s)
-            if chosen is not None:
-                _strk = (_MAN_STATE.get("streak", 0) + 1) if _straight_clear() else 0   # NB: _straight_clear replans straight
-                _MAN_STATE["streak"] = _strk
-                if _strk >= EGO_MAN_RELEASE:
-                    chosen = None; _MAN_STATE["streak"] = 0                  # straight safe long enough -> release the commit
-                else:
-                    ego.replan(p_d, v_d, a_d, gsub_c)                       # restore committed plan (straight probe clobbered ego)
+    # (CCF commitment block DELETED 2026-07-07: superseded by SL.maneuver_decide_v2's built-in
+    #  incumbent retry + angle carrot + speed grid. Reproduce old behaviour with EGO_DECIDE=v1 --
+    #  which now runs the PLAIN tournament below, i.e. the pre-CCF default.)
+    _csub = _MAN_STATE.get("sub")                       # v1 tournament still prefers the committed SIDE
     if chosen is None:
         # Tournament: straight -> SAME-side detour -> mirror -> wider; then fly OVER -> climb -> HOLD. EACH candidate must
         # clear the mover cert AND the static gate. (blind EVADE not used: dense static -> fleeing drives into buildings.)
@@ -1357,14 +1344,6 @@ def ego_maneuver_replan(p_d, v_d, a_d, cur_wp, t_sim):
             elif (ego.replan(p_d, v_d, a_d, np.array([p_d[0], p_d[1], z_top]))
                     and ego.duration() > 1e-3 and cert_clear() and static_clear() and mover_clear_flown()):
                 chosen = "climb"                                  # certified vertical escape
-            elif (EGO_CRET_HOLD
-                    and ego.replan(p_d, v_d, a_d, np.array([p_d[0] + gdir[0] * L, p_d[1] + gdir[1] * L, CRUISE_Z]))
-                    and ego.duration() > 1e-3 and static_clear()
-                    and (_cret_s := _committed_warp(smin=EGO_CRET_SMIN)) >= EGO_CRET_SMIN - 1e-9):
-                # CRET-hold: a certified SLOW glide along the straight plan exists (full-speed candidates
-                # all failed, but the slip-retime identity certifies s<1). Fly it instead of freezing;
-                # man_g carries the certified warp and the g-slew smooths the deceleration.
-                chosen = "cret"; man_g = float(_cret_s)
             else:
                 chosen = "hold"                                   # uncertifiable -> brake/hover, do NOT fly uncertified
         _MAN_STATE["sub"] = _ang if chosen in ("around_l", "around_r") else None
@@ -1792,24 +1771,8 @@ while not quit_now:
                 # NOTHING certified (boxed) -> safe RTA backstop: hover/brake in place (executor s=None holds position).
                 # NO uncertified flight -> restores 'flown == certified' (was the climb-fallback soundness hole, e.g. seed 56).
                 ego_cert_hold = True; ego_hold_class = "boxed"; ego_n_hold += 1
-            elif args.maneuver and ego_dur > 1e-3 and os.environ.get("EGO_FOVCAP", "0") == "1":
-                # SPEED-FOV COUPLING (default OFF): the per-tick time-warp THRASHES the maneuver tournament (re-plan +
-                # slow near clutter -> L/R candidate flip -> switches~80-100, reach collapses). The stable half of the
-                # speed-FOV idea is the GLOBAL EGO_VMAX cap (don't outrun the 8m cone). This dynamic warp is kept for
-                # future anti-thrash work (commit hysteresis). Enable with EGO_FOVCAP=1.
-                # within the free distance the forward cone perceives along the path. Closes the fast-flight-into-late-
-                # detected-obstacle residual (drone outrunning its 8 m cone at ~9 m/s) WITHOUT adding any perception.
-                d_free = _path_free_dist(p_d, float(quad.yaw), t)
-                v_allow = (2.0 * FOV_ABRAKE * max(d_free - FOV_DMARGIN, 0.0)) ** 0.5
-                vpk = max((float(np.linalg.norm(ego.eval(s)[1]))
-                           for s in np.linspace(0.0, min(ego_dur, EGO_TAU_TRUST), 6)), default=1e-3)
-                g_raw = float(np.clip(v_allow / max(vpk, 1e-3), FOV_GMIN, 1.0))
-                ego_speed_g = g_raw if g_raw < ego_g_prev else min(g_raw, ego_g_prev + EGO_G_RELEASE)  # brake fast, release slow
-                ego_g_prev = ego_speed_g
-                if ego_speed_g >= 0.999:
-                    ego_n_cert += 1
-                else:
-                    ego_n_slow += 1                          # slowing to stay inside the perceived free distance
+            # (EGO_FOVCAP speed-FOV warp DELETED 2026-07-07: its comment promised "future anti-thrash
+            #  work (commit hysteresis)" -- that future is maneuver_decide_v2's speed grid.)
             elif args.maneuver and ego_dur > 1e-3:
                 # CCF yield-behind warp: ego_maneuver_replan returns the fastest certified speed on the COMMITTED side
                 # (1.0 unless it is slowing behind a crosser to HOLD the side instead of switching). Brake fast, release slow.

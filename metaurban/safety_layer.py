@@ -239,7 +239,10 @@ def cert_clear_warp(ego, cyl, s, tau=TAU, delta=None):
 def maneuver_decide_v2(ego, p_d, v_d, a_d, goal, ztop, cyl, state,
                        cruise_z=CRUISE_Z, horizon=HORIZON, straight_clip=None,
                        tau=TAU, delta=None, speeds=(1.0, 0.6, 0.3),  # 0.3 kept: it ABSORBS evades (without it evade 40->106); the time cost is the honest price of persistence
-                       dwell_ticks=3, strict_margin=0.15):
+                       dwell_ticks=3, strict_margin=0.15, extra_gate=None, carrot="frozen"):
+    # carrot="frozen": incumbent sub-goal fixed in the WORLD (short-corridor benchmark: moving
+    #   carrots spiral, A/B 07-06). carrot="angle": incumbent DEFLECTION re-anchored to the current
+    #   goal direction each tick (long routes: a frozen point goes stale; the renderer's CCF rule).
     """UNIFIED tournament (task#8): candidates = (direction x speed) grid, ONE implementation for
     both the headless benchmark and (stage-2) the renderer. Absorbs the four bolt-on speed
     governors (slip / CCF-warp / CRET / FOVCAP): speed is a first-class tournament dimension, so
@@ -273,6 +276,9 @@ def maneuver_decide_v2(ego, p_d, v_d, a_d, goal, ztop, cyl, state,
             return np.array([p_d[0], p_d[1], ztop])
         return None
 
+    def _ok_plan():
+        return extra_gate() if extra_gate is not None else True
+
     def _cert_at(s, strict=False):
         dd = d + (strict_margin if strict else 0.0)
         if s >= 0.999:
@@ -297,6 +303,8 @@ def maneuver_decide_v2(ego, p_d, v_d, a_d, goal, ztop, cyl, state,
     DIRS = ("straight", "around_l", "around_r", "around_l2", "around_r2", "over", "climb")
     inc, inc_s = state.get("kind"), float(state.get("s", 1.0))
     gs_inc = state.get("gsub")
+    if carrot == "angle" and inc in DIRS:
+        gs_inc = _gsub(inc)                                 # re-anchor the deflection to the current gdir
     if inc in DIRS and gs_inc is not None and float(np.linalg.norm(gs_inc[:2] - p_d[:2])) < 1.5:
         inc = None                                          # carrot reached -> re-decide
 
@@ -308,13 +316,13 @@ def maneuver_decide_v2(ego, p_d, v_d, a_d, goal, ztop, cyl, state,
             state["age"] = 0                                # dwell-gated STRICT upgrade probe
             for uk in DIRS[:DIRS.index(inc)]:
                 gs = _gsub(uk)
-                if ego.replan(p_d, v_d, a_d, gs) and ego.duration() > 1e-3:
+                if ego.replan(p_d, v_d, a_d, gs) and ego.duration() > 1e-3 and _ok_plan():
                     s_up = _best_s(strict=True)
                     if s_up >= max(inc_s, speeds[-1]) - 1e-9 and s_up > 0.0:
                         # upgrade must be certified-with-margin AND not slower than the incumbent
                         state.update(kind=uk, gsub=gs, s=s_up)
                         return uk, s_up
-        if ego.replan(p_d, v_d, a_d, gs_inc) and ego.duration() > 1e-3:
+        if ego.replan(p_d, v_d, a_d, gs_inc) and ego.duration() > 1e-3 and _ok_plan():
             idx = max(0, speeds.index(inc_s) - 1) if inc_s in speeds else 0
             s_now = _best_s(smax=speeds[idx])               # may rise ONE grid step above last tick
             if s_now > 0.0:
@@ -329,6 +337,8 @@ def maneuver_decide_v2(ego, p_d, v_d, a_d, goal, ztop, cyl, state,
         if not (ego.replan(p_d, v_d, a_d, gs) and ego.duration() > 1e-3):
             continue
         last_replanned = dk
+        if not _ok_plan():
+            continue
         s_ok = _best_s()
         if s_ok <= 0.0:
             continue
