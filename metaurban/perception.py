@@ -9,6 +9,7 @@ two drifting copies again):
   observe():  FOV cone (half-angle + range)  ->  hard occlusion (2-D ray vs other cylinders)
               ->  distance-dependent miss  P_miss(d) = p0 + p1*(d/R)^2
               ->  distance-dependent noise sigma(d) = s0 + s1*d
+import os
   step():     observe + greedy nearest-neighbour association (NO GT identity) -> per-track KF
               (kf_tracker.MoverTracker: two-point init + coast) with birth / coast / kill.
 
@@ -214,6 +215,13 @@ class PerceptionFrontEnd:
             step_dt = float(dt) if dt is not None else self.cfg.dt
             gate = self.cfg.gate_m if self.tracks[ti].trk.ready else \
                 (self.cfg.gate_m + self.cfg.birth_vmax * step_dt)   # birth gate covers TRUE unmodelled motion
+            _kg = float(os.environ.get("ASSOC_KGATE", "0"))
+            if _kg > 0.0 and self.tracks[ti].trk.ready:
+                # convergence-aware gate (chi2-gating spirit): open by the track's OWN filter position
+                # uncertainty -- a half-converged fast mover that coasted once has pos_sigma of metres
+                # (fixed 1.2m gate = death spiral: bad prediction -> assoc fail -> more coast -> worse);
+                # a converged track keeps sigma~0.1 so the gate stays tight (no new ID-swap risk).
+                gate += _kg * float(self.tracks[ti].trk.pos_sigma)
             if dist > gate or ti in used_t or di in used_d:
                 continue
             self.tracks[ti].update(dets[di], dt)
