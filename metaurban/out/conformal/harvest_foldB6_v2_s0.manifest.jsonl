@@ -1,0 +1,19 @@
+{"config_sha": "2e9443e4685d591b", "mode": "foldB6", "n_jobs": 18}
+{"ep": 0, "scn": "climb_trap", "seed": 134202967, "rows": 13398, "a2_miss": 0, "a2_qual": 39, "reached": false, "status": "ok"}
+{"ep": 1, "scn": "gauntlet", "seed": 136445903, "rows": 2002, "a2_miss": 0, "a2_qual": 14, "reached": true, "status": "ok"}
+{"ep": 2, "scn": "gen_pool_03", "seed": 133971133, "rows": 0, "a2_miss": 7, "a2_qual": 7, "reached": true, "status": "ok"}
+{"ep": 3, "scn": "gen_pool_07", "seed": 131642026, "rows": 770, "a2_miss": 1, "a2_qual": 29, "reached": true, "status": "ok"}
+{"ep": 4, "scn": "gen_pool_11", "seed": 132770822, "rows": 484, "a2_miss": 5, "a2_qual": 21, "reached": true, "status": "ok"}
+{"ep": 5, "scn": "gen_pool_15", "seed": 136938001, "rows": 330, "a2_miss": 0, "a2_qual": 7, "reached": true, "status": "ok"}
+{"ep": 6, "scn": "gen_pool_19", "seed": 131665001, "rows": 0, "a2_miss": 8, "a2_qual": 8, "reached": true, "status": "ok"}
+{"ep": 7, "scn": "gen_pool_c03", "seed": 134333967, "rows": 0, "a2_miss": 6, "a2_qual": 6, "reached": true, "status": "ok"}
+{"ep": 8, "scn": "gen_pool_c07", "seed": 131588568, "rows": 0, "a2_miss": 7, "a2_qual": 7, "reached": true, "status": "ok"}
+{"ep": 9, "scn": "gen_pool_c11", "seed": 138673332, "rows": 66, "a2_miss": 6, "a2_qual": 8, "reached": true, "status": "ok"}
+{"ep": 10, "scn": "head_on", "seed": 134562094, "rows": 550, "a2_miss": 0, "a2_qual": 24, "reached": true, "status": "ok"}
+{"ep": 11, "scn": "speed_sweep", "seed": 136792422, "rows": 2068, "a2_miss": 0, "a2_qual": 24, "reached": true, "status": "ok"}
+{"ep": 12, "scn": "street_busy_s1_alt1", "seed": 138971866, "rows": 0, "a2_miss": 1, "a2_qual": 1, "reached": true, "status": "ok"}
+{"ep": 13, "scn": "street_busy_s3_alt1", "seed": 134897116, "rows": 198, "a2_miss": 6, "a2_qual": 10, "reached": true, "status": "ok"}
+{"ep": 14, "scn": "street_rush_s1", "seed": 137073812, "rows": 132, "a2_miss": 0, "a2_qual": 0, "reached": true, "status": "ok"}
+{"ep": 15, "scn": "street_rush_s3", "seed": 135657695, "rows": 606, "a2_miss": 3, "a2_qual": 17, "reached": true, "status": "ok"}
+{"ep": 16, "scn": "veh_cal_2", "seed": 131769808, "rows": 132, "a2_miss": 5, "a2_qual": 5, "reached": true, "status": "ok"}
+{"ep": 17, "scn": "wall_and_crosser", "seed": 137395222, "rows": 1210, "a2_miss": 2, "a2_qual": 18, "reached": true, "status": "ok"}

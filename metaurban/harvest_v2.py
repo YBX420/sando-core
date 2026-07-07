@@ -19,7 +19,7 @@ import zlib
 
 ap = argparse.ArgumentParser()
 ap.add_argument("--mode", choices=["foldB", "test", "vehA", "foldB2", "test2", "foldB3", "test3",
-                                   "foldB4", "test4", "designC", "designD", "foldB5", "test5"], required=True)
+                                   "foldB4", "test4", "designC", "designD", "foldB5", "test5", "foldB6", "test6"], required=True)
 ap.add_argument("--shard", type=int, default=0)
 ap.add_argument("--nshard", type=int, default=1)
 args = ap.parse_args()
@@ -67,6 +67,10 @@ elif args.mode == "foldB5":
     jobs = [(n, CFG["SEEDS_FOLDB5"][n]) for n in POOL]
 elif args.mode == "test5":
     jobs = [(n, s) for n in POOL for s in CFG["SEEDS_TEST5"][n]]
+elif args.mode == "foldB6":
+    jobs = [(n, CFG["SEEDS_FOLDB6"][n]) for n in POOL]
+elif args.mode == "test6":
+    jobs = [(n, s) for n in POOL for s in CFG["SEEDS_TEST6"][n]]
 else:  # vehA: design-domain vehicle boost (veh_cal x22 + street x6 fresh-A seeds)
     veh = [n for n in POOL if n.startswith("veh_cal")]
     street = [n for n in POOL if n.startswith("street_")]
