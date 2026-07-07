@@ -18,7 +18,7 @@ import sys
 import zlib
 
 ap = argparse.ArgumentParser()
-ap.add_argument("--mode", choices=["foldB", "test", "vehA"], required=True)
+ap.add_argument("--mode", choices=["foldB", "test", "vehA", "foldB2", "test2"], required=True)
 args = ap.parse_args()
 
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, HERE); os.chdir(HERE)
@@ -40,8 +40,12 @@ import scenario_lib as SLB
 POOL = CFG["scenario_pool"]
 if args.mode == "foldB":
     jobs = [(n, CFG["SEEDS_FOLDB"][n]) for n in POOL]
+elif args.mode == "foldB2":
+    jobs = [(n, CFG["SEEDS_FOLDB2"][n]) for n in POOL]
 elif args.mode == "test":
     jobs = [(n, s) for n in POOL for s in CFG["SEEDS_TEST"][n]]
+elif args.mode == "test2":
+    jobs = [(n, s) for n in POOL for s in CFG["SEEDS_TEST2"][n]]
 else:  # vehA: design-domain vehicle boost (veh_cal x22 + street x6 fresh-A seeds)
     veh = [n for n in POOL if n.startswith("veh_cal")]
     street = [n for n in POOL if n.startswith("street_")]
@@ -85,7 +89,7 @@ RC.PERCEPT_HARVEST = None; RC.PERCEPT_A2 = None
 man.close()
 
 data = np.array(rows_all, dtype=[("d", "f4"), ("e", "f4"), ("age", "i4"), ("cls", "U12"),
-                                 ("ep", "i4"), ("dd", "f4"), ("scn", "U40")])
+                                 ("ep", "i4"), ("dd", "f4"), ("scn", "U40"), ("qual", "i4")])
 np.save(out_npy, data)
 # scenario-aliasing fingerprints (ruling #17)
 fps = {}

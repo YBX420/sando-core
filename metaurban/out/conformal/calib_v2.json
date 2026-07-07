@@ -1,0 +1,124 @@
+{
+ "provenance": {
+  "spec": "FS3C-R theta2",
+  "config_sha": "06ecfed6e68b7ec8",
+  "n_foldB2_flights": 27,
+  "date": "2026-07-07"
+ },
+ "groups": {
+  "pedestrian": {
+   "levels": {
+    "0.05": {
+     "q_conformal": 2.8806,
+     "v_eff": 1.0396,
+     "status": "MAX_RANK_WARNING"
+    },
+    "0.1": {
+     "q_conformal": 1.5267,
+     "v_eff": 1.0396,
+     "status": "ok"
+    }
+   }
+  },
+  "vehicle": {
+   "levels": {
+    "0.05": {
+     "q_conformal": 4.764,
+     "v_eff": 0.9306,
+     "status": "MAX_RANK_WARNING"
+    },
+    "0.1": {
+     "q_conformal": 2.5908,
+     "v_eff": 0.9306,
+     "status": "ok"
+    }
+   }
+  },
+  "animal": {
+   "levels": {
+    "0.05": {
+     "status": "UNCALIBRATED"
+    },
+    "0.1": {
+     "status": "UNCALIBRATED"
+    }
+   }
+  },
+  "static": {
+   "levels": {
+    "0.05": {
+     "q_conformal": 0.565,
+     "v_eff": 0.0,
+     "status": "MAX_RANK_WARNING"
+    },
+    "0.1": {
+     "q_conformal": 0.3606,
+     "v_eff": 0.0,
+     "status": "ok"
+    }
+   }
+  }
+ },
+ "young": {
+  "pedestrian": {
+   "0.05": {
+    "q0y": 3.6304,
+    "growth": 2.2
+   },
+   "0.1": {
+    "q0y": 2.4853,
+    "growth": 2.2
+   }
+  },
+  "vehicle": {
+   "0.05": {
+    "q0y": 35.1132,
+    "growth": 11.0
+   },
+   "0.1": {
+    "q0y": 20.3277,
+    "growth": 11.0
+   }
+  },
+  "static": {
+   "0.05": {
+    "q0y": 0.9295,
+    "growth": 0.0
+   },
+   "0.1": {
+    "q0y": 0.5792,
+    "growth": 0.0
+   }
+  }
+ },
+ "flags": [],
+ "validation": {
+  "0.05": {
+   "test2_flight_coverage": 0.9804,
+   "n_test2": 51,
+   "mondrian": "{'pedestrian': (0.98, 51), 'vehicle': (1.0, 13), 'static': (1.0, 6)}"
+  },
+  "0.1": {
+   "test2_flight_coverage": 0.8627,
+   "n_test2": 51,
+   "mondrian": "{'pedestrian': (0.863, 51), 'vehicle': (1.0, 13), 'static': (1.0, 6)}"
+  }
+ },
+ "deployability": {
+  "pedestrian": {
+   "tube@0.3": 3.19,
+   "tube@0.75": 3.66,
+   "tube@1.05": 3.97
+  },
+  "vehicle": {
+   "tube@0.3": 5.04,
+   "tube@0.75": 5.46,
+   "tube@1.05": 5.74
+  },
+  "static": {
+   "tube@0.3": 0.56,
+   "tube@0.75": 0.56,
+   "tube@1.05": 0.56
+  }
+ }
+}

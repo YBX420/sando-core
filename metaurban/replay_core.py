@@ -36,6 +36,7 @@ _HARV_AGEMIN = int(os.environ.get("HARV_AGE_MIN", "4"))
 _HARV_SCN = [""]
 _HARV_RHO = json.loads(os.environ["HARV_RHO"]) if "HARV_RHO" in os.environ else None
 PERCEPT_A2 = None                 # set to dict(miss_ticks=0, qual_ticks=0) by the v2 driver
+_QUAL_MEMO = {}                   # per-tick mover-index -> future-reach qualification (theta2)
 
 # ---- geometry / dynamics ----
 DT = 0.30; TAU = 0.75; DELTA = DT
@@ -391,22 +392,33 @@ def run_replay(movers, ep, mode="ours", calib=None, predict=True, max_vel=3.0, m
                           for i in idx]
                 ptracks = percept_fe.step(p_d[:2], hd, gt_cyl)
                 percepts = [(tr.trk, tr.xy, tr.r, tr.h, tr.cls) for tr in ptracks]
-                if PERCEPT_A2 is not None and _HARV_RHO is not None:
-                    # A2 presence-miss (FS3C-R): a tick where some in-rho_c GT mover has NO ready
-                    # representation -- the measured epsilon_miss term of the ledger.
+                if PERCEPT_A2 is not None:
+                    # A2 presence-miss, FUTURE-REACH qualification (theta2 2026-07-07): a mover is
+                    # dangerous at tick t iff its ACTUAL GT future enters the drone's reachable ball
+                    # within the horizon -- the isotropic rho_c counted receding 11 m/s vehicles as
+                    # "missed danger" (91% of flights, vacuous ledger). Sound for the lemma: any
+                    # actual culprit trivially satisfies it at the last certified tick.
                     _rxy = [np.asarray(tr.xy[:2], float) for tr in ptracks if tr.trk.ready]
                     _anyq = False
+
+                    def _qual(_i):
+                        _r = movers.m[_i]["r"]
+                        for _dh in (0.0, 0.35, 0.70, 1.05):
+                            if not movers.present(_i, t + _dh):
+                                continue
+                            if float(np.hypot(*(pos_l(_i, t + _dh) - p_d[:2]))) <=                                     3.0 * _dh + float(_r) + 0.35 + 0.50:
+                                return True
+                        return False
+
+                    _QUAL_MEMO.clear()
                     for _i in idx:
-                        _rho = _HARV_RHO.get(movers.m[_i]["cls"])
-                        if _rho is None:
-                            continue
-                        _gp = pos_l(_i, t)
-                        if float(np.hypot(*(_gp - p_d[:2]))) > _rho:
+                        _QUAL_MEMO[_i] = _qual(_i)
+                        if not _QUAL_MEMO[_i]:
                             continue
                         _anyq = True
+                        _gp = pos_l(_i, t)
                         if not any(float(np.hypot(*(_gp - _q))) < 2.0 for _q in _rxy):
                             PERCEPT_A2["miss_ticks"] += 1
-                            break
                     if _anyq:
                         PERCEPT_A2["qual_ticks"] += 1
                 if PERCEPT_HARVEST is not None:
@@ -446,7 +458,8 @@ def run_replay(movers, ep, mode="ours", calib=None, predict=True, max_vel=3.0, m
                             resid = float(np.hypot(*(pos_l(gi, t + dh) - pred)))
                             PERCEPT_HARVEST.append((float(dh), resid, int(tr.trk.n),
                                                     str(tr.cls), int(_HARV_EP[0]), d_drone)
-                                                   + ((_HARV_SCN[0],) if _HARV_V2 else ()))
+                                                   + ((_HARV_SCN[0], int(_QUAL_MEMO.get(gi, True)))
+                                                      if _HARV_V2 else ()))
             else:
                 percepts = [(trackers[i], dets[i], movers.m[i]["r"], movers.m[i]["h"], movers.m[i]["cls"])
                             for i in near]

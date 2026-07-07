@@ -1,5 +1,5 @@
 {
- "spec": "FS3C-R",
+ "spec": "FS3C-R theta2",
  "date": "2026-07-07",
  "AGE_MIN": 4,
  "GRID": [
@@ -305,5 +305,184 @@
   "street_rush_s3",
   "street_rush_s3_alt1"
  ],
- "config_sha256": "81dd6ba227586511"
+ "QUAL_RULE": "future-reach: exists dh in {0,0.35,0.70,1.05}: |GT(t+dh)-p_d(t)| <= 3.0*dh + r_obs + 0.35 + 0.50; isotropic rho_c retired (counted receding traffic as danger, 91% flight-miss vacuous ledger)",
+ "SEEDS_FOLDB2": {
+  "climb_trap": 40039758,
+  "crossers": 41605767,
+  "crowd_dense": 42711978,
+  "fast_overtake": 47805170,
+  "gauntlet": 46409430,
+  "head_on": 40169527,
+  "occlusion_reveal": 48068710,
+  "props_alley": 43422966,
+  "roundabout_rush": 41784283,
+  "speed_sweep": 43851647,
+  "street_life": 40478705,
+  "veh_cal_0": 43254530,
+  "veh_cal_1": 46124327,
+  "veh_cal_2": 44735945,
+  "veh_cal_3": 40734508,
+  "veh_cal_4": 40720661,
+  "vehicle_spawn_accel": 47961153,
+  "wall_and_crosser": 45446159,
+  "street_busy_s0": 46572218,
+  "street_busy_s0_alt1": 42171328,
+  "street_busy_s1": 41947039,
+  "street_busy_s1_alt1": 41241923,
+  "street_busy_s2": 46655345,
+  "street_busy_s2_alt1": 45785862,
+  "street_busy_s3": 45772308,
+  "street_busy_s3_alt1": 47217413,
+  "street_rush_s0": 48174440,
+  "street_rush_s0_alt1": 46879644,
+  "street_rush_s1": 48367501,
+  "street_rush_s1_alt1": 43785631,
+  "street_rush_s2": 48570403,
+  "street_rush_s2_alt1": 47064410,
+  "street_rush_s3": 43923846,
+  "street_rush_s3_alt1": 40656281
+ },
+ "SEEDS_TEST2": {
+  "climb_trap": [
+   52821841,
+   58307399
+  ],
+  "crossers": [
+   55170297,
+   57219183
+  ],
+  "crowd_dense": [
+   56645170,
+   51755684
+  ],
+  "fast_overtake": [
+   58390854,
+   50624912
+  ],
+  "gauntlet": [
+   53290482,
+   58800612
+  ],
+  "head_on": [
+   56514347,
+   56689661
+  ],
+  "occlusion_reveal": [
+   53698264,
+   53013070
+  ],
+  "props_alley": [
+   50493131,
+   58785629
+  ],
+  "roundabout_rush": [
+   58682003,
+   55192133
+  ],
+  "speed_sweep": [
+   51261493,
+   58596515
+  ],
+  "street_life": [
+   57258537,
+   50562943
+  ],
+  "veh_cal_0": [
+   57478623,
+   56192457
+  ],
+  "veh_cal_1": [
+   50046895,
+   51387705
+  ],
+  "veh_cal_2": [
+   54125247,
+   50310697
+  ],
+  "veh_cal_3": [
+   51610703,
+   56681305
+  ],
+  "veh_cal_4": [
+   56297119,
+   54121545
+  ],
+  "vehicle_spawn_accel": [
+   55856519,
+   58286033
+  ],
+  "wall_and_crosser": [
+   58467505,
+   56534183
+  ],
+  "street_busy_s0": [
+   53053582,
+   58916888
+  ],
+  "street_busy_s0_alt1": [
+   56439575,
+   58282753
+  ],
+  "street_busy_s1": [
+   58658366,
+   51297384
+  ],
+  "street_busy_s1_alt1": [
+   56406697,
+   58077887
+  ],
+  "street_busy_s2": [
+   52520686,
+   53879672
+  ],
+  "street_busy_s2_alt1": [
+   53588202,
+   54264124
+  ],
+  "street_busy_s3": [
+   50079070,
+   58955592
+  ],
+  "street_busy_s3_alt1": [
+   53417172,
+   55485570
+  ],
+  "street_rush_s0": [
+   52094960,
+   50044518
+  ],
+  "street_rush_s0_alt1": [
+   57320598,
+   50258112
+  ],
+  "street_rush_s1": [
+   55790784,
+   57371606
+  ],
+  "street_rush_s1_alt1": [
+   58758888,
+   50286654
+  ],
+  "street_rush_s2": [
+   58885008,
+   57822534
+  ],
+  "street_rush_s2_alt1": [
+   51709675,
+   55093053
+  ],
+  "street_rush_s3": [
+   56143584,
+   57937846
+  ],
+  "street_rush_s3_alt1": [
+   52063253,
+   52472259
+  ]
+ },
+ "RETIRED_TO_DESIGN": [
+  "SEEDS_FOLDB",
+  "SEEDS_TEST"
+ ],
+ "config_sha256": "06ecfed6e68b7ec8"
 }
