@@ -6,7 +6,8 @@ import os
 import sys
 
 ap = argparse.ArgumentParser()
-ap.add_argument("--config", choices=["ours_v2", "ours_legacy", "native", "gt_thin"], required=True)
+ap.add_argument("--config", choices=["ours_v2", "ours_legacy", "native", "gt_thin", "cone_oracle"],
+                required=True)
 ap.add_argument("--shard", type=int, required=True)
 ap.add_argument("--nshard", type=int, default=4)
 ap.add_argument("--out", required=True)
@@ -16,6 +17,14 @@ HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, HERE); os.
 if args.config == "ours_v2":
     os.environ["CALIB_V2"] = "1"; os.environ["CALIB_EPS"] = "0.10"
 os.environ["PERCEPT"] = "gt" if args.config == "gt_thin" else "realistic"
+if args.config == "cone_oracle":
+    # premise ceiling: IDEAL cone sensor -- keep the 45deg cone + occlusion (the premise), zero out
+    # noise/miss/clutter/class-error, near-zero tubes. What clean-arrival can ANY algorithm reach
+    # under cone-limited information? (paper envelope: the info-theoretic cost of cone sensing)
+    for k, v in (("PERCEPT_SIGMA0", "0.0"), ("PERCEPT_SIGMA_K", "0.0"), ("PERCEPT_PMISS0", "0.0"),
+                 ("PERCEPT_PMISS_K", "0.0"), ("PERCEPT_FP_RATE", "0.0"), ("PERCEPT_CLS_ERR", "0.0"),
+                 ("PERCEPT_SIZE_ERR", "0.0")):
+        os.environ[k] = v
 
 import replay_core as RC
 import scenario_lib as SLB
