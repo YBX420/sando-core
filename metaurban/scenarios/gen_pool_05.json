@@ -1,0 +1,397 @@
+{
+ "schema": "sando-scenario-v1",
+ "name": "gen_pool_05",
+ "description": "procedurally populated street life (seed 1135): sidewalk walkers, crosswalk-area crossers, lane-following vehicles; pairwise spacing verified over the compiled timeline (floors ped-ped 0.8 / ped-veh 2.0 / veh-veh 4.0 m beyond radii). CONTESTED: corridor crosses the anchor crosser, arrivals time-aligned.",
+ "map": {
+  "seed": 5,
+  "block_str": "X"
+ },
+ "drone": {
+  "start": [
+   114.58,
+   110.96,
+   1.5
+  ],
+  "goal": [
+   114.58,
+   78.96,
+   1.5
+  ],
+  "cruise_z": 1.5,
+  "max_vel": 3.0,
+  "max_acc": 6.0
+ },
+ "statics": [],
+ "movers": [
+  {
+   "cls": "pedestrian",
+   "spawn_t": 5.0,
+   "path": [
+    [
+     210.79,
+     19.57
+    ],
+    [
+     206.41,
+     19.57
+    ],
+    [
+     202.03,
+     19.57
+    ],
+    [
+     197.65,
+     19.57
+    ],
+    [
+     193.27,
+     19.57
+    ],
+    [
+     188.89,
+     19.57
+    ]
+   ],
+   "speed": 1.39,
+   "hold_end": false
+  },
+  {
+   "cls": "pedestrian",
+   "spawn_t": 4.6,
+   "path": [
+    [
+     95.79,
+     -28.84
+    ],
+    [
+     97.02,
+     -31.11
+    ],
+    [
+     98.13,
+     -33.45
+    ],
+    [
+     99.13,
+     -35.83
+    ],
+    [
+     100.01,
+     -38.26
+    ],
+    [
+     100.77,
+     -40.73
+    ]
+   ],
+   "speed": 1.42,
+   "hold_end": false
+  },
+  {
+   "cls": "pedestrian",
+   "spawn_t": 1.8,
+   "path": [
+    [
+     140.02,
+     40.51
+    ],
+    [
+     138.03,
+     43.0
+    ],
+    [
+     136.21,
+     45.61
+    ],
+    [
+     134.56,
+     48.33
+    ],
+    [
+     133.09,
+     51.15
+    ],
+    [
+     131.8,
+     54.06
+    ]
+   ],
+   "speed": 1.41,
+   "hold_end": false
+  },
+  {
+   "cls": "pedestrian",
+   "spawn_t": 1.6,
+   "path": [
+    [
+     102.31,
+     97.5
+    ],
+    [
+     102.31,
+     93.76
+    ],
+    [
+     102.31,
+     90.02
+    ],
+    [
+     102.31,
+     86.28
+    ],
+    [
+     102.31,
+     82.55
+    ],
+    [
+     102.31,
+     78.81
+    ]
+   ],
+   "speed": 1.57,
+   "hold_end": false
+  },
+  {
+   "cls": "pedestrian",
+   "spawn_t": 3.4,
+   "path": [
+    [
+     126.06,
+     -77.65
+    ],
+    [
+     126.06,
+     -74.84
+    ],
+    [
+     126.06,
+     -72.03
+    ],
+    [
+     126.06,
+     -69.22
+    ],
+    [
+     126.06,
+     -66.41
+    ],
+    [
+     126.06,
+     -63.6
+    ]
+   ],
+   "speed": 1.82,
+   "hold_end": false
+  },
+  {
+   "cls": "pedestrian",
+   "spawn_t": 5.7,
+   "path": [
+    [
+     199.22,
+     19.83
+    ],
+    [
+     195.27,
+     19.83
+    ],
+    [
+     191.32,
+     19.83
+    ],
+    [
+     187.37,
+     19.83
+    ],
+    [
+     183.42,
+     19.83
+    ],
+    [
+     179.47,
+     19.83
+    ]
+   ],
+   "speed": 1.59,
+   "hold_end": false
+  },
+  {
+   "cls": "pedestrian",
+   "spawn_t": 3.1,
+   "path": [
+    [
+     20.27,
+     -4.69
+    ],
+    [
+     24.61,
+     -4.69
+    ],
+    [
+     28.96,
+     -4.69
+    ],
+    [
+     33.3,
+     -4.69
+    ],
+    [
+     37.64,
+     -4.69
+    ],
+    [
+     41.99,
+     -4.69
+    ]
+   ],
+   "speed": 1.15,
+   "hold_end": false
+  },
+  {
+   "cls": "pedestrian",
+   "spawn_t": 2.9,
+   "path": [
+    [
+     41.89,
+     21.36
+    ],
+    [
+     38.21,
+     21.36
+    ],
+    [
+     34.52,
+     21.36
+    ],
+    [
+     30.84,
+     21.36
+    ],
+    [
+     27.15,
+     21.36
+    ],
+    [
+     23.46,
+     21.36
+    ]
+   ],
+   "speed": 1.18,
+   "hold_end": false
+  },
+  {
+   "cls": "pedestrian",
+   "spawn_t": 4.6,
+   "path": [
+    [
+     197.02,
+     -4.59
+    ],
+    [
+     200.12,
+     -4.59
+    ],
+    [
+     203.21,
+     -4.59
+    ],
+    [
+     206.31,
+     -4.59
+    ],
+    [
+     209.4,
+     -4.59
+    ],
+    [
+     212.5,
+     -4.59
+    ]
+   ],
+   "speed": 1.22,
+   "hold_end": false
+  },
+  {
+   "cls": "pedestrian",
+   "spawn_t": 2.6,
+   "path": [
+    [
+     134.7,
+     41.66
+    ],
+    [
+     133.07,
+     44.05
+    ],
+    [
+     131.57,
+     46.54
+    ],
+    [
+     130.22,
+     49.1
+    ],
+    [
+     129.0,
+     51.73
+    ],
+    [
+     127.93,
+     54.43
+    ]
+   ],
+   "speed": 1.57,
+   "hold_end": false
+  },
+  {
+   "cls": "pedestrian",
+   "spawn_t": 0.0,
+   "path": [
+    [
+     127.01,
+     91.96
+    ],
+    [
+     102.15,
+     91.96
+    ]
+   ],
+   "speed": 0.74,
+   "hold_end": false
+  },
+  {
+   "cls": "pedestrian",
+   "spawn_t": 0.0,
+   "path": [
+    [
+     101.04,
+     84.36
+    ],
+    [
+     125.35,
+     84.36
+    ]
+   ],
+   "speed": 1.49,
+   "hold_end": false
+  },
+  {
+   "cls": "pedestrian",
+   "spawn_t": 0.0,
+   "path": [
+    [
+     126.82,
+     97.58
+    ],
+    [
+     102.15,
+     97.58
+    ]
+   ],
+   "speed": 1.71,
+   "hold_end": false
+  }
+ ],
+ "params": {},
+ "t_max": 35.0
+}

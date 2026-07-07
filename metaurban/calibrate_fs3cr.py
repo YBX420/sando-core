@@ -22,10 +22,27 @@ CLASSES = CFG["CLASSES"]; VCAP = CFG["VCAP_TRUE"]; SIG_FLOOR = CFG["SIG_FLOOR"]
 
 def load(name, fields8=False):
     d = np.load(f"out/conformal/harvest_{name}_v2.npy")
+    if "qual" not in d.dtype.names:                     # pre-theta2 design harvests lack the flag;
+        out = np.empty(len(d), dtype=d.dtype.descr + [("qual", "i4")])
+        for f in d.dtype.names:                         # shapes never read qual -> pad with 1
+            out[f] = d[f]
+        out["qual"] = 1
+        d = out
     return d
 
-A = [load("vehA"), load("foldB"), load("test")]          # design domain (retired folds included)
-B2 = load("foldB2"); T2 = load("test2")
+# design domain = vehA + ALL retired folds (spec: anything not the live quantile/test folds)
+_design = ["vehA", "foldB", "test"]
+if os.path.exists("out/conformal/harvest_foldB4_v2.npy"):
+    _live_B, _live_T = "foldB4", "test4"
+    _design += ["foldB2", "test2", "foldB3", "test3"]
+elif os.path.exists("out/conformal/harvest_foldB3_v2.npy"):
+    _live_B, _live_T = "foldB3", "test3"
+    _design += ["foldB2", "test2"]
+else:
+    _live_B, _live_T = "foldB2", "test2"
+A = [load(n) for n in _design]
+B2 = load(_live_B); T2 = load(_live_T)
+print(f"[folds] live quantile={_live_B} test={_live_T}  design={_design}")
 assert "qual" in B2.dtype.names and "qual" in T2.dtype.names
 
 def rows_of(ds, cls, mature=None):

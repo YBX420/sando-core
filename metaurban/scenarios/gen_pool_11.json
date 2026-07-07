@@ -1,0 +1,381 @@
+{
+ "schema": "sando-scenario-v1",
+ "name": "gen_pool_11",
+ "description": "procedurally populated street life (seed 2177): sidewalk walkers, crosswalk-area crossers, lane-following vehicles; pairwise spacing verified over the compiled timeline (floors ped-ped 0.8 / ped-veh 2.0 / veh-veh 4.0 m beyond radii). CONTESTED: corridor crosses the anchor crosser, arrivals time-aligned.",
+ "map": {
+  "seed": 5,
+  "block_str": "X"
+ },
+ "drone": {
+  "start": [
+   -3.7,
+   9.13,
+   1.5
+  ],
+  "goal": [
+   38.3,
+   9.13,
+   1.5
+  ],
+  "cruise_z": 1.5,
+  "max_vel": 3.0,
+  "max_acc": 6.0
+ },
+ "statics": [],
+ "movers": [
+  {
+   "cls": "pedestrian",
+   "spawn_t": 5.3,
+   "path": [
+    [
+     28.9,
+     23.14
+    ],
+    [
+     25.12,
+     23.14
+    ],
+    [
+     21.34,
+     23.14
+    ],
+    [
+     17.56,
+     23.14
+    ],
+    [
+     13.78,
+     23.14
+    ],
+    [
+     10.0,
+     23.14
+    ]
+   ],
+   "speed": 1.32,
+   "hold_end": false
+  },
+  {
+   "cls": "pedestrian",
+   "spawn_t": 0.9,
+   "path": [
+    [
+     98.8,
+     -74.95
+    ],
+    [
+     98.8,
+     -77.96
+    ],
+    [
+     98.8,
+     -80.97
+    ],
+    [
+     98.8,
+     -83.98
+    ],
+    [
+     98.8,
+     -86.99
+    ],
+    [
+     98.8,
+     -90.0
+    ]
+   ],
+   "speed": 1.59,
+   "hold_end": false
+  },
+  {
+   "cls": "pedestrian",
+   "spawn_t": 5.7,
+   "path": [
+    [
+     188.63,
+     -2.58
+    ],
+    [
+     193.4,
+     -2.58
+    ],
+    [
+     198.18,
+     -2.58
+    ],
+    [
+     202.95,
+     -2.58
+    ],
+    [
+     207.73,
+     -2.58
+    ],
+    [
+     212.5,
+     -2.58
+    ]
+   ],
+   "speed": 1.24,
+   "hold_end": false
+  },
+  {
+   "cls": "pedestrian",
+   "spawn_t": 4.8,
+   "path": [
+    [
+     97.63,
+     51.02
+    ],
+    [
+     96.49,
+     48.65
+    ],
+    [
+     95.23,
+     46.34
+    ],
+    [
+     93.86,
+     44.1
+    ],
+    [
+     92.37,
+     41.93
+    ],
+    [
+     90.78,
+     39.83
+    ]
+   ],
+   "speed": 1.41,
+   "hold_end": false
+  },
+  {
+   "cls": "pedestrian",
+   "spawn_t": 2.5,
+   "path": [
+    [
+     102.16,
+     -58.85
+    ],
+    [
+     102.16,
+     -61.84
+    ],
+    [
+     102.16,
+     -64.82
+    ],
+    [
+     102.16,
+     -67.8
+    ],
+    [
+     102.16,
+     -70.79
+    ],
+    [
+     102.16,
+     -73.77
+    ]
+   ],
+   "speed": 1.87,
+   "hold_end": false
+  },
+  {
+   "cls": "pedestrian",
+   "spawn_t": 2.0,
+   "path": [
+    [
+     100.35,
+     95.3
+    ],
+    [
+     100.35,
+     92.34
+    ],
+    [
+     100.35,
+     89.39
+    ],
+    [
+     100.35,
+     86.44
+    ],
+    [
+     100.35,
+     83.49
+    ],
+    [
+     100.35,
+     80.53
+    ]
+   ],
+   "speed": 1.61,
+   "hold_end": false
+  },
+  {
+   "cls": "pedestrian",
+   "spawn_t": 1.1,
+   "path": [
+    [
+     124.83,
+     -86.6
+    ],
+    [
+     124.83,
+     -82.47
+    ],
+    [
+     124.83,
+     -78.33
+    ],
+    [
+     124.83,
+     -74.2
+    ],
+    [
+     124.83,
+     -70.07
+    ],
+    [
+     124.83,
+     -65.94
+    ]
+   ],
+   "speed": 1.29,
+   "hold_end": false
+  },
+  {
+   "cls": "pedestrian",
+   "spawn_t": 3.0,
+   "path": [
+    [
+     201.11,
+     -4.68
+    ],
+    [
+     201.11,
+     19.55
+    ]
+   ],
+   "speed": 1.1,
+   "hold_end": false
+  },
+  {
+   "cls": "pedestrian",
+   "spawn_t": 5.6,
+   "path": [
+    [
+     125.46,
+     83.56
+    ],
+    [
+     102.15,
+     83.56
+    ]
+   ],
+   "speed": 1.37,
+   "hold_end": false
+  },
+  {
+   "cls": "pedestrian",
+   "spawn_t": 4.7,
+   "path": [
+    [
+     197.65,
+     -3.78
+    ],
+    [
+     197.65,
+     19.55
+    ]
+   ],
+   "speed": 1.31,
+   "hold_end": false
+  },
+  {
+   "cls": "pedestrian",
+   "spawn_t": 1.9,
+   "path": [
+    [
+     23.12,
+     22.02
+    ],
+    [
+     23.12,
+     -2.05
+    ]
+   ],
+   "speed": 1.07,
+   "hold_end": false
+  },
+  {
+   "cls": "pedestrian",
+   "spawn_t": 0.0,
+   "path": [
+    [
+     25.3,
+     20.31
+    ],
+    [
+     25.3,
+     -2.05
+    ]
+   ],
+   "speed": 0.88,
+   "hold_end": false
+  },
+  {
+   "cls": "vehicle",
+   "spawn_t": 4.9,
+   "path": [
+    [
+     119.0,
+     -55.0
+    ],
+    [
+     119.0,
+     -40.83
+    ],
+    [
+     119.0,
+     -26.67
+    ],
+    [
+     119.0,
+     -12.5
+    ],
+    [
+     119.0,
+     1.67
+    ],
+    [
+     119.0,
+     15.83
+    ],
+    [
+     119.0,
+     30.0
+    ],
+    [
+     119.0,
+     44.17
+    ],
+    [
+     119.0,
+     58.33
+    ],
+    [
+     119.0,
+     72.5
+    ]
+   ],
+   "speed": 4.5,
+   "hold_end": false
+  }
+ ],
+ "params": {},
+ "t_max": 35.0
+}

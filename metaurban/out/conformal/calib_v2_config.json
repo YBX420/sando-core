@@ -1,5 +1,5 @@
 {
- "spec": "FS3C-R theta2",
+ "spec": "FS3C-R theta2 poolv4",
  "date": "2026-07-07",
  "AGE_MIN": 4,
  "GRID": [
@@ -275,6 +275,41 @@
   "crowd_dense",
   "fast_overtake",
   "gauntlet",
+  "gen_pool_00",
+  "gen_pool_01",
+  "gen_pool_02",
+  "gen_pool_03",
+  "gen_pool_04",
+  "gen_pool_05",
+  "gen_pool_06",
+  "gen_pool_07",
+  "gen_pool_08",
+  "gen_pool_09",
+  "gen_pool_10",
+  "gen_pool_11",
+  "gen_pool_12",
+  "gen_pool_13",
+  "gen_pool_14",
+  "gen_pool_15",
+  "gen_pool_16",
+  "gen_pool_17",
+  "gen_pool_18",
+  "gen_pool_19",
+  "gen_pool_c00",
+  "gen_pool_c01",
+  "gen_pool_c02",
+  "gen_pool_c03",
+  "gen_pool_c04",
+  "gen_pool_c05",
+  "gen_pool_c06",
+  "gen_pool_c07",
+  "gen_pool_c08",
+  "gen_pool_c09",
+  "gen_pool_c10",
+  "gen_pool_c11",
+  "gen_pool_c12",
+  "gen_pool_c13",
+  "gen_pool_c14",
   "head_on",
   "occlusion_reveal",
   "props_alley",
@@ -482,7 +517,684 @@
  },
  "RETIRED_TO_DESIGN": [
   "SEEDS_FOLDB",
-  "SEEDS_TEST"
+  "SEEDS_TEST",
+  "SEEDS_FOLDB2",
+  "SEEDS_TEST2",
+  "SEEDS_FOLDB3",
+  "SEEDS_TEST3"
  ],
- "config_sha256": "06ecfed6e68b7ec8"
+ "SEEDS_FOLDB3": {
+  "climb_trap": 61251288,
+  "crossers": 60394257,
+  "crowd_dense": 60837180,
+  "fast_overtake": 63303204,
+  "gauntlet": 68007936,
+  "gen_pool_00": 66139676,
+  "gen_pool_01": 63327481,
+  "gen_pool_02": 61611991,
+  "gen_pool_03": 63025714,
+  "gen_pool_04": 67036043,
+  "gen_pool_05": 68820526,
+  "gen_pool_06": 67867776,
+  "gen_pool_07": 64072677,
+  "gen_pool_08": 67245811,
+  "gen_pool_09": 61928982,
+  "gen_pool_10": 61832684,
+  "gen_pool_11": 61247049,
+  "gen_pool_12": 67486119,
+  "gen_pool_13": 68771842,
+  "gen_pool_14": 62742907,
+  "gen_pool_15": 61493406,
+  "gen_pool_16": 67884848,
+  "gen_pool_17": 61443029,
+  "gen_pool_18": 63892675,
+  "gen_pool_19": 61446694,
+  "head_on": 64395425,
+  "occlusion_reveal": 67254000,
+  "props_alley": 61511776,
+  "roundabout_rush": 65570381,
+  "speed_sweep": 67795177,
+  "street_life": 60839719,
+  "veh_cal_0": 61820948,
+  "veh_cal_1": 61053745,
+  "veh_cal_2": 61022239,
+  "veh_cal_3": 65900154,
+  "veh_cal_4": 60438403,
+  "vehicle_spawn_accel": 63406935,
+  "wall_and_crosser": 61213849,
+  "street_busy_s0": 63042284,
+  "street_busy_s0_alt1": 65133334,
+  "street_busy_s1": 62054089,
+  "street_busy_s1_alt1": 68594901,
+  "street_busy_s2": 65405543,
+  "street_busy_s2_alt1": 65795984,
+  "street_busy_s3": 64643138,
+  "street_busy_s3_alt1": 63925075,
+  "street_rush_s0": 63404286,
+  "street_rush_s0_alt1": 61958090,
+  "street_rush_s1": 62669403,
+  "street_rush_s1_alt1": 61908553,
+  "street_rush_s2": 61520117,
+  "street_rush_s2_alt1": 60013836,
+  "street_rush_s3": 68461968,
+  "street_rush_s3_alt1": 67472719
+ },
+ "SEEDS_TEST3": {
+  "climb_trap": [
+   73709136,
+   71033862
+  ],
+  "crossers": [
+   76212728,
+   78789486
+  ],
+  "crowd_dense": [
+   75967283,
+   71916965
+  ],
+  "fast_overtake": [
+   78421575,
+   70078609
+  ],
+  "gauntlet": [
+   71589107,
+   77889253
+  ],
+  "gen_pool_00": [
+   77456231,
+   73072881
+  ],
+  "gen_pool_01": [
+   74498135,
+   72181953
+  ],
+  "gen_pool_02": [
+   73334791,
+   76955729
+  ],
+  "gen_pool_03": [
+   78811383,
+   74724961
+  ],
+  "gen_pool_04": [
+   73035047,
+   74235249
+  ],
+  "gen_pool_05": [
+   72144151,
+   71277121
+  ],
+  "gen_pool_06": [
+   74041159,
+   75438417
+  ],
+  "gen_pool_07": [
+   71810423,
+   71914977
+  ],
+  "gen_pool_08": [
+   78022950,
+   74027120
+  ],
+  "gen_pool_09": [
+   71865878,
+   78162176
+  ],
+  "gen_pool_10": [
+   71638402,
+   76793620
+  ],
+  "gen_pool_11": [
+   70173554,
+   72504292
+  ],
+  "gen_pool_12": [
+   74149666,
+   72075124
+  ],
+  "gen_pool_13": [
+   74024658,
+   77351108
+  ],
+  "gen_pool_14": [
+   75213250,
+   74027668
+  ],
+  "gen_pool_15": [
+   70923954,
+   72562788
+  ],
+  "gen_pool_16": [
+   75817314,
+   73660148
+  ],
+  "gen_pool_17": [
+   72093330,
+   73535108
+  ],
+  "gen_pool_18": [
+   74882691,
+   71424917
+  ],
+  "gen_pool_19": [
+   77994547,
+   70938277
+  ],
+  "head_on": [
+   73268522,
+   70419900
+  ],
+  "occlusion_reveal": [
+   72127449,
+   71970127
+  ],
+  "props_alley": [
+   71118026,
+   73450844
+  ],
+  "roundabout_rush": [
+   77496210,
+   74796356
+  ],
+  "speed_sweep": [
+   73868468,
+   75473186
+  ],
+  "street_life": [
+   73339368,
+   70191998
+  ],
+  "veh_cal_0": [
+   78513374,
+   77771464
+  ],
+  "veh_cal_1": [
+   70183726,
+   70734520
+  ],
+  "veh_cal_2": [
+   76732094,
+   76187240
+  ],
+  "veh_cal_3": [
+   70191566,
+   71713944
+  ],
+  "veh_cal_4": [
+   77998878,
+   75033288
+  ],
+  "vehicle_spawn_accel": [
+   75973254,
+   78684880
+  ],
+  "wall_and_crosser": [
+   76765616,
+   75622310
+  ],
+  "street_busy_s0": [
+   72813327,
+   77575321
+  ],
+  "street_busy_s0_alt1": [
+   76941718,
+   73070976
+  ],
+  "street_busy_s1": [
+   76154175,
+   78091689
+  ],
+  "street_busy_s1_alt1": [
+   75748776,
+   77154238
+  ],
+  "street_busy_s2": [
+   76579247,
+   74111481
+  ],
+  "street_busy_s2_alt1": [
+   76326763,
+   71010237
+  ],
+  "street_busy_s3": [
+   72259935,
+   75193161
+  ],
+  "street_busy_s3_alt1": [
+   74995669,
+   76519811
+  ],
+  "street_rush_s0": [
+   75743921,
+   70685927
+  ],
+  "street_rush_s0_alt1": [
+   78776087,
+   71415105
+  ],
+  "street_rush_s1": [
+   77594817,
+   73986007
+  ],
+  "street_rush_s1_alt1": [
+   72341673,
+   76188287
+  ],
+  "street_rush_s2": [
+   78235153,
+   76890567
+  ],
+  "street_rush_s2_alt1": [
+   71207274,
+   74013628
+  ],
+  "street_rush_s3": [
+   73262561,
+   76108983
+  ],
+  "street_rush_s3_alt1": [
+   72688148,
+   76137474
+  ]
+ },
+ "FAMILIES": {
+  "gen_pool": [
+   "gen_pool_00",
+   "gen_pool_01",
+   "gen_pool_02",
+   "gen_pool_03",
+   "gen_pool_04",
+   "gen_pool_05",
+   "gen_pool_06",
+   "gen_pool_07",
+   "gen_pool_08",
+   "gen_pool_09",
+   "gen_pool_10",
+   "gen_pool_11",
+   "gen_pool_12",
+   "gen_pool_13",
+   "gen_pool_14",
+   "gen_pool_15",
+   "gen_pool_16",
+   "gen_pool_17",
+   "gen_pool_18",
+   "gen_pool_19"
+  ],
+  "street": [
+   "street_life",
+   "street_busy_s0",
+   "street_busy_s0_alt1",
+   "street_busy_s1",
+   "street_busy_s1_alt1",
+   "street_busy_s2",
+   "street_busy_s2_alt1",
+   "street_busy_s3",
+   "street_busy_s3_alt1",
+   "street_rush_s0",
+   "street_rush_s0_alt1",
+   "street_rush_s1",
+   "street_rush_s1_alt1",
+   "street_rush_s2",
+   "street_rush_s2_alt1",
+   "street_rush_s3",
+   "street_rush_s3_alt1"
+  ],
+  "veh_cal": [
+   "veh_cal_0",
+   "veh_cal_1",
+   "veh_cal_2",
+   "veh_cal_3",
+   "veh_cal_4"
+  ]
+ },
+ "SEEDS_FOLDB4": {
+  "climb_trap": 85348155,
+  "crossers": 88069810,
+  "crowd_dense": 86269983,
+  "fast_overtake": 82365767,
+  "gauntlet": 84849763,
+  "gen_pool_00": 87771775,
+  "gen_pool_01": 85901658,
+  "gen_pool_02": 88603252,
+  "gen_pool_03": 81153553,
+  "gen_pool_04": 80057640,
+  "gen_pool_05": 82593165,
+  "gen_pool_06": 84529699,
+  "gen_pool_07": 82291142,
+  "gen_pool_08": 84732624,
+  "gen_pool_09": 87083381,
+  "gen_pool_10": 82794767,
+  "gen_pool_11": 84148970,
+  "gen_pool_12": 87936964,
+  "gen_pool_13": 84098849,
+  "gen_pool_14": 88175704,
+  "gen_pool_15": 81196093,
+  "gen_pool_16": 84829395,
+  "gen_pool_17": 88721142,
+  "gen_pool_18": 82886048,
+  "gen_pool_19": 87882373,
+  "gen_pool_c00": 80871309,
+  "gen_pool_c01": 82923816,
+  "gen_pool_c02": 82317574,
+  "gen_pool_c03": 86175907,
+  "gen_pool_c04": 86681370,
+  "gen_pool_c05": 88068991,
+  "gen_pool_c06": 86833873,
+  "gen_pool_c07": 82963636,
+  "gen_pool_c08": 85923426,
+  "gen_pool_c09": 87164039,
+  "gen_pool_c10": 88306941,
+  "gen_pool_c11": 81875608,
+  "gen_pool_c12": 88572086,
+  "gen_pool_c13": 86301139,
+  "gen_pool_c14": 85104170,
+  "head_on": 88960514,
+  "occlusion_reveal": 81945427,
+  "props_alley": 83230659,
+  "roundabout_rush": 88829742,
+  "speed_sweep": 80134794,
+  "street_life": 81324612,
+  "veh_cal_0": 82832119,
+  "veh_cal_1": 84054546,
+  "veh_cal_2": 87261500,
+  "veh_cal_3": 84323545,
+  "veh_cal_4": 82032352,
+  "vehicle_spawn_accel": 80669172,
+  "wall_and_crosser": 81672442,
+  "street_busy_s0": 82813391,
+  "street_busy_s0_alt1": 87575605,
+  "street_busy_s1": 85706474,
+  "street_busy_s1_alt1": 80226550,
+  "street_busy_s2": 85819460,
+  "street_busy_s2_alt1": 88505971,
+  "street_busy_s3": 87002017,
+  "street_busy_s3_alt1": 82207984,
+  "street_rush_s0": 85585437,
+  "street_rush_s0_alt1": 84558505,
+  "street_rush_s1": 84710904,
+  "street_rush_s1_alt1": 88495530,
+  "street_rush_s2": 80060438,
+  "street_rush_s2_alt1": 81393391,
+  "street_rush_s3": 86057139,
+  "street_rush_s3_alt1": 82103404
+ },
+ "SEEDS_TEST4": {
+  "climb_trap": [
+   96713431,
+   96013825
+  ],
+  "crossers": [
+   97417215,
+   95473449
+  ],
+  "crowd_dense": [
+   90223668,
+   90899106
+  ],
+  "fast_overtake": [
+   90395072,
+   90120854
+  ],
+  "gauntlet": [
+   95537460,
+   94829666
+  ],
+  "gen_pool_00": [
+   93323680,
+   98089846
+  ],
+  "gen_pool_01": [
+   91075984,
+   94582214
+  ],
+  "gen_pool_02": [
+   95867264,
+   93403670
+  ],
+  "gen_pool_03": [
+   94960560,
+   90462502
+  ],
+  "gen_pool_04": [
+   94151136,
+   94141046
+  ],
+  "gen_pool_05": [
+   90643536,
+   91893318
+  ],
+  "gen_pool_06": [
+   94787264,
+   93805590
+  ],
+  "gen_pool_07": [
+   91846128,
+   92898854
+  ],
+  "gen_pool_08": [
+   94503201,
+   90656375
+  ],
+  "gen_pool_09": [
+   96833233,
+   90952455
+  ],
+  "gen_pool_10": [
+   96682117,
+   90861139
+  ],
+  "gen_pool_11": [
+   92942325,
+   90753059
+  ],
+  "gen_pool_12": [
+   92528613,
+   94711923
+  ],
+  "gen_pool_13": [
+   97222357,
+   93262851
+  ],
+  "gen_pool_14": [
+   93448133,
+   94775251
+  ],
+  "gen_pool_15": [
+   93340085,
+   91035427
+  ],
+  "gen_pool_16": [
+   94421925,
+   95946099
+  ],
+  "gen_pool_17": [
+   92972885,
+   91639811
+  ],
+  "gen_pool_18": [
+   90313860,
+   93880402
+  ],
+  "gen_pool_19": [
+   92374068,
+   98797282
+  ],
+  "gen_pool_c00": [
+   95818639,
+   96290201
+  ],
+  "gen_pool_c01": [
+   90941247,
+   90152873
+  ],
+  "gen_pool_c02": [
+   96385775,
+   96643897
+  ],
+  "gen_pool_c03": [
+   98720159,
+   96943817
+  ],
+  "gen_pool_c04": [
+   95096911,
+   97824921
+  ],
+  "gen_pool_c05": [
+   97959615,
+   92947497
+  ],
+  "gen_pool_c06": [
+   91789551,
+   95496889
+  ],
+  "gen_pool_c07": [
+   92089503,
+   97831241
+  ],
+  "gen_pool_c08": [
+   92770958,
+   93629528
+  ],
+  "gen_pool_c09": [
+   91859902,
+   90684520
+  ],
+  "gen_pool_c10": [
+   98643754,
+   96593084
+  ],
+  "gen_pool_c11": [
+   98145050,
+   90726092
+  ],
+  "gen_pool_c12": [
+   96466442,
+   95403740
+  ],
+  "gen_pool_c13": [
+   98530490,
+   91324972
+  ],
+  "gen_pool_c14": [
+   96958698,
+   95023420
+  ],
+  "head_on": [
+   90859053,
+   93849211
+  ],
+  "occlusion_reveal": [
+   92709406,
+   93499720
+  ],
+  "props_alley": [
+   95148749,
+   91658651
+  ],
+  "roundabout_rush": [
+   91556821,
+   90849027
+  ],
+  "speed_sweep": [
+   98729011,
+   91499109
+  ],
+  "street_life": [
+   92234543,
+   90281081
+  ],
+  "veh_cal_0": [
+   96335705,
+   97710607
+  ],
+  "veh_cal_1": [
+   91845545,
+   91186047
+  ],
+  "veh_cal_2": [
+   97313785,
+   97717103
+  ],
+  "veh_cal_3": [
+   90260873,
+   98404319
+  ],
+  "veh_cal_4": [
+   94031001,
+   96887823
+  ],
+  "vehicle_spawn_accel": [
+   98383745,
+   95256599
+  ],
+  "wall_and_crosser": [
+   96077879,
+   97329889
+  ],
+  "street_busy_s0": [
+   97659528,
+   91707486
+  ],
+  "street_busy_s0_alt1": [
+   97004753,
+   95250311
+  ],
+  "street_busy_s1": [
+   98725432,
+   96405102
+  ],
+  "street_busy_s1_alt1": [
+   95892719,
+   94902841
+  ],
+  "street_busy_s2": [
+   94762472,
+   96814718
+  ],
+  "street_busy_s2_alt1": [
+   94791340,
+   93434170
+  ],
+  "street_busy_s3": [
+   95261912,
+   91171342
+  ],
+  "street_busy_s3_alt1": [
+   96328466,
+   94171268
+  ],
+  "street_rush_s0": [
+   96858870,
+   90590560
+  ],
+  "street_rush_s0_alt1": [
+   94046608,
+   95258118
+  ],
+  "street_rush_s1": [
+   96093062,
+   94601040
+  ],
+  "street_rush_s1_alt1": [
+   97277870,
+   92273976
+  ],
+  "street_rush_s2": [
+   98982422,
+   95258880
+  ],
+  "street_rush_s2_alt1": [
+   95443885,
+   96536699
+  ],
+  "street_rush_s3": [
+   93299430,
+   97094000
+  ],
+  "street_rush_s3_alt1": [
+   97248659,
+   93690565
+  ]
+ },
+ "config_sha256": "72551b68962ccb5f"
 }

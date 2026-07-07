@@ -18,7 +18,7 @@ import sys
 import zlib
 
 ap = argparse.ArgumentParser()
-ap.add_argument("--mode", choices=["foldB", "test", "vehA", "foldB2", "test2"], required=True)
+ap.add_argument("--mode", choices=["foldB", "test", "vehA", "foldB2", "test2", "foldB3", "test3", "foldB4", "test4"], required=True)
 args = ap.parse_args()
 
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, HERE); os.chdir(HERE)
@@ -46,6 +46,14 @@ elif args.mode == "test":
     jobs = [(n, s) for n in POOL for s in CFG["SEEDS_TEST"][n]]
 elif args.mode == "test2":
     jobs = [(n, s) for n in POOL for s in CFG["SEEDS_TEST2"][n]]
+elif args.mode == "foldB3":
+    jobs = [(n, CFG["SEEDS_FOLDB3"][n]) for n in POOL]
+elif args.mode == "test3":
+    jobs = [(n, s) for n in POOL for s in CFG["SEEDS_TEST3"][n]]
+elif args.mode == "foldB4":
+    jobs = [(n, CFG["SEEDS_FOLDB4"][n]) for n in POOL]
+elif args.mode == "test4":
+    jobs = [(n, s) for n in POOL for s in CFG["SEEDS_TEST4"][n]]
 else:  # vehA: design-domain vehicle boost (veh_cal x22 + street x6 fresh-A seeds)
     veh = [n for n in POOL if n.startswith("veh_cal")]
     street = [n for n in POOL if n.startswith("street_")]

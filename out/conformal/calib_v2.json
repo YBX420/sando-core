@@ -1,21 +1,21 @@
 {
  "provenance": {
   "spec": "FS3C-R theta2",
-  "config_sha": "06ecfed6e68b7ec8",
-  "n_foldB2_flights": 27,
+  "config_sha": "715766e766753dc4",
+  "n_foldB2_flights": 34,
   "date": "2026-07-07"
  },
  "groups": {
   "pedestrian": {
    "levels": {
     "0.05": {
-     "q_conformal": 2.8806,
-     "v_eff": 1.0396,
+     "q_conformal": 1.6572,
+     "v_eff": 1.0193,
      "status": "MAX_RANK_WARNING"
     },
     "0.1": {
-     "q_conformal": 1.5267,
-     "v_eff": 1.0396,
+     "q_conformal": 1.2346,
+     "v_eff": 1.0193,
      "status": "ok"
     }
    }
@@ -23,13 +23,13 @@
   "vehicle": {
    "levels": {
     "0.05": {
-     "q_conformal": 4.764,
-     "v_eff": 0.9306,
+     "q_conformal": 2.4194,
+     "v_eff": 0.9536,
      "status": "MAX_RANK_WARNING"
     },
     "0.1": {
-     "q_conformal": 2.5908,
-     "v_eff": 0.9306,
+     "q_conformal": 1.8801,
+     "v_eff": 0.9536,
      "status": "ok"
     }
    }
@@ -47,12 +47,12 @@
   "static": {
    "levels": {
     "0.05": {
-     "q_conformal": 0.565,
+     "q_conformal": 0.3169,
      "v_eff": 0.0,
      "status": "MAX_RANK_WARNING"
     },
     "0.1": {
-     "q_conformal": 0.3606,
+     "q_conformal": 0.2723,
      "v_eff": 0.0,
      "status": "ok"
     }
@@ -62,31 +62,31 @@
  "young": {
   "pedestrian": {
    "0.05": {
-    "q0y": 3.6304,
+    "q0y": 2.2888,
     "growth": 2.2
    },
    "0.1": {
-    "q0y": 2.4853,
+    "q0y": 2.0341,
     "growth": 2.2
    }
   },
   "vehicle": {
    "0.05": {
-    "q0y": 35.1132,
+    "q0y": 18.2894,
     "growth": 11.0
    },
    "0.1": {
-    "q0y": 20.3277,
+    "q0y": 14.9415,
     "growth": 11.0
    }
   },
   "static": {
    "0.05": {
-    "q0y": 0.9295,
+    "q0y": 0.3881,
     "growth": 0.0
    },
    "0.1": {
-    "q0y": 0.5792,
+    "q0y": 0.3389,
     "growth": 0.0
    }
   }
@@ -94,31 +94,31 @@
  "flags": [],
  "validation": {
   "0.05": {
-   "test2_flight_coverage": 0.9804,
-   "n_test2": 51,
-   "mondrian": "{'pedestrian': (0.98, 51), 'vehicle': (1.0, 13), 'static': (1.0, 6)}"
+   "test2_flight_coverage": 0.9545,
+   "n_test2": 66,
+   "mondrian": "{'pedestrian': (0.954, 65), 'vehicle': (1.0, 15), 'static': (1.0, 6)}"
   },
   "0.1": {
-   "test2_flight_coverage": 0.8627,
-   "n_test2": 51,
-   "mondrian": "{'pedestrian': (0.863, 51), 'vehicle': (1.0, 13), 'static': (1.0, 6)}"
+   "test2_flight_coverage": 0.9242,
+   "n_test2": 66,
+   "mondrian": "{'pedestrian': (0.923, 65), 'vehicle': (1.0, 15), 'static': (1.0, 6)}"
   }
  },
  "deployability": {
   "pedestrian": {
-   "tube@0.3": 3.19,
-   "tube@0.75": 3.66,
-   "tube@1.05": 3.97
+   "tube@0.3": 1.96,
+   "tube@0.75": 2.42,
+   "tube@1.05": 2.73
   },
   "vehicle": {
-   "tube@0.3": 5.04,
-   "tube@0.75": 5.46,
-   "tube@1.05": 5.74
+   "tube@0.3": 2.71,
+   "tube@0.75": 3.13,
+   "tube@1.05": 3.42
   },
   "static": {
-   "tube@0.3": 0.56,
-   "tube@0.75": 0.56,
-   "tube@1.05": 0.56
+   "tube@0.3": 0.32,
+   "tube@0.75": 0.32,
+   "tube@1.05": 0.32
   }
  }
 }
