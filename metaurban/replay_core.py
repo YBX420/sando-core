@@ -26,8 +26,16 @@ OUTDIR = os.path.join(os.path.dirname(HERE), "out", "conformal")
 
 # B-bucket deployment-in-the-loop residual harvest (activated by b_bucket_recalibrate.py, not env):
 PERCEPT_HARVEST = None            # set to a list to collect (Delta, resid, age, cls, ep_id) tuples
-_HARV_DELTAS = (0.10, 0.25, 0.40, 0.55, 0.70, 0.85)   # elapsed-since-detection grid, covers TAU+delta=0.85
+_HARV_DELTAS = (tuple(float(x) for x in os.environ["HARV_DELTAS"].split(","))
+                if "HARV_DELTAS" in os.environ else
+                (0.10, 0.25, 0.40, 0.55, 0.70, 0.85))   # legacy grid; FS3C-R passes 0.00..1.05/0.05
 _HARV_EP = [0]
+# FS3C-R harvest v2 (HARV_V2=1): per-row scenario name, young-arm frozen scoring, A2 presence-miss
+_HARV_V2 = os.environ.get("HARV_V2", "0") == "1"
+_HARV_AGEMIN = int(os.environ.get("HARV_AGE_MIN", "4"))
+_HARV_SCN = [""]
+_HARV_RHO = json.loads(os.environ["HARV_RHO"]) if "HARV_RHO" in os.environ else None
+PERCEPT_A2 = None                 # set to dict(miss_ticks=0, qual_ticks=0) by the v2 driver
 
 # ---- geometry / dynamics ----
 DT = 0.30; TAU = 0.75; DELTA = DT
@@ -44,6 +52,9 @@ CRET_GLIDE = os.environ.get("CRET_GLIDE", "0") == "1"   # task#7: on 'evade', tr
 #   mover-speed-limited freezes into certified slow progress. Default OFF = frozen behaviour.
 CRET_GLIDE_SMIN = float(os.environ.get("CRET_GLIDE_SMIN", "0.10"))
 VERDICT3_LOG = os.environ.get("VERDICT3_LOG", "0") == "1"
+CALIB_V2 = os.environ.get("CALIB_V2", "0") == "1"   # FS3C-R era switch: SL loader (static/animal keys,
+#   fail-closed semantics) + code-level static stationarity in cylinders. Flips WHOLESALE with the
+#   new calib at Stage-C validation; default OFF = frozen benchmark behaviour.
 DECIDE = os.environ.get("DECIDE", "v1")   # "v1" frozen tournament | "v2" unified direction-x-speed
 #   grid (SL.maneuver_decide_v2: speed as a first-class dimension, built-in commitment; task#8)   # log the 3-valued cert verdict on evade
 #   ticks into hist (DNF-seed diagnosis: UNKNOWN -> deepen budget; REFUTED -> genuinely boxed)
@@ -222,7 +233,7 @@ def run_replay(movers, ep, mode="ours", calib=None, predict=True, max_vel=3.0, m
     tick_cb(info): optional per-tick hook for live/3D visualisation -- called after each decision+step with
     dict(tick, t, p (LOCAL frame; add back org=midpoint(start,goal) for world), kind, clr). Keep it fast;
     it runs inside the control loop."""
-    calib = calib or load_calib()
+    calib = calib or (SL.load_calib() if CALIB_V2 else load_calib())
     # work in a LOCAL frame centred on the corridor midpoint: MetaUrban world coords span hundreds of metres,
     # so a global grid would be billions of voxels. Translate everything by -org -> a small local map suffices.
     org = 0.5 * (ep["start"][:2] + ep["goal"][:2])
@@ -380,6 +391,24 @@ def run_replay(movers, ep, mode="ours", calib=None, predict=True, max_vel=3.0, m
                           for i in idx]
                 ptracks = percept_fe.step(p_d[:2], hd, gt_cyl)
                 percepts = [(tr.trk, tr.xy, tr.r, tr.h, tr.cls) for tr in ptracks]
+                if PERCEPT_A2 is not None and _HARV_RHO is not None:
+                    # A2 presence-miss (FS3C-R): a tick where some in-rho_c GT mover has NO ready
+                    # representation -- the measured epsilon_miss term of the ledger.
+                    _rxy = [np.asarray(tr.xy[:2], float) for tr in ptracks if tr.trk.ready]
+                    _anyq = False
+                    for _i in idx:
+                        _rho = _HARV_RHO.get(movers.m[_i]["cls"])
+                        if _rho is None:
+                            continue
+                        _gp = pos_l(_i, t)
+                        if float(np.hypot(*(_gp - p_d[:2]))) > _rho:
+                            continue
+                        _anyq = True
+                        if not any(float(np.hypot(*(_gp - _q))) < 2.0 for _q in _rxy):
+                            PERCEPT_A2["miss_ticks"] += 1
+                            break
+                    if _anyq:
+                        PERCEPT_A2["qual_ticks"] += 1
                 if PERCEPT_HARVEST is not None:
                     # DEPLOYMENT-IN-THE-LOOP residual harvest (B-bucket CRITICAL#1): score the DEPLOYED
                     # tracks' predictions against the nearest GT mover's true future -- association error,
@@ -405,7 +434,7 @@ def run_replay(movers, ep, mode="ours", calib=None, predict=True, max_vel=3.0, m
                         for dh in _HARV_DELTAS:
                             if not movers.present(gi, t + dh):
                                 continue                    # mover leaves the world: nothing to predict
-                            if str(tr.cls) == "static":
+                            if str(tr.cls) == "static" or (_HARV_V2 and int(tr.trk.n) < _HARV_AGEMIN):
                                 # STATIC-STATIONARY predictor (2026-07-07): a static's future = its
                                 # present. Scoring statics with the CV extrapolation charged them
                                 # for KF velocity noise -> mover-sized tubes -> keep-out walls.
@@ -416,7 +445,8 @@ def run_replay(movers, ep, mode="ours", calib=None, predict=True, max_vel=3.0, m
                                 pred = tr.trk.predict([dh], model=PRED_MODEL)[0, :2]
                             resid = float(np.hypot(*(pos_l(gi, t + dh) - pred)))
                             PERCEPT_HARVEST.append((float(dh), resid, int(tr.trk.n),
-                                                    str(tr.cls), int(_HARV_EP[0]), d_drone))
+                                                    str(tr.cls), int(_HARV_EP[0]), d_drone)
+                                                   + ((_HARV_SCN[0],) if _HARV_V2 else ()))
             else:
                 percepts = [(trackers[i], dets[i], movers.m[i]["r"], movers.m[i]["h"], movers.m[i]["cls"])
                             for i in near]

@@ -64,6 +64,9 @@ def build_cylinders(movers, calib, predict=True, track_margin=0.0):
         vv = np.asarray(vel, float).copy(); aa = np.asarray(acc, float).copy()
         if not predict:
             vv = np.zeros(3); aa = np.zeros(3)
+        if os.environ.get("CALIB_V2", "0") == "1" and str(cls) == "static":
+            vv = np.zeros(3); aa = np.zeros(3)     # FS3C-R #13: statics are STATIONARY at code level
+            #   (KF v on a static is measurement noise; calib static law is v=0 -- must match)
         R = float(r_obs) + R_DRONE + D_SAFE_H + q + track_margin
         zc = float(h) + REACH_PAD + R_DRONE + D_SAFE_V + q + track_margin
         cyl.append((np.asarray(c0, float), vv, aa, R, zc, veff)); ztop = max(ztop, zc + 0.2)

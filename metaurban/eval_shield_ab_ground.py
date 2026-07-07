@@ -32,6 +32,9 @@ ap.add_argument("--out", type=str, default="")
 args = ap.parse_args()
 os.chdir(_HERE)
 stamp = time.strftime("%Y%m%d_%H%M%S")
+FPRINT = {k: os.environ.get(k, "") for k in
+          ("SHIELD_EPS", "SHIELD_PERCLASS", "DECIDE", "SMOOTH", "RADIUS_CONSIST", "CRET_GLIDE",
+           "CALIB_V2", "PERCEPT", "PERCEPT_SEED", "PRED_MODEL", "DYN_TRACK")}
 OUT = args.out or f"out/ppo_eval/ab_{stamp}"
 os.makedirs(OUT, exist_ok=True)
 
@@ -58,6 +61,8 @@ def run_arm(name, shielded):
     sh = inner[0].sh if shielded else None
 
     jl = open(os.path.join(OUT, f"{name}.jsonl"), "a")
+    jl.write(json.dumps(dict(config_fingerprint=FPRINT, model=args.model, n_ep=args.n_ep,
+                             seed=args.seed)) + "\n"); jl.flush()
     obs = venv.reset()
     eps, t0 = [], time.time()
     while len(eps) < args.n_ep:
@@ -137,7 +142,8 @@ except Exception as e:
 
 out = "\n\n".join([
     f"# shield ON/OFF campaign  ({time.strftime('%Y-%m-%d %H:%M')})  "
-    f"model={args.model}  n={args.n_ep}/arm  seed={args.seed} (paired scenarios)",
+    f"model={args.model}  n={args.n_ep}/arm  seed={args.seed} (same-seed stream, NOT strictly paired)\n"
+    f"config: {json.dumps(FPRINT)}",
     blk_s, blk_b, stat_line,
 ])
 print(out, flush=True)
