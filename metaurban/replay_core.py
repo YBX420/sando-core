@@ -487,9 +487,29 @@ def run_replay(movers, ep, mode="ours", calib=None, predict=True, max_vel=3.0, m
                             for i in near]
             # near-term predicted cloud for EGO's grid
             cloud = []
+            _cpa = os.environ.get("CPA_CLOUD", "0") == "1"
             for (trk, dxy, r_o, h_o, _c) in percepts:
-                xy = trk.predict(np.linspace(0, DT, 2), model=PRED_MODEL)[:, :2] if trk.ready \
-                    else np.asarray(dxy, float)[None, :2]
+                if _cpa and trk.ready and int(getattr(trk, 'n', 0)) >= 4:
+                    # ANTICIPATORY OCCUPANCY -- MATURE TRACKS ONLY (vehicle_spawn_accel autopsy
+                    # 2026-07-08: a just-spawned accelerating vehicle has a stale-low KF velocity;
+                    # CPA placement trusted it and threaded the plan into its acceleration path.
+                    # Anticipate only agents whose running logic is CONVERGED; newborns keep the
+                    # conservative current-position block): block the
+                    # mover where it WILL BE at closest approach of the relative motion -- the
+                    # planner threads the predicted gap instead of dodging the past; the
+                    # certificate still judges the true tubes (safety semantics untouched).
+                    _c0, _vv, _ = trk.state()
+                    _sp = float(np.hypot(v_d[0], v_d[1]))
+                    _gd = (np.asarray(v_d[:2], float) / _sp) if _sp > 0.3 else \
+                        (goal[:2] - p_d[:2]) / max(np.linalg.norm(goal[:2] - p_d[:2]), 1e-6)
+                    _dp = np.asarray(_c0[:2], float) - np.asarray(p_d[:2], float)
+                    _dv = np.asarray(_vv[:2], float) - _gd * max_vel
+                    _dvn = float(_dv @ _dv)
+                    _tc = float(np.clip(-(_dp @ _dv) / _dvn, 0.0, 2.5)) if _dvn > 1e-6 else 0.0
+                    xy = (np.asarray(_c0[:2], float) + np.asarray(_vv[:2], float) * _tc)[None, :]
+                else:
+                    xy = trk.predict(np.linspace(0, DT, 2), model=PRED_MODEL)[:, :2] if trk.ready \
+                        else np.asarray(dxy, float)[None, :2]
                 cloud += _cyl_cloud(xy, _plan_r(r_o, str(_c)), 0.3, h_o)
             ego.update_cloud(np.asarray(cloud, float) if cloud else np.zeros((0, 3)), p_d)
 

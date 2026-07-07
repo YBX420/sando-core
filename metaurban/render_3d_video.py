@@ -1385,12 +1385,30 @@ def fov_cloud(p_drone, heading, t_sim):
     def _seen(c):
         dd = c[:2] - p_drone[:2]; r = float(np.linalg.norm(dd))
         return r <= R and (float(dd @ fwd) / max(r, 1e-6)) >= cmax
+    _eta_on = os.environ.get("ETA_CLOUD", "0") == "1"
+
+    def _eta_pos(pos, vel):
+        # ANTICIPATORY OCCUPANCY (ETA projection): place the mover's planning-obstacle where the
+        # mover WILL BE when the drone ARRIVES there -- "use the agents' running logic to fly
+        # faster/smoother" (the planner threads predicted gaps instead of dodging the past; the
+        # CERTIFICATE still judges the true predicted tubes, so safety semantics are untouched).
+        v_eta = max(0.6 * float(PLN.get("v_max", 6.0)), 1.0)
+        q = np.asarray(pos, float).copy(); vv = np.asarray(vel, float)
+        for _ in range(2):                                  # fixed-point ETA iteration (2 rounds)
+            eta = min(float(np.linalg.norm(q[:2] - p_drone[:2])) / v_eta, 2.5)
+            q = np.asarray(pos, float) + vv * eta
+        return q
+
     for oid, cls, pos, vel, size in native_objects():
         if cls == "static": continue
-        if _seen(p3(pos, size[2] * 0.5)): chunks.append(np.asarray(_voxel_box(pos, size), float))
+        _p = _eta_pos(pos, vel) if _eta_on else pos
+        if _seen(p3(_p, size[2] * 0.5)) or (_eta_on and _seen(p3(pos, size[2] * 0.5))):
+            chunks.append(np.asarray(_voxel_box(_p, size), float))
     for a in animals:
         pos = a.p0 + a.vel * t_sim
-        if _seen(p3(pos, a.size[2] * 0.5)): chunks.append(np.asarray(_voxel_box(pos, a.size), float))
+        _p = _eta_pos(pos, a.vel) if _eta_on else pos
+        if _seen(p3(_p, a.size[2] * 0.5)) or (_eta_on and _seen(p3(pos, a.size[2] * 0.5))):
+            chunks.append(np.asarray(_voxel_box(_p, a.size), float))
     chunks = [c for c in chunks if len(c)]
     return np.concatenate(chunks, axis=0) if chunks else np.zeros((0, 3))
 
