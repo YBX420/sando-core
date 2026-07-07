@@ -403,7 +403,7 @@ def load_calib_v2(eps=0.05):
     """FS3C-R consumer: class -> dict(mature=(q0, v_eff), young=(q0y, growth), status).
     FAIL-CLOSED: an UNCALIBRATED / missing class gets q0=1e6 (nothing near it certifies) and a
     loud log line -- never a silent optimistic fallback (spec ruling #20 / #13)."""
-    path = os.path.join(_OUTDIR, "calib_v2.json")
+    path = (os.environ.get("CALIB_FILE") or os.path.join(_OUTDIR, "calib_v2.json"))
     rep = json.load(open(path))                     # missing file = hard crash, intended
     out = {}
     for cls in ("pedestrian", "vehicle", "animal", "static"):
