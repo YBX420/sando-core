@@ -9,7 +9,7 @@ SC="$(cd "$(dirname "$0")" && pwd)"
 TAG="$1"; shift || true
 cd /media/boxuan/Data2/projects/metaurban
 env PYTHONPATH=/media/boxuan/Data2/projects/metaurban CALIB_V2=1 CALIB_EPS=0.10 DECIDE=v2 "$@" \
-  "$HOME/miniconda3/envs/metaurban/bin/python" "$SC/ego_mu_bench.py" --tag "$TAG" \
+  "$HOME/miniconda3/envs/metaurban/bin/python" "$SC/ego_mu_bench.py" --tag "$TAG" --episodes "${EPISODES:-10}" \
   2>&1 | grep -E "^\[$TAG\]"
 echo
 echo "================ 版本进化表(MetaUrban headless,EGO 线,10集/版本)================"
