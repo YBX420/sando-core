@@ -243,7 +243,39 @@ def maneuver_decide_sticky(ego, p_d, v_d, a_d, goal, ztop, clear_fn, state,
     gdir = gxy / dist if dist > 1e-6 else np.array([1.0, 0.0])
     L = min(horizon, max(dist, 1.0))
 
+    _gaps = {}
+    if os.environ.get("GAP_CARROT", "0") == "1" and cyl:
+        # WORLD-AIMED carrots (GapWeave S3): the fixed +-PHI fan is BLIND -- when a crosser owns the
+        # corridor the tournament flip-flops between left/right guesses. Aim instead at the crosser's
+        # WAKE: the point just behind its closest-approach position (pass-behind, the human road-
+        # crossing move); pass-ahead as the alternate. Speed-first ranking untouched.
+        _cand = None
+        for c in cyl:
+            _vv = np.asarray(c[1][:2], float)
+            if float(np.hypot(*_vv)) < 0.5:
+                continue
+            _d = np.asarray(c[0][:2], float) - p_d[:2]
+            _dn = float(np.linalg.norm(_d))
+            if _dn < 1e-6 or float(_d @ gdir) / _dn < 0.2:
+                continue
+            if _cand is None or _dn < _cand[0]:
+                _cand = (_dn, np.asarray(c[0][:2], float), _vv, float(c[3]))
+        if _cand is not None:
+            _, _c0, _vv, _R = _cand
+            _vn = _vv / max(float(np.hypot(*_vv)), 1e-6)
+            _tc = max(0.0, min(2.5, float(-((_c0 - p_d[:2]) @ (_vv - gdir * 3.0))
+                                          / max(float((_vv - gdir * 3.0) @ (_vv - gdir * 3.0)), 1e-6))))
+            _pc = _c0 + _vv * _tc
+            for _tag, _sgn in (("gap_b", -1.0), ("gap_a", +1.0)):
+                _pt = _pc + _vn * _sgn * (_R + 0.8)
+                _dirv = _pt - p_d[:2]
+                _dl = float(np.linalg.norm(_dirv))
+                if _dl > 0.5:
+                    _gaps[_tag] = np.array([*(p_d[:2] + _dirv / _dl * L), cruise_z])
+
     def _gsub(kind):
+        if kind in _gaps:
+            return _gaps[kind]
         if kind == "straight":
             return (np.array([goal[0], goal[1], cruise_z]) if straight_clip is None
                     else np.array([*(p_d[:2] + gdir * min(straight_clip, dist)), cruise_z]))
@@ -370,7 +402,39 @@ def maneuver_decide_v2(ego, p_d, v_d, a_d, goal, ztop, cyl, state,
     gdir = gxy / dist if dist > 1e-6 else np.array([1.0, 0.0])
     L = min(horizon, max(dist, 1.0))
 
+    _gaps = {}
+    if os.environ.get("GAP_CARROT", "0") == "1" and cyl:
+        # WORLD-AIMED carrots (GapWeave S3): the fixed +-PHI fan is BLIND -- when a crosser owns the
+        # corridor the tournament flip-flops between left/right guesses. Aim instead at the crosser's
+        # WAKE: the point just behind its closest-approach position (pass-behind, the human road-
+        # crossing move); pass-ahead as the alternate. Speed-first ranking untouched.
+        _cand = None
+        for c in cyl:
+            _vv = np.asarray(c[1][:2], float)
+            if float(np.hypot(*_vv)) < 0.5:
+                continue
+            _d = np.asarray(c[0][:2], float) - p_d[:2]
+            _dn = float(np.linalg.norm(_d))
+            if _dn < 1e-6 or float(_d @ gdir) / _dn < 0.2:
+                continue
+            if _cand is None or _dn < _cand[0]:
+                _cand = (_dn, np.asarray(c[0][:2], float), _vv, float(c[3]))
+        if _cand is not None:
+            _, _c0, _vv, _R = _cand
+            _vn = _vv / max(float(np.hypot(*_vv)), 1e-6)
+            _tc = max(0.0, min(2.5, float(-((_c0 - p_d[:2]) @ (_vv - gdir * 3.0))
+                                          / max(float((_vv - gdir * 3.0) @ (_vv - gdir * 3.0)), 1e-6))))
+            _pc = _c0 + _vv * _tc
+            for _tag, _sgn in (("gap_b", -1.0), ("gap_a", +1.0)):
+                _pt = _pc + _vn * _sgn * (_R + 0.8)
+                _dirv = _pt - p_d[:2]
+                _dl = float(np.linalg.norm(_dirv))
+                if _dl > 0.5:
+                    _gaps[_tag] = np.array([*(p_d[:2] + _dirv / _dl * L), cruise_z])
+
     def _gsub(kind):
+        if kind in _gaps:
+            return _gaps[kind]
         if kind == "straight":
             return (np.array([goal[0], goal[1], cruise_z]) if straight_clip is None
                     else np.array([*(p_d[:2] + gdir * min(straight_clip, dist)), cruise_z]))
@@ -460,6 +524,10 @@ def maneuver_decide_v2(ego, p_d, v_d, a_d, goal, ztop, cyl, state,
             ("straight", "around_l", "around_r", "around_l2", "around_r2", "soar", "over", "climb")
             if _soar else
             ("straight", "around_l", "around_r", "around_l2", "around_r2", "over", "climb"))
+    if os.environ.get("GAP_CARROT", "0") == "1":
+        DIRS = ("straight", "gap_b", "gap_a") + tuple(k for k in DIRS if k != "straight")
+        #   gap keys ALWAYS in DIRS when the feature is on (blueprint rule): with _gaps empty,
+        #   _gsub returns None and the grid SKIPS them -- incumbent lookups never ValueError
     if _esc_hot:
         # escape family first; WITHIN the family no paternal ordering -- the speed-lexicographic
         # rank decides (user ruling 2026-07-08: "if both certify, the faster gear arrives faster
@@ -481,7 +549,7 @@ def maneuver_decide_v2(ego, p_d, v_d, a_d, goal, ztop, cyl, state,
             state["age"] = 0                                # dwell-gated STRICT upgrade probe
             for uk in DIRS[:DIRS.index(inc)]:
                 gs = _gsub(uk)
-                if ego.replan(p_d, v_d, a_d, gs) and ego.duration() > 1e-3 and _ok_plan():
+                if gs is not None and ego.replan(p_d, v_d, a_d, gs) and ego.duration() > 1e-3 and _ok_plan():
                     s_up = _best_s(strict=True)
                     if s_up >= max(inc_s, speeds[-1]) - 1e-9 and s_up > 0.0:
                         # upgrade must be certified-with-margin AND not slower than the incumbent
@@ -499,6 +567,8 @@ def maneuver_decide_v2(ego, p_d, v_d, a_d, goal, ztop, cyl, state,
     last_replanned = None
     for dk in DIRS:
         gs = _gsub(dk)
+        if gs is None:
+            continue                        # gap carrot with binding mover gone: skip, NEVER replan(None)
         if not (ego.replan(p_d, v_d, a_d, gs) and ego.duration() > 1e-3):
             continue
         last_replanned = dk
@@ -533,6 +603,13 @@ def maneuver_decide_v2(ego, p_d, v_d, a_d, goal, ztop, cyl, state,
     gs = _gsub(dk)
     if last_replanned != dk:
         ego.replan(p_d, v_d, a_d, gs)                       # restore the WINNER's spline (loop clobbered ego)
+        # SOUNDNESS (GapWeave audit 2026-07-08): the restored spline is a FRESH replan, not the one
+        # that was certified in the loop -- poly-init determinism made them coincide historically,
+        # but warm-start / any nondeterminism makes flying it UNCERTIFIED. Re-certify; on failure
+        # fall through to evade (never fly an unrecertified restore).
+        if not _cert_at(s_ok):
+            state.update(kind=None, gsub=None, s=1.0, age=0)
+            return "evade", 0.0
     state.update(kind=dk, gsub=gs, s=s_ok, age=0)
     return dk, s_ok
 
