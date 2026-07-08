@@ -52,6 +52,8 @@ for scn_name in POOL:
             cnt = r.get("counts", {})
             emerg = int(cnt.get("evade", 0)) + int(cnt.get("cret", 0))
             row = dict(scn=scn_name, seed=sd, cfg=args.config, reached=bool(r["reached"]),
+                       start=[round(float(x), 2) for x in ep["start"][:2]],
+                       goal=[round(float(x), 2) for x in ep["goal"][:2]],
                        collided=bool(r["collided"]), min_clr=round(float(r["min_clr"]), 3),
                        t=round(float(r["time_s"]), 1), emerg=emerg,
                        clean=bool(r["reached"] and not r["collided"] and emerg == 0))

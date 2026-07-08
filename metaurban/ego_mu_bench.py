@@ -43,6 +43,8 @@ led = open(os.path.join(_HERE, args.ledger), "a")
 rows = []
 for ep in range(args.episodes):
     env.reset(seed=1000 + ep)                  # same scene sequence for every version tag
+    _start0 = [round(float(x), 2) for x in np.asarray(env.p, float)[:2]]
+    _goal0 = [round(float(x), 2) for x in np.asarray(env.goal, float)[:2]]
     state = {}
     evade = 0
     done = False
@@ -94,6 +96,7 @@ for ep in range(args.episodes):
         _o, _r, term, trunc, info = env.step(act)
         done = term or trunc
     rec = dict(tag=args.tag, ep=ep, reached=bool(info.get("reached")),
+               start=_start0, goal=_goal0,
                collided=bool(info.get("collided")), evade=int(evade),
                min_clr=round(float(info.get("min_clr", np.nan)), 2), ticks=int(env.tick),
                clean=bool(info.get("reached") and not info.get("collided") and evade == 0))
