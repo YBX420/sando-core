@@ -564,24 +564,20 @@ def run_replay(movers, ep, mode="ours", calib=None, predict=True, max_vel=3.0, m
                     _v3st["prim"] = _prim                   # warm-start next tick
                     kind = "cpl"
                 else:
-                    # FALLBACK L1: nothing certified -> BRAKE ALONG CURRENT MOTION (not flee). The
-                    # composite cert is stricter than v2 (it clears the whole stop), so at speed in
-                    # a crowd few candidates pass; braking here settles the drone into the low-speed
-                    # regime where forward candidates certify again -> recursive-feasibility recovery.
-                    _sp = float(np.hypot(v_d[0], v_d[1]))
-                    if _sp > 0.15:
-                        # GENTLE glide-down (not a hard stop): lose ~25%/tick so the drone slows
-                        # into the regime where forward candidates re-certify BEFORE stalling dead.
-                        # A hard brake (v*=0.4) made it stop-and-wait -> timeout without reaching.
-                        _dec = float(os.environ.get("V3_BRAKE_DECAY", "0.75"))
-                        v_ref = v_d * _dec
-                        p_ref = p_d + v_ref * DT
-                        a_ref = np.zeros(3)
+                    # FALLBACK L1 (blueprint 5): nothing in the lattice certified -> fly a CERTIFIED
+                    # brake from the current state. The jerk-limited brake is SMOOTH (continuous
+                    # deceleration, not a discrete hold) AND sound (re-certified this tick). Only if
+                    # even the brake fails to certify do we evade (L3). This resolves the
+                    # continuity-vs-safety tension: smooth AND safe.
+                    _v3st.pop("prim", None)
+                    _bsegs, _bdurs, _btc = _LL.make_composite(
+                        _LL.quintic3(p_d, v_d, a_d, p_d, v_d * 0.0, np.zeros(3), _LL.T_P), max_acc, DT)
+                    _bok, _ = _LL.certify_composite(_bsegs, _bdurs, cyl, _btc, DELTA)
+                    if _bok:
+                        p_ref, v_ref, a_ref = _LL.plan_eval((_bsegs, _bdurs, _btc), DT)
                         kind = "brake"
-                        _v3st.pop("prim", None)
                     else:
-                        _v3st.pop("prim", None)
-                        kind = "evade"                      # already stopped & still nothing -> flee
+                        kind = "evade"                      # even braking uncertifiable -> flee (L3)
                 counts["cpl_cert"] = counts.get("cpl_cert", 0) + _diag["n_cert"]
             elif DECIDE == "v2" and cont_cert:
                 kind, _v2s = SL.maneuver_decide_v2(ego, p_d, v_d, a_d, goal, ztop, cyl, _stick,

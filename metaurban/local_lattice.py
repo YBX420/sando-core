@@ -194,17 +194,27 @@ def candidate_primitives(p, v, a, goal, ztop, v_max, incumbent=None, guide=None)
     sp0 = float(np.linalg.norm(v[:2]))
     L = min(T_P, max(np.linalg.norm(g), 1.0) / max(sp0, 1.0))
     out = []
+    # z-grid (blueprint + user 2026-07-08: a DRONE should use altitude -- climb over movers when the
+    # horizontal is blocked; the certificate's above-branch keeps it sound). Forward headings get a
+    # cruise-altitude grid so "fly higher and continue" is a first-class candidate, not a last resort.
+    import os as _os
+    z_grid = [Z_CRUISE, 2.5, 4.0] if _os.environ.get("V3_ZGRID", "1") == "1" else [Z_CRUISE]
+    z_cap = float(_os.environ.get("V3_ZMAX", str(max(ztop, 5.0))))
     for dpsi in PSI_GRID:
         psi = gpsi + dpsi
         u = np.array([np.cos(psi), np.sin(psi), 0.0])
+        wide = abs(dpsi) > np.radians(50)               # only near-forward headings get the z-grid
         for dv in DV_GRID:
             vT = float(np.clip(sp0 + dv, 0.0, v_max))
             if vT < 0.05 and dv != DV_GRID[-1]:
                 continue
             vTv = u * vT
-            pT = p + 0.5 * (v + vTv) * T_P
-            pT[2] = Z_CRUISE
-            out.append((quintic3(p, v, a, pT, vTv, np.zeros(3), T_P), f"g{int(np.degrees(dpsi))}_{vT:.1f}"))
+            for zc in ([Z_CRUISE] if wide else z_grid):
+                zc = min(zc, z_cap)
+                pT = p + 0.5 * (v + vTv) * T_P
+                pT[2] = zc
+                out.append((quintic3(p, v, a, pT, vTv, np.zeros(3), T_P),
+                            f"g{int(np.degrees(dpsi))}_{vT:.1f}_z{zc:.0f}"))
     # hover (stop in place)
     out.append((quintic3(p, v, a, p, np.zeros(3), np.zeros(3), T_P), "hover"))
     # soar: forward + climb ; climb: up in place
