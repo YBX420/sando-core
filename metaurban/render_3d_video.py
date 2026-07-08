@@ -359,6 +359,26 @@ def _yaw_smooth(raw):
     _YAW_ST[0] = prev + step
     return float(_YAW_ST[0])
 
+
+
+def _telem_row(t, tp, tr, quad_, t_sim):
+    """Extended telemetry row: (t, pitch, roll, |v|, x, y, z, cpd, dxn, dyn, dvxn, dvyn) --
+    cpd = centre distance to nearest non-static mover; dn*/dvn* = that mover's relative position
+    and velocity (raw material for PSC/CPD/TTC standard comfort metrics; radii convention doc'd
+    in docs/comfort-metrics-adoption.md)."""
+    best = (1e9, 0.0, 0.0, 0.0, 0.0)
+    for _oid, _c, _p, _v, _s in native_objects():
+        if _c == "static":
+            continue
+        dx, dy = float(_p[0] - quad_.p[0]), float(_p[1] - quad_.p[1])
+        dd = float(np.hypot(dx, dy))
+        if dd < best[0]:
+            best = (dd, dx, dy, float(_v[0] - quad_.v[0]), float(_v[1] - quad_.v[1]))
+    return (float(t), tp, tr, float(np.linalg.norm(quad_.v)),
+            float(quad_.p[0]), float(quad_.p[1]), float(quad_.p[2]),
+            round(best[0], 3), round(best[1], 3), round(best[2], 3),
+            round(best[3], 3), round(best[4], 3))
+
 quad = Quadrotor()
 _TELEM = [] if os.environ.get("TELEM_OUT") else None   # (t, pitch, roll, speed) per tick
 px4 = None
@@ -2005,7 +2025,7 @@ while not quit_now:
                 _pitch, _roll = quad.tilt_deg(); drone_model.setHpr(0.0, _pitch, _roll)
             if _TELEM is not None:
                 _tp, _tr = quad.tilt_deg()
-                _TELEM.append((float(t), _tp, _tr, float(np.linalg.norm(quad.v))))
+                _TELEM.append(_telem_row(t, _tp, _tr, quad, t))
         elif native is not None:
             for _ in range(int(round(REPLAN_DT / DT))):
                 yaw_ref = _yaw_smooth(float(np.arctan2(cur_wp[1] - quad.p[1], cur_wp[0] - quad.p[0])))
@@ -2025,7 +2045,7 @@ while not quit_now:
                 _pitch, _roll = quad.tilt_deg(); drone_model.setHpr(0.0, _pitch, _roll)
             if _TELEM is not None:
                 _tp2, _tr2 = quad.tilt_deg()
-                _TELEM.append((float(t), _tp2, _tr2, float(np.linalg.norm(quad.v))))
+                _TELEM.append(_telem_row(t, _tp2, _tr2, quad, t))
         else:
             for _ in range(int(round(REPLAN_DT / DT))):
                 yaw_ref = _yaw_smooth(float(np.arctan2(cur_wp[1] - quad.p[1], cur_wp[0] - quad.p[0])))   # face current waypoint
