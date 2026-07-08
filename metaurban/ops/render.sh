@@ -3,9 +3,13 @@
 ARM=${1:-ours}; SEED=${2:-7}; shift 2 2>/dev/null || shift $# 
 SC=/media/boxuan/Data2/projects/sando_py/sando-core
 FLAG=$([ "$ARM" = native ] && echo "--ego" || echo "--maneuver")
+# HUMANOID_NO_IDLE=60: demo crowd stays moving (no frozen pedestrians stranding the drone). DEMO ONLY --
+# it perturbs crowd behaviour outside the calibrated v_eff envelope; keep it OFF for benchmark/safety numbers
+# (headless replay / ego_mu don't use this renderer). Override with HUMANOID_NO_IDLE=0 to disable.
 cd /media/boxuan/Data2/projects/metaurban && env DISPLAY=:1 \
   PYTHONPATH=/media/boxuan/Data2/projects/metaurban \
   LD_PRELOAD=$HOME/miniconda3/envs/sando/lib/libstdc++.so.6 \
+  HUMANOID_NO_IDLE=${HUMANOID_NO_IDLE:-60} \
   ~/miniconda3/envs/metaurban/bin/python -u $SC/metaurban/render_3d_video.py \
   --seed "$SEED" $FLAG --clear_spawn --mp4 --t_max 25 --w 560 --h 350 "$@" \
   && mv $SC/metaurban/out/drone_3d.mp4 $SC/metaurban/out/drone_3d_${ARM}_s${SEED}.mp4 \
