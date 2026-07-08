@@ -71,40 +71,46 @@ def flight_sups(DD, alphas):
     return out
 
 
-# ---- Stage 0: alpha profiles ------------------------------------------------------------------
-alphas = {}
-for cls in ("pedestrian", "vehicle"):
-    prof = q_profile(A_shape, cls)
-    alphas[cls] = {g: 1.0 / v for g, v in prof.items()}
-print(f"[alpha] ped pts={len(alphas['pedestrian'])} veh pts={len(alphas['vehicle'])} "
-      f"(init = per-Delta q90 normalization on A_shape)")
+# ---- Stage 0: DIRECT AFFINE-SHAPE optimization (v4b) --------------------------------------------
+# Envelope-aware coordinate descent over 22 free alphas stalls (envelope is piecewise-constant in
+# single-point moves). Optimize the DEPLOYED representation directly instead: per mature class an
+# affine shape (b, v), score e/(b+v*Delta), (b, v) chosen on the DISJOINT A_opt to minimize the
+# joint deployed-envelope area. Same LCP spirit (parameterized score optimized held-out), zero
+# representation mismatch.
+shapes = {"pedestrian": (0.50, 1.63), "vehicle": (0.63, 1.62)}   # v3 envelopes as init
 
-# coordinate-descent refinement on A_opt: minimize deployed area sum_t(lam(alpha)/alpha_t)
-def deployed_area(al):
-    sups = flight_sups(D[A_opt], al)
+
+def alphas_of(sh):
+    return {c: {g: 1.0 / max(b + v * g, B_MIN) for g in GRID} for c, (b, v) in sh.items()}
+
+
+def area_of(sh):
+    sups = flight_sups(D[A_opt], alphas_of(sh))
     n = len(sups)
     k = int(np.ceil((n + 1) * 0.90))
     if k > n:
-        return None, 1e18
+        return 1e18, None
     lam = float(np.sort(list(sups.values()))[k - 1])
-    area = sum(lam / a for cls in al for a in al[cls].values())
-    return lam, area
+    T = GRID[-1]
+    area = sum(lam * (b * T + 0.5 * v * T * T) for (b, v) in sh.values())
+    return area, lam
 
 
-lam0, area0 = deployed_area(alphas)
-best_area = area0
-for sweep in range(2):
+base_area, _ = area_of(shapes)
+for rnd in range(2):
     for cls in ("pedestrian", "vehicle"):
-        for g in list(alphas[cls]):
-            a0 = alphas[cls][g]
-            for f in (0.8, 1.25):
-                alphas[cls][g] = a0 * f
-                _, ar = deployed_area(alphas)
-                if ar < best_area - 1e-9:
-                    best_area = ar
-                    a0 = alphas[cls][g]
-            alphas[cls][g] = a0
-print(f"[opt] deployed-area {area0:.1f} -> {best_area:.1f} ({100*(1-best_area/area0):.1f}% tighter on A_opt)")
+        b0, v0 = shapes[cls]
+        best = (base_area, b0, v0)
+        for b in np.linspace(max(0.1, b0 - 0.25), b0 + 0.25, 5):
+            for v in np.linspace(max(0.3, v0 - 0.5), v0 + 0.5, 5):
+                shapes[cls] = (float(b), float(v))
+                ar, _ = area_of(shapes)
+                if ar < best[0] - 1e-9:
+                    best = (ar, float(b), float(v))
+        base_area, shapes[cls] = best[0], (best[1], best[2])
+        print(f"[opt] {cls}: (b,v)=({best[1]:.3f},{best[2]:.3f}) area={best[0]:.2f}")
+alphas = alphas_of(shapes)
+print(f"[opt] final shapes {shapes}")
 
 # ---- Stage 1: rank on B8, validate on T8 ------------------------------------------------------
 B, T = load("foldB8"), load("test8")
