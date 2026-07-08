@@ -212,8 +212,10 @@ def candidate_primitives(p, v, a, goal, ztop, v_max, incumbent=None, guide=None)
     out.append((quintic3(p, v, a, fwd, np.array([gdir[0], gdir[1], 0.0]) * min(sp0, v_max), np.zeros(3), T_P), "soar"))
     up = p.copy(); up[2] = ztop
     out.append((quintic3(p, v, a, up, np.zeros(3), np.zeros(3), T_P), "climb"))
+    if incumbent is not None:
+        out.append((incumbent, "incumbent"))           # warm-start: last tick's winning intent
     if guide is not None:
-        out.append((guide, "ego"))
+        out.append((guide, "ego"))                     # EGO global guide (escapes local minima)
     return out
 
 
@@ -239,22 +241,25 @@ def plan_local(p, v, a, goal, ztop, cyl, v_max=3.0, a_max=6.0, dt=DT, delta=DT,
         if not ok:
             continue
         n_cert += 1
-        # progress: displacement of the flown+brake composite at a fixed score window along gdir
-        p_end = composite_eval(segs, durs, t_cert)
-        prog = float((p_end[:2] - np.asarray(p, float)[:2]) @ gdir)
+        # progress = the INTENT primitive's goal-ward reach (where this plan WANTS to go), NOT the
+        # braked composite endpoint (all composites stop, so that can't tell forward from hover).
+        # We only fly the certified commit; the intent expresses sustained navigation preference.
+        p_int = _poly_eval(prim, T_P, 0)[0]
+        prog = float((p_int[:2] - np.asarray(p, float)[:2]) @ gdir)
         excess = float(np.clip(m if np.isfinite(m) else band, 0, band))
-        vT = float(np.linalg.norm(_poly_eval(prim, T_P, 1)[0][:2]))
-        dpsi = abs(float(np.arctan2(_poly_eval(prim, T_P, 1)[0][1], _poly_eval(prim, T_P, 1)[0][0])
-                        - np.arctan2(gdir[1], gdir[0])))
+        vend = _poly_eval(prim, T_P, 1)[0]
+        vT = float(np.linalg.norm(vend[:2]))
+        dpsi = abs(float(np.arctan2(vend[1], vend[0]) - np.arctan2(gdir[1], gdir[0])))
+        dpsi = min(dpsi, 2 * np.pi - dpsi)
         smooth = -(w_smooth[0] * dpsi / (np.pi / 2) + w_smooth[1] * abs(vT - float(np.linalg.norm(v[:2]))) / v_max)
         key = (round(prog / bucket), excess, smooth)
-        scored.append((key, (segs, durs, t_cert), tag))
+        scored.append((key, (segs, durs, t_cert), prim, tag))
     diag = dict(n_cand=len(cands), n_feas=n_feas, n_cert=n_cert)
     if not scored:
-        return None, None, diag
+        return None, None, None, diag
     scored.sort(key=lambda x: x[0], reverse=True)
-    _, plan, tag = scored[0]
-    return plan, tag, diag
+    _, plan, prim_win, tag = scored[0]
+    return plan, prim_win, tag, diag
 
 
 def composite_eval(segs, durs, t):

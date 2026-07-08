@@ -546,17 +546,39 @@ def run_replay(movers, ep, mode="ours", calib=None, predict=True, max_vel=3.0, m
             _v2s = 1.0
             if DECIDE == "v3" and cont_cert:
                 # CPL-v3: certified LOCAL TRAJECTORY planner -- plan INSIDE the certified set (no
-                # discrete tournament/arbitration). Returns a composite plan or None -> fallback.
+                # discrete tournament/arbitration). EGO supplies the GLOBAL guide candidate (escapes
+                # local minima); last tick's winner is the warm-start incumbent (temporal
+                # consistency -> churn dies). Returns a composite plan or None -> fallback.
                 import local_lattice as _LL
-                _plan, _tag, _diag = _LL.plan_local(
+                _guide = None
+                if ego.replan(p_d, v_d, a_d, goal) and ego.duration() > 1e-3:
+                    _ge = ego.eval(min(_LL.T_P, ego.duration() - 1e-3))
+                    if _ge is not None:
+                        _guide = _LL.quintic3(p_d, v_d, a_d, np.asarray(_ge[0], float),
+                                              np.asarray(_ge[1], float), np.zeros(3), _LL.T_P)
+                _plan, _prim, _tag, _diag = _LL.plan_local(
                     p_d, v_d, a_d, goal, ztop, cyl, v_max=max_vel, a_max=max_acc, dt=DT, delta=DELTA,
-                    incumbent=_v3st.get("prim"))
+                    incumbent=_v3st.get("prim"), guide=_guide)
                 if _plan is not None:
                     p_ref, v_ref, a_ref = _LL.plan_eval(_plan, DT)
-                    _v3st["plan"] = _plan
+                    _v3st["prim"] = _prim                   # warm-start next tick
                     kind = "cpl"
                 else:
-                    kind = "evade"                          # caller's fallback (brake/blend) runs below
+                    # FALLBACK L1: nothing certified -> BRAKE ALONG CURRENT MOTION (not flee). The
+                    # composite cert is stricter than v2 (it clears the whole stop), so at speed in
+                    # a crowd few candidates pass; braking here settles the drone into the low-speed
+                    # regime where forward candidates certify again -> recursive-feasibility recovery.
+                    _sp = float(np.hypot(v_d[0], v_d[1]))
+                    if _sp > 0.15:
+                        _dec = max(0.0, 1.0 - (max_acc * DT) / _sp)
+                        v_ref = v_d * _dec
+                        p_ref = p_d + v_ref * DT
+                        a_ref = np.zeros(3)
+                        kind = "brake"
+                        _v3st.pop("prim", None)
+                    else:
+                        _v3st.pop("prim", None)
+                        kind = "evade"                      # already stopped & still nothing -> flee
                 counts["cpl_cert"] = counts.get("cpl_cert", 0) + _diag["n_cert"]
             elif DECIDE == "v2" and cont_cert:
                 kind, _v2s = SL.maneuver_decide_v2(ego, p_d, v_d, a_d, goal, ztop, cyl, _stick,
@@ -570,8 +592,8 @@ def run_replay(movers, ep, mode="ours", calib=None, predict=True, max_vel=3.0, m
                                                  dwell_ticks=SMOOTH_DWELL, clear_fn_strict=_strict)
             else:
                 kind = SL.maneuver_decide(ego, p_d, v_d, a_d, goal, ztop, clear_fn, cruise_z=CRUISE_Z, horizon=HORIZON)
-            if kind == "cpl":
-                pass                                        # p_ref/v_ref/a_ref already set from plan_eval
+            if kind in ("cpl", "brake"):
+                pass                                        # p_ref/v_ref/a_ref already set (plan_eval / v3 brake)
             elif kind != "evade":
                 rr = ego.eval(min(_v2s * DT, max(ego.duration() - 1e-3, 0.0)))
                 if rr is not None:
