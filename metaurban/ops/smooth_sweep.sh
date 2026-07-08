@@ -7,7 +7,10 @@ RUN="env DISPLAY=:1 PYTHONPATH=/media/boxuan/Data2/projects/metaurban LD_PRELOAD
 TAG=$1; shift; EXTRA="$*"
 cd /media/boxuan/Data2/projects/metaurban
 RES=$SC/metaurban/out/sweep_${TAG}.txt; : > $RES
-for TGT in "7 X" "12 CS" "3 X" "21 CS" "5 S" "15 X"; do
+TGTS=${TGTS:-"7 X|12 CS|3 X|21 CS|5 S|15 X"}
+IFS="|"
+for TGT in $TGTS; do
+  IFS=" "
   set -- $TGT; SEED=$1; MAP=$2
   REF=$SC/metaurban/out/telem_native_s${SEED}${MAP}.json
   if [ ! -s "$REF" ]; then
