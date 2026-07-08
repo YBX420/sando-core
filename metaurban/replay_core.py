@@ -556,13 +556,23 @@ def run_replay(movers, ep, mode="ours", calib=None, predict=True, max_vel=3.0, m
                     if _ge is not None:
                         _guide = _LL.quintic3(p_d, v_d, a_d, np.asarray(_ge[0], float),
                                               np.asarray(_ge[1], float), np.zeros(3), _LL.T_P)
+                _vmax = max_vel
+                if os.environ.get("V3_VCAP", "0") == "1" and cyl:
+                    # speed-limited-by-clearance (blueprint fundamental lever): cap the intent speed so
+                    # the brake fits the sensed free distance -> the composite's whole-stop window
+                    # shrinks (shorter t_brake) -> forward-slow candidates certify where forward-fast
+                    # couldn't, instead of failing and fleeing. Principled early slowing.
+                    _df = min(float(np.linalg.norm(np.asarray(c[0], float)[:2] - np.asarray(p_d, float)[:2]) - float(c[3])) for c in cyl)
+                    _vmax = float(min(max_vel, SL.v_cap(_df, max_acc, margin=float(os.environ.get("V3_VCAP_M", "0.5")))))
                 _plan, _prim, _tag, _diag = _LL.plan_local(
-                    p_d, v_d, a_d, goal, ztop, cyl, v_max=max_vel, a_max=max_acc, dt=DT, delta=DELTA,
+                    p_d, v_d, a_d, goal, ztop, cyl, v_max=_vmax, a_max=max_acc, dt=DT, delta=DELTA,
                     incumbent=_v3st.get("prim"), guide=_guide)
                 if _plan is not None:
                     p_ref, v_ref, a_ref = _LL.plan_eval(_plan, DT)
                     _v3st["prim"] = _prim                   # warm-start next tick
                     kind = "cpl"
+                    _tf = str(_tag).split("_")[0]           # winning intent family (diagnostic)
+                    counts["v3_" + _tf] = counts.get("v3_" + _tf, 0) + 1
                 else:
                     # FALLBACK L1 (blueprint 5): nothing in the lattice certified -> fly a CERTIFIED
                     # brake from the current state. The jerk-limited brake is SMOOTH (continuous

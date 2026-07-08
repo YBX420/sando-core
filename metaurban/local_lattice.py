@@ -235,6 +235,11 @@ def plan_local(p, v, a, goal, ztop, cyl, v_max=3.0, a_max=6.0, dt=DT, delta=DT,
     """CPL-v3 local planner: build lattice -> composite -> feasibility -> certify -> lexicographic
     score (progress bucket, clearance BAND, smoothness) -> pick. Returns (plan, kind, diag).
     plan = (segs, durs, t_cert); None kind -> caller runs the fallback chain."""
+    import os as _os
+    bucket = float(_os.environ.get("V3_BUCKET", str(bucket)))   # coarser bucket -> similar-progress
+    band = float(_os.environ.get("V3_BAND", str(band)))          # candidates tie on progress, clearance
+    #   (excess, capped at band) breaks the tie -> the drone detours around a mover instead of greedily
+    #   creeping straight into it and then failing to certify a stop (evade). Tuning lever, reach gap.
     g = np.asarray(goal, float)[:2] - np.asarray(p, float)[:2]
     gdir = g / max(np.linalg.norm(g), 1e-6)
     cands = candidate_primitives(p, v, a, goal, ztop, v_max, incumbent, guide)

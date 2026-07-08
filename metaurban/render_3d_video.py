@@ -1161,6 +1161,8 @@ MAN_DEADBAND = 0.5    # hysteresis: keep the CURRENT maneuver unless another cer
                       # speed by >this (m/s). Stops the around-L/R/over flicker that brakes-and-reaccelerates
                       # (the "hesitation") every time a mover twitches; straight resumes the moment it re-certifies.
 _MAN_STATE = {"kind": None}
+_V3_ST = {}          # CPL-v3 (EGO_DECIDE=v3, stage-3 render wiring): warm-start incumbent primitive
+_V3_PLAN = [None]    # the committed composite plan for the executor to fly via local_lattice.plan_eval
 _SPAWNDBG = [0]   # MAN_SPAWNDBG=1: dump the spawn occupancy (360 static vs native forward cone) for the first calls
 
 
@@ -1375,6 +1377,47 @@ def ego_maneuver_replan(p_d, v_d, a_d, cur_wp, t_sim):
     def _straight_clear():
         return (ego.replan(p_d, v_d, a_d, np.array([p_d[0] + gdir[0] * L, p_d[1] + gdir[1] * L, CRUISE_Z]))
                 and ego.duration() > 1e-3 and cert_clear() and static_clear() and mover_clear_flown())
+
+    if EGO_DECIDE == "v3":
+        # CPL-v3 (stage-3): plan a certified LOCAL composite INSIDE the certified set (no discrete
+        # tournament). Same cyl keep-out as v2; EGO supplies the global guide; the executor flies the
+        # composite via plan_eval (not ego.eval). None -> certified brake -> hold (never blind-flee).
+        import local_lattice as _LL
+        _v3dt = float(os.environ.get("V3_DT", "0.3"))
+        if _V3_PLAN[0] is not None and _V3_ST.get("t", 1e9) < _v3dt - 1e-6:
+            return "cpl", None, 1.0          # COMMIT-AND-FLY: keep flying the committed segment. The
+            #   composite's recursive feasibility makes the whole [0,_v3dt] sound, so re-plan only when it
+            #   is flown out -- flying just REPLAN_DT of a from-rest quintic never builds speed (crept in place).
+        _cyl3 = []
+        for (_oid, c3, vel, r_obs, d_safe) in movers:
+            q_c, veff_c = PERCLASS_CONF.get(d_safe, (MAN_QCONF, MAN_VEFF))
+            _cyl3.append((np.asarray(c3, float), np.array([float(vel[0]), float(vel[1]), 0.0]),
+                          np.zeros(3), r_obs + MAN_DSAFE + q_c + MAN_TRACK,
+                          2.0 * float(c3[2]) + MAN_REACH_PAD + MAN_DSAFE_V + q_c + MAN_TRACK, veff_c))
+        _g3 = np.array([cur_wp[0], cur_wp[1], CRUISE_Z], float)
+        _vmx = float(os.environ.get("V3_VMAX", "3.0")); _amx = float(os.environ.get("V3_AMAX", "6.0"))
+        _v3dt = float(os.environ.get("V3_DT", "0.3"))   # committed-segment horizon: must be long enough to
+        #   BUILD speed from near-zero (0.1s commits never accelerate -> the drone crept in place). Re-planned
+        #   every REPLAN_DT with warm-start, so only the segment head is flown before the next solve.
+        _guide = None
+        if ego.replan(p_d, v_d, a_d, _g3) and ego.duration() > 1e-3:
+            _ge = ego.eval(min(_LL.T_P, ego.duration() - 1e-3))
+            if _ge is not None:
+                _guide = _LL.quintic3(p_d, v_d, a_d, np.asarray(_ge[0], float),
+                                      np.asarray(_ge[1], float), np.zeros(3), _LL.T_P)
+        _plan, _prim, _tag, _diag = _LL.plan_local(p_d, v_d, a_d, _g3, z_top, _cyl3,
+                                                   v_max=_vmx, a_max=_amx, dt=_v3dt, delta=REPLAN_DT,
+                                                   incumbent=_V3_ST.get("prim"), guide=_guide)
+        if _plan is None:
+            _V3_ST.pop("prim", None)
+            _bs, _bd, _bt = _LL.make_composite(
+                _LL.quintic3(p_d, v_d, a_d, p_d, v_d * 0.0, np.zeros(3), _LL.T_P), _amx, _v3dt)
+            if _LL.certify_composite(_bs, _bd, _cyl3, _bt, REPLAN_DT)[0]:
+                _V3_PLAN[0] = (_bs, _bd, _bt); _V3_ST["t"] = 0.0; return "brake", None, 1.0
+            _V3_PLAN[0] = None; _V3_ST["t"] = 0.0; return "hold", None, 1.0
+        _V3_ST["prim"] = _prim; _V3_PLAN[0] = _plan; _V3_ST["t"] = 0.0
+        _pts3 = [_LL.plan_eval(_plan, u)[0] for u in np.linspace(0, _plan[2], 24)]
+        return ("cpl" if _tag not in ("hover",) else "hold"), _pts3, 1.0
 
     if EGO_DECIDE == "v2":
         _cyl = []
@@ -1953,6 +1996,31 @@ while not quit_now:
             p_d = np.asarray(pw, float); v_d = np.asarray(vw, float); a_d = np.zeros(3)
             drone.set_position([float(p_d[0]), float(p_d[1]), float(p_d[2])])
             drone.set_heading_theta(float(yw))
+        elif ego is not None and EGO_DECIDE == "v3":
+            # CPL-v3 executor: fly the committed composite plan (plan_eval), NOT the EGO B-spline.
+            import local_lattice as _LL3
+            _pl = _V3_PLAN[0]
+            for _k in range(int(round(REPLAN_DT / DT))):
+                yaw_ref = _yaw_smooth(float(np.arctan2(cur_wp[1] - quad.p[1], cur_wp[0] - quad.p[0])))
+                _tt = _V3_ST.get("t", 0.0)                 # ACCUMULATED flown time into the committed plan
+                if _pl is not None:
+                    _rr = _LL3.plan_eval(_pl, min(_tt + DT, _pl[2]))   # track one step ahead -> builds speed
+                    _sp = np.asarray(_rr[0], float).copy()
+                    if _sp[2] < MIN_FLY_Z:
+                        _sp[2] = MIN_FLY_Z
+                    next_goal_pos = _sp.copy()
+                    quad.step(_sp, np.asarray(_rr[1], float), np.asarray(_rr[2], float), DT, yaw_ref=yaw_ref)
+                else:
+                    quad.step(quad.p, np.zeros(3), np.zeros(3), DT, yaw_ref=yaw_ref)   # hold in place
+                _V3_ST["t"] = _tt + DT
+                t += DT
+            p_d = quad.p.copy(); v_d = quad.v.copy(); a_d = quad.a.copy()   # write flown state back
+            drone.set_position([float(p_d[0]), float(p_d[1]), float(p_d[2])])
+            drone.set_heading_theta(float(quad.yaw))
+            if drone_model is not None:
+                _pitch, _roll = quad.tilt_deg(); drone_model.setHpr(0.0, _pitch, _roll)
+            if _TELEM is not None:
+                _tp3, _tr3 = quad.tilt_deg(); _TELEM.append(_telem_row(t, _tp3, _tr3, quad, t))
         elif ego is not None:
             for _ in range(int(round(REPLAN_DT / DT))):
                 yaw_ref = _yaw_smooth(float(np.arctan2(cur_wp[1] - quad.p[1], cur_wp[0] - quad.p[0])))
