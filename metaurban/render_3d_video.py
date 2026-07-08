@@ -339,6 +339,26 @@ def occ_remember(new_pts, p_d, movers, t_sim=None):
 
 
 # real quadrotor flight dynamics: SANDO set-points are TRACKED through this (tilt-to-accelerate, momentum)
+
+_YAW_ST = [None]
+
+
+def _yaw_smooth(raw):
+    """Yaw-reference rate limiter (YAW_SLEW deg/tick; yaw never enters the certificate -- the quad
+    is rotationally symmetric -- so this is free comfort: kills the near-waypoint heading flapping
+    that read as high-frequency wobble even at 3 m/s, revs=49)."""
+    lim = float(os.environ.get("YAW_SLEW", "0"))
+    if lim <= 0:
+        return raw
+    prev = _YAW_ST[0]
+    if prev is None:
+        _YAW_ST[0] = raw
+        return raw
+    d = (raw - prev + np.pi) % (2 * np.pi) - np.pi
+    step = np.clip(d, -np.radians(lim), np.radians(lim))
+    _YAW_ST[0] = prev + step
+    return float(_YAW_ST[0])
+
 quad = Quadrotor()
 _TELEM = [] if os.environ.get("TELEM_OUT") else None   # (t, pitch, roll, speed) per tick
 px4 = None
@@ -1124,6 +1144,9 @@ _MAN_STATE = {"kind": None}
 _SPAWNDBG = [0]   # MAN_SPAWNDBG=1: dump the spawn occupancy (360 static vs native forward cone) for the first calls
 
 
+_VF_STATE = {}
+
+
 def _man_cloud(p_d, heading, t_sim, movers):
     """Occupancy for the maneuver planner: the FOV static voxels + ground, PLUS each mover's PREDICTED footprint
     rendered as a CYLINDER inflated to r_obs+d_safe and CAPPED at head height (so the overhead column stays free
@@ -1153,7 +1176,15 @@ def _man_cloud(p_d, heading, t_sim, movers):
     if len(stat):
         pts.append(stat)
     v_nom = np.array([np.cos(heading), np.sin(heading)]) * MAN_VCRUISE   # drone's nominal motion
+    _vf_a = float(os.environ.get("VF_EMA", "0"))
     for (_oid, c3, vel, r_obs, d_safe) in movers:
+        if _vf_a > 0:
+            # PLANNER-FEED velocity EMA (cert cylinders keep the raw KF; calibration matches raw).
+            # Measurement noise -> per-tick velocity wiggle -> t_cpa ring wiggle -> reference
+            # jitter even at 3 m/s. Smooth the FEED only.
+            _pv = _VF_STATE.get(_oid)
+            vel = tuple(vel) if _pv is None else tuple((1 - _vf_a) * np.asarray(_pv) + _vf_a * np.asarray(vel))
+            _VF_STATE[_oid] = vel
         # RELATIVE-MOTION timing (this is where KF prediction buys SPEED & smooth accel): block each mover at where
         # it WILL BE at the closest-approach time t_cpa of the relative motion (drone - mover), not where it is now.
         # A mover that will have swept past the corridor has its t_cpa footprint OFF the drone's path -> the drone
@@ -1518,9 +1549,37 @@ def clearance(p, fed):
 FONT = cv2.FONT_HERSHEY_SIMPLEX
 
 
-def grab(pos, hpr):
+_CAM_EMA = [None]
+
+
+def grab(pos, hpr, gimbal=False):
     """offscreen GPU frame at (pos,hpr) rel. to the drone (BGR uint8). ONE renderFrame per view
-    (multi_thread_render=False makes a single pass correct) instead of perceive()'s 2x taskMgr.step."""
+    (multi_thread_render=False makes a single pass correct) instead of perceive()'s 2x taskMgr.step.
+    gimbal=True + CAM_SMOOTH>0: chase cam rides a DAMPED virtual gimbal (EMA position+yaw in the
+    WORLD frame) instead of being bolted to the airframe -- every micro-tilt of the body otherwise
+    shakes the whole frame, which reads as high-frequency judder even when the flight is smooth."""
+    a = float(os.environ.get("CAM_SMOOTH", "0"))
+    if gimbal and a > 0:
+        p_now = np.asarray(drone.origin.getPos(eng.render), float)
+        yaw_now = float(np.radians(drone.origin.getH(eng.render)))
+        st = _CAM_EMA[0]
+        if st is None:
+            st = [p_now, yaw_now]
+        else:
+            st[0] = (1 - a) * st[0] + a * p_now
+            dy = (yaw_now - st[1] + np.pi) % (2 * np.pi) - np.pi
+            st[1] = st[1] + a * dy
+        _CAM_EMA[0] = st
+        ca, sa = np.cos(st[1]), np.sin(st[1])
+        off = np.array([pos[0] * ca - pos[1] * sa, pos[0] * sa + pos[1] * ca, pos[2]])
+        cam.cam.reparentTo(eng.render)
+        cam.cam.setPos(Vec3(*(st[0] + off)))
+        cam.cam.setHpr(Vec3(np.degrees(st[1]) + hpr[0], hpr[1], hpr[2]))
+        eng.graphicsEngine.renderFrame()
+        a2 = np.asarray(cam.get_rgb_array_cpu())
+        if a2.dtype != np.uint8:
+            a2 = (a2 * 255).astype(np.uint8) if a2.max() <= 1.01 else a2.astype(np.uint8)
+        return a2
     cam.cam.reparentTo(drone.origin)
     cam.cam.setPos(Vec3(*pos)); cam.cam.setHpr(Vec3(*hpr))
     eng.graphicsEngine.renderFrame()
@@ -1538,7 +1597,7 @@ def grab_views():
         out["fpv"] = grab(FPV_POS, FPV_HPR)
         if drone_model is not None: drone_model.show()
     if args.view in ("chase", "dual"):
-        out["chase"] = grab(CHASE_POS, CHASE_HPR)
+        out["chase"] = grab(CHASE_POS, CHASE_HPR, gimbal=True)
     return out
 
 
@@ -1854,7 +1913,7 @@ while not quit_now:
         if px4 is not None:
             # REAL PX4: stream the committed set-point to offboard, pace to wall-clock (PX4 is real-time),
             # read PX4's fused pose back to drive the render. PX4 = inner control + jMAVSim dynamics.
-            yaw_ref = float(np.arctan2(cur_wp[1] - p_d[1], cur_wp[0] - p_d[0]))
+            yaw_ref = _yaw_smooth(float(np.arctan2(cur_wp[1] - p_d[1], cur_wp[0] - p_d[0])))
             ok, ng = sando.get_next_goal()
             if ok: next_goal_pos = np.asarray(ng.pos, float).copy()
             px4.set_setpoint(next_goal_pos if next_goal_pos is not None else cur_wp, yaw_ref)
@@ -1867,7 +1926,7 @@ while not quit_now:
             drone.set_heading_theta(float(yw))
         elif ego is not None:
             for _ in range(int(round(REPLAN_DT / DT))):
-                yaw_ref = float(np.arctan2(cur_wp[1] - quad.p[1], cur_wp[0] - quad.p[0]))
+                yaw_ref = _yaw_smooth(float(np.arctan2(cur_wp[1] - quad.p[1], cur_wp[0] - quad.p[0])))
                 # --ego_safe ANTICIPATORY BRAKE: advance along the SAME B-spline path at the graded rate
                 # ego_speed_g (time-warp). g<1 -> slower (smooth deceleration as a mover gets close);
                 # g==0 -> ego_cert_hold -> s=None -> hover (already near-stopped, so no jerk), climb if stuck.
@@ -1894,6 +1953,23 @@ while not quit_now:
                     if args.pointmass:                                       # DIAGNOSTIC: flown == planned (teleport)
                         quad.p = np.asarray(sp_pos, float).copy(); quad.v = np.asarray(sp_vel, float).copy()
                         quad.a = np.asarray(sp_acc, float).copy(); quad.yaw = float(yaw_ref)
+                    elif os.environ.get("SMOOTH_EXEC", "0") == "1":
+                        # CONTINUOUS-REFERENCE executor: one spline sample held for a whole tick is a
+                        # stair-step target -- the quad lunges/overshoots/brakes every tick (revs=49
+                        # accel<->decel reversals = the residual high-frequency judder even at 3 m/s).
+                        # Sample the SAME certified spline at 3 sub-instants instead: flown path hugs
+                        # the plan tighter (uses LESS delta_track budget -- strictly sound).
+                        _tbase = t_ego - ego_speed_g * DT     # t_ego already advanced by g*DT above
+                        for _k in (1, 2, 3):
+                            _rr = ego.eval(min(_tbase + ego_speed_g * DT * (_k / 3.0),
+                                               max(ego_dur - 1e-3, 0.0)))
+                            _sp, _sv, _sa = _rr
+                            _sp = np.asarray(_sp, float).copy()
+                            if _sp[2] < MIN_FLY_Z:
+                                _sp[2] = MIN_FLY_Z
+                            quad.step(_sp, np.asarray(_sv, float) * ego_speed_g,
+                                      np.asarray(_sa, float) * (ego_speed_g ** 2), DT / 3.0,
+                                      yaw_ref=yaw_ref)
                     else:
                         quad.step(sp_pos, sp_vel, sp_acc, DT, yaw_ref=yaw_ref)   # quad tracks the EGO B-spline (slowed)
                     if _TRACKH:   # HCT-D harvest: tracking error + hodograph covariates of THIS planned set-point
@@ -1932,7 +2008,7 @@ while not quit_now:
                 _TELEM.append((float(t), _tp, _tr, float(np.linalg.norm(quad.v))))
         elif native is not None:
             for _ in range(int(round(REPLAN_DT / DT))):
-                yaw_ref = float(np.arctan2(cur_wp[1] - quad.p[1], cur_wp[0] - quad.p[0]))
+                yaw_ref = _yaw_smooth(float(np.arctan2(cur_wp[1] - quad.p[1], cur_wp[0] - quad.p[0])))
                 ok, ng = native.get_next_goal()   # (pos, vel, accel) from native SANDO's committed traj
                 if ok:
                     sp_pos = np.asarray(ng[0], float).copy()
@@ -1952,7 +2028,7 @@ while not quit_now:
                 _TELEM.append((float(t), _tp2, _tr2, float(np.linalg.norm(quad.v))))
         else:
             for _ in range(int(round(REPLAN_DT / DT))):
-                yaw_ref = float(np.arctan2(cur_wp[1] - quad.p[1], cur_wp[0] - quad.p[0]))   # face current waypoint
+                yaw_ref = _yaw_smooth(float(np.arctan2(cur_wp[1] - quad.p[1], cur_wp[0] - quad.p[0])))   # face current waypoint
                 ok, ng = sando.get_next_goal()
                 if ok:
                     next_goal_pos = np.asarray(ng.pos, float).copy()

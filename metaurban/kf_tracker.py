@@ -134,6 +134,20 @@ class MoverTracker:
     def _clamp_a(self, a):
         return float(np.clip(a, -self.a_max, self.a_max))
 
+    @property
+    def vel_smooth(self):
+        """EMA-smoothed velocity for PLANNER FEED ONLY (VF_EMA alpha; the certificate keeps the raw
+        KF state -- calibration was harvested against it). Kills the per-tick feed-cylinder wiggle
+        that turns measurement noise into reference jitter."""
+        import os as _os
+        a = float(_os.environ.get("VF_EMA", "0"))
+        v = np.array([self.fx.x[1], self.fy.x[1], 0.0])
+        if a <= 0:
+            return v
+        prev = getattr(self, "_vs", None)
+        self._vs = v.copy() if prev is None else (1 - a) * prev + a * v
+        return self._vs.copy()
+
     def state(self):
         """Certificate input: centre c(t) = c0 + v*t + 1/2*a*t^2. Returns (c0[3], v[3], a[3])."""
         c0 = np.array([self.fx.x[0], self.fy.x[0], self.z])
