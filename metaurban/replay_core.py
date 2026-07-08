@@ -570,7 +570,10 @@ def run_replay(movers, ep, mode="ours", calib=None, predict=True, max_vel=3.0, m
                     # regime where forward candidates certify again -> recursive-feasibility recovery.
                     _sp = float(np.hypot(v_d[0], v_d[1]))
                     if _sp > 0.15:
-                        _dec = max(0.0, 1.0 - (max_acc * DT) / _sp)
+                        # GENTLE glide-down (not a hard stop): lose ~25%/tick so the drone slows
+                        # into the regime where forward candidates re-certify BEFORE stalling dead.
+                        # A hard brake (v*=0.4) made it stop-and-wait -> timeout without reaching.
+                        _dec = float(os.environ.get("V3_BRAKE_DECAY", "0.75"))
                         v_ref = v_d * _dec
                         p_ref = p_d + v_ref * DT
                         a_ref = np.zeros(3)
