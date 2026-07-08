@@ -265,3 +265,15 @@ def composite_eval(segs, durs, t):
             return _poly_eval(c, min(t - t0, d), 0)[0]
         t0 += d
     return _poly_eval(segs[-1], durs[-1], 0)[0]
+
+
+def plan_eval(plan, t):
+    """(pos, vel, acc) of the plan composite at wall time t -- the executor set-point at t=DT."""
+    segs, durs, _ = plan
+    t0 = 0.0
+    for c, d in zip(segs, durs):
+        if t <= t0 + d or (c is segs[-1]):
+            lt = min(t - t0, d)
+            return (_poly_eval(c, lt, 0)[0], _poly_eval(c, lt, 1)[0], _poly_eval(c, lt, 2)[0])
+        t0 += d
+    return (_poly_eval(segs[-1], durs[-1], 0)[0], np.zeros(3), np.zeros(3))

@@ -303,6 +303,7 @@ def run_replay(movers, ep, mode="ours", calib=None, predict=True, max_vel=3.0, m
     min_clr = 1e18; max_z = start[2]; reached = False
     counts = {k: 0 for k in ("straight", "around_l", "around_r", "over", "climb", "evade", "cret", "native", "sando")}
     _stick = {}                                      # SMOOTH=1 incumbent-maneuver state (kind/age)
+    _v3st = {}                                        # DECIDE=v3 CPL incumbent (warm-start) state
     rta = dict(certified_ticks=0, violations=0)      # RTA failure rate: cert-passed tick followed by
     #                                                  a clearance violation within the SAME trust window
     hist = []
@@ -543,7 +544,21 @@ def run_replay(movers, ep, mode="ours", calib=None, predict=True, max_vel=3.0, m
                                 return False
                     return True
             _v2s = 1.0
-            if DECIDE == "v2" and cont_cert:
+            if DECIDE == "v3" and cont_cert:
+                # CPL-v3: certified LOCAL TRAJECTORY planner -- plan INSIDE the certified set (no
+                # discrete tournament/arbitration). Returns a composite plan or None -> fallback.
+                import local_lattice as _LL
+                _plan, _tag, _diag = _LL.plan_local(
+                    p_d, v_d, a_d, goal, ztop, cyl, v_max=max_vel, a_max=max_acc, dt=DT, delta=DELTA,
+                    incumbent=_v3st.get("prim"))
+                if _plan is not None:
+                    p_ref, v_ref, a_ref = _LL.plan_eval(_plan, DT)
+                    _v3st["plan"] = _plan
+                    kind = "cpl"
+                else:
+                    kind = "evade"                          # caller's fallback (brake/blend) runs below
+                counts["cpl_cert"] = counts.get("cpl_cert", 0) + _diag["n_cert"]
+            elif DECIDE == "v2" and cont_cert:
                 kind, _v2s = SL.maneuver_decide_v2(ego, p_d, v_d, a_d, goal, ztop, cyl, _stick,
                                                    cruise_z=CRUISE_Z, horizon=HORIZON, delta=DELTA)
                 if kind in ("around_l2", "around_r2"):
@@ -555,7 +570,9 @@ def run_replay(movers, ep, mode="ours", calib=None, predict=True, max_vel=3.0, m
                                                  dwell_ticks=SMOOTH_DWELL, clear_fn_strict=_strict)
             else:
                 kind = SL.maneuver_decide(ego, p_d, v_d, a_d, goal, ztop, clear_fn, cruise_z=CRUISE_Z, horizon=HORIZON)
-            if kind != "evade":
+            if kind == "cpl":
+                pass                                        # p_ref/v_ref/a_ref already set from plan_eval
+            elif kind != "evade":
                 rr = ego.eval(min(_v2s * DT, max(ego.duration() - 1e-3, 0.0)))
                 if rr is not None:
                     p_ref = np.asarray(rr[0], float)
