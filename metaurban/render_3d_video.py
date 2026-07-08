@@ -1682,7 +1682,8 @@ def step_env():
 
 DT = float(par.dc); T_MAX = float(args.t_max)
 os.makedirs(os.path.join(_HERE, "out"), exist_ok=True)
-writer = imageio.get_writer(os.path.join(_HERE, "out", "drone_3d.mp4"), fps=args.fps) if args.mp4 else None
+_MP4_OUT = os.environ.get("OUT_MP4") or os.path.join(_HERE, "out", "drone_3d.mp4")  # per-job override -> safe parallel renders
+writer = imageio.get_writer(_MP4_OUT, fps=args.fps) if args.mp4 else None
 WIN = "MetaUrban x SANDO — REAL-TIME 3D (FPV + 3rd person + planned path)"
 
 # ---- real-time MJPEG-over-HTTP view (robust where cv2 windows are black on software GL) ----------
@@ -1776,16 +1777,24 @@ while not quit_now:
     # incl. trees). Keep the best attempt if none reaches the target. Same seed+flag -> deterministic, so an
     # A/B (raw vs safe) still gets the identical route.
     if args.clear_spawn:
-        SPAWN_CLR_MIN = 1.5
-        best = (-1e9, route, axis, left)
+        SPAWN_CLR_MIN = 1.5; GOAL_PED_MIN = 3.0
+        def _goal_idle_ped_gap(g_xy):   # dist to nearest STATIONARY ped (|v|<0.2): a frozen person on the
+            gaps = [float(np.linalg.norm(p - g_xy)) for (_, c, p, v, _) in native_objects()   # goal approach
+                    if c == "pedestrian" and float(np.linalg.norm(v)) < 0.2]                  # strands the drone
+            return min(gaps) if gaps else 1e9                                                 # (climb, can't
+        best = (-1e9, route, axis, left)                                                      #  descend; seed23)
         for att in range(16):
-            s0 = np.asarray(route[0], float)
+            s0 = np.asarray(route[0], float); g0 = np.asarray(route[-1], float)
             c0, _ = clearance(s0, feed(None, {}, 0.0, s0))
-            if c0 > best[0]: best = (c0, route, axis, left)
-            if c0 >= SPAWN_CLR_MIN: break
+            cg, _ = clearance(g0, feed(None, {}, 0.0, g0))   # GOAL must be OPEN too: a cluttered goal makes
+            gped = _goal_idle_ped_gap(g0[:2])                #   the drone climb near it and fail to descend
+            score = min(min(c0, cg) - SPAWN_CLR_MIN, gped - GOAL_PED_MIN)  # BOTH must clear their targets
+            if score > best[0]: best = (score, route, axis, left)
+            if score >= 0.0: break
             route, axis, left = plan_route(lap_idx + (att + 1) * 7919)   # different start/route, same seed family
-        c_best, route, axis, left = best
-        print(f"[3dv] clear_spawn: START spawn clearance {c_best:+.2f}m (target >= {SPAWN_CLR_MIN}m)", flush=True)
+        _sc, route, axis, left = best
+        print(f"[3dv] clear_spawn: START/GOAL clr + goal-idle-ped gap >= {GOAL_PED_MIN}m "
+              f"(margin {_sc:+.2f}m over targets)", flush=True)
     if _STALE_CNT[1]:
         print(f"[theorem] stale-spline branch: {_STALE_CNT[0]}/{_STALE_CNT[1]} flown ticks "
               f"({100.0*_STALE_CNT[0]/_STALE_CNT[1]:.1f}%)", flush=True)
@@ -2164,7 +2173,7 @@ while not quit_now:
                   f"dgoal={np.linalg.norm(p_d[:2]-GOAL[:2]):5.1f}m wp_i={wp_i} kind={man_kind} "
                   f"vd={np.linalg.norm(v_d[:2]):.2f}", flush=True)
         iters += 1
-        final_close = (wp_i == len(wp) - 1 and np.linalg.norm(p_d - GOAL) < float(par.goal_radius))
+        final_close = (wp_i == len(wp) - 1 and np.linalg.norm(p_d[:2] - GOAL[:2]) < float(par.goal_radius))  # HORIZONTAL reach: goal is an (x,y) location; requiring exact z stranded the drone hovering above it (seed23)
         if final_close and (sando is None or sando.get_drone_status() == GOAL_REACHED):
             reached = True
     t_goal = t if reached else float("inf")
@@ -2196,7 +2205,7 @@ while not quit_now:
     if not (args.serve or (args.live and args.loop_scene)):
         break
 if writer is not None:
-    writer.close(); print(f"[3dv] mp4 -> {os.path.join(_HERE, 'out', 'drone_3d.mp4')}", flush=True)
+    writer.close(); print(f"[3dv] mp4 -> {_MP4_OUT}", flush=True)
 try: cv2.destroyAllWindows()
 except Exception: pass
 env.close()
