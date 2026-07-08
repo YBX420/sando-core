@@ -92,9 +92,10 @@ def make_composite(prim, a_max, dt=DT):
     vmag = float(np.linalg.norm(v_dt[:2]))
     vdir = v_dt / max(np.linalg.norm(v_dt), 1e-9)
     p_stop = p_dt + vdir * (vmag * bdur * 0.5)
-    for _ in range(8):                                  # widen (ACCUMULATING) until feasible accel
-        if _peak_accel(bc, bdur) <= a_max + 1e-6:
-            break
+    for _ in range(10):                                 # widen (ACCUMULATING) until accel AND jerk fit
+        _, pa, pj = _sampled_deriv_bounds(bc, bdur)     # quintic stop over a short window has high
+        if pa <= a_max + 1e-6 and pj <= J_BRK + 1e-6:   # jerk -> widen on BOTH (bang-bang would be
+            break                                       # tighter; the widened quintic is sound+feasible)
         bdur *= 1.3
         p_stop = p_dt + vdir * (vmag * bdur * 0.5)
         bc = quintic3(p_dt, v_dt, a_dt, p_stop, np.zeros(3), np.zeros(3), bdur)
