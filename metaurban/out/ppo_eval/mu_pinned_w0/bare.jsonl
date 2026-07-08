@@ -1,0 +1,101 @@
+{"config_fingerprint": {"SHIELD_EPS": "", "SHIELD_PERCLASS": "", "DECIDE": "", "SMOOTH": "", "RADIUS_CONSIST": "", "CRET_GLIDE": "", "CALIB_V2": "1", "PERCEPT": "", "PERCEPT_SEED": "", "PRED_MODEL": "", "DYN_TRACK": ""}, "model": "out/ppo_planner_mu", "n_ep": 100, "seed": 7777}
+{"ep": 1, "reached": true, "collided": false, "min_clr": 11.923, "interv": 0, "clean": true}
+{"ep": 2, "reached": true, "collided": false, "min_clr": 15.314, "interv": 0, "clean": true}
+{"ep": 3, "reached": true, "collided": false, "min_clr": 17.399, "interv": 0, "clean": true}
+{"ep": 4, "reached": true, "collided": false, "min_clr": 15.128, "interv": 0, "clean": true}
+{"ep": 5, "reached": true, "collided": false, "min_clr": 2.083, "interv": 0, "clean": true}
+{"ep": 6, "reached": false, "collided": false, "min_clr": 9.519, "interv": 0, "clean": false}
+{"ep": 7, "reached": true, "collided": false, "min_clr": 4.732, "interv": 0, "clean": true}
+{"ep": 8, "reached": true, "collided": false, "min_clr": 11.192, "interv": 0, "clean": true}
+{"ep": 9, "reached": true, "collided": false, "min_clr": 8.611, "interv": 0, "clean": true}
+{"ep": 10, "reached": true, "collided": false, "min_clr": 4.881, "interv": 0, "clean": true}
+{"ep": 11, "reached": true, "collided": false, "min_clr": 1.71, "interv": 0, "clean": true}
+{"ep": 12, "reached": true, "collided": false, "min_clr": 6.207, "interv": 0, "clean": true}
+{"ep": 13, "reached": false, "collided": true, "min_clr": -0.008, "interv": 0, "clean": false, "culprit": {"cls": "static", "r": 0.37, "in_track": true, "track_dist": 0.09, "n_ready": 7, "n_live": 7, "bearing_deg": -87.4, "in_cone": false, "speed": 0.0, "decision": "no-shield"}}
+{"ep": 14, "reached": false, "collided": true, "min_clr": -0.038, "interv": 0, "clean": false, "culprit": {"cls": "static", "r": 0.37, "in_track": true, "track_dist": 0.13, "n_ready": 4, "n_live": 6, "bearing_deg": 120.2, "in_cone": false, "speed": 0.0, "decision": "no-shield"}}
+{"ep": 15, "reached": true, "collided": false, "min_clr": 1.617, "interv": 0, "clean": true}
+{"ep": 16, "reached": true, "collided": false, "min_clr": 8.179, "interv": 0, "clean": true}
+{"ep": 17, "reached": true, "collided": false, "min_clr": 0.701, "interv": 0, "clean": true}
+{"ep": 18, "reached": true, "collided": false, "min_clr": 0.232, "interv": 0, "clean": true}
+{"ep": 19, "reached": true, "collided": false, "min_clr": 11.167, "interv": 0, "clean": true}
+{"ep": 20, "reached": false, "collided": false, "min_clr": 10.335, "interv": 0, "clean": false}
+{"ep": 21, "reached": true, "collided": false, "min_clr": 14.296, "interv": 0, "clean": true}
+{"ep": 22, "reached": true, "collided": false, "min_clr": 14.873, "interv": 0, "clean": true}
+{"ep": 23, "reached": true, "collided": false, "min_clr": 12.509, "interv": 0, "clean": true}
+{"ep": 24, "reached": true, "collided": false, "min_clr": 15.284, "interv": 0, "clean": true}
+{"ep": 25, "reached": true, "collided": false, "min_clr": 17.419, "interv": 0, "clean": true}
+{"ep": 26, "reached": true, "collided": false, "min_clr": 15.112, "interv": 0, "clean": true}
+{"ep": 27, "reached": false, "collided": true, "min_clr": -0.758, "interv": 0, "clean": false, "culprit": {"cls": "vehicle", "r": 2.87, "in_track": false, "track_dist": 16.32, "n_ready": 2, "n_live": 3, "bearing_deg": 49.9, "in_cone": false, "speed": 8.33, "decision": "no-shield"}}
+{"ep": 28, "reached": false, "collided": true, "min_clr": -0.074, "interv": 0, "clean": false, "culprit": {"cls": "static", "r": 1.0, "in_track": true, "track_dist": 0.07, "n_ready": 1, "n_live": 1, "bearing_deg": -23.8, "in_cone": true, "speed": 0.0, "decision": "no-shield"}}
+{"ep": 29, "reached": false, "collided": true, "min_clr": -0.249, "interv": 0, "clean": false, "culprit": {"cls": "static", "r": 1.0, "in_track": true, "track_dist": 0.06, "n_ready": 1, "n_live": 1, "bearing_deg": -67.8, "in_cone": false, "speed": 0.0, "decision": "no-shield"}}
+{"ep": 30, "reached": true, "collided": false, "min_clr": 0.207, "interv": 0, "clean": true}
+{"ep": 31, "reached": true, "collided": false, "min_clr": 3.422, "interv": 0, "clean": true}
+{"ep": 32, "reached": true, "collided": false, "min_clr": 16.2, "interv": 0, "clean": true}
+{"ep": 33, "reached": true, "collided": false, "min_clr": 8.763, "interv": 0, "clean": true}
+{"ep": 34, "reached": true, "collided": false, "min_clr": 12.702, "interv": 0, "clean": true}
+{"ep": 35, "reached": true, "collided": false, "min_clr": 0.038, "interv": 0, "clean": true}
+{"ep": 36, "reached": true, "collided": false, "min_clr": 7.867, "interv": 0, "clean": true}
+{"ep": 37, "reached": true, "collided": false, "min_clr": 12.085, "interv": 0, "clean": true}
+{"ep": 38, "reached": true, "collided": false, "min_clr": 10.973, "interv": 0, "clean": true}
+{"ep": 39, "reached": false, "collided": true, "min_clr": -0.792, "interv": 0, "clean": false, "culprit": {"cls": "vehicle", "r": 2.44, "in_track": true, "track_dist": 2.49, "n_ready": 1, "n_live": 1, "bearing_deg": -55.8, "in_cone": false, "speed": 8.33, "decision": "no-shield"}}
+{"ep": 40, "reached": false, "collided": true, "min_clr": -0.729, "interv": 0, "clean": false, "culprit": {"cls": "vehicle", "r": 2.15, "in_track": true, "track_dist": 2.43, "n_ready": 1, "n_live": 1, "bearing_deg": -92.7, "in_cone": false, "speed": 8.33, "decision": "no-shield"}}
+{"ep": 41, "reached": true, "collided": false, "min_clr": 5.597, "interv": 0, "clean": true}
+{"ep": 42, "reached": true, "collided": false, "min_clr": 9.123, "interv": 0, "clean": true}
+{"ep": 43, "reached": true, "collided": false, "min_clr": 4.169, "interv": 0, "clean": true}
+{"ep": 44, "reached": true, "collided": false, "min_clr": 15.053, "interv": 0, "clean": true}
+{"ep": 45, "reached": true, "collided": false, "min_clr": 11.04, "interv": 0, "clean": true}
+{"ep": 46, "reached": true, "collided": false, "min_clr": 10.618, "interv": 0, "clean": true}
+{"ep": 47, "reached": true, "collided": false, "min_clr": 11.167, "interv": 0, "clean": true}
+{"ep": 48, "reached": false, "collided": false, "min_clr": 10.335, "interv": 0, "clean": false}
+{"ep": 49, "reached": true, "collided": false, "min_clr": 14.285, "interv": 0, "clean": true}
+{"ep": 50, "reached": true, "collided": false, "min_clr": 14.936, "interv": 0, "clean": true}
+{"ep": 51, "reached": true, "collided": false, "min_clr": 8.905, "interv": 0, "clean": true}
+{"ep": 52, "reached": true, "collided": false, "min_clr": 11.305, "interv": 0, "clean": true}
+{"ep": 53, "reached": true, "collided": false, "min_clr": 15.718, "interv": 0, "clean": true}
+{"ep": 54, "reached": true, "collided": false, "min_clr": 15.003, "interv": 0, "clean": true}
+{"ep": 55, "reached": true, "collided": false, "min_clr": 0.493, "interv": 0, "clean": true}
+{"ep": 56, "reached": true, "collided": false, "min_clr": 3.971, "interv": 0, "clean": true}
+{"ep": 57, "reached": true, "collided": false, "min_clr": 11.371, "interv": 0, "clean": true}
+{"ep": 58, "reached": true, "collided": false, "min_clr": 11.104, "interv": 0, "clean": true}
+{"ep": 59, "reached": true, "collided": false, "min_clr": 8.587, "interv": 0, "clean": true}
+{"ep": 60, "reached": true, "collided": false, "min_clr": 9.578, "interv": 0, "clean": true}
+{"ep": 61, "reached": true, "collided": false, "min_clr": 9.637, "interv": 0, "clean": true}
+{"ep": 62, "reached": true, "collided": false, "min_clr": 9.973, "interv": 0, "clean": true}
+{"ep": 63, "reached": true, "collided": false, "min_clr": 8.581, "interv": 0, "clean": true}
+{"ep": 64, "reached": true, "collided": false, "min_clr": 9.6, "interv": 0, "clean": true}
+{"ep": 65, "reached": true, "collided": false, "min_clr": 9.648, "interv": 0, "clean": true}
+{"ep": 66, "reached": true, "collided": false, "min_clr": 9.702, "interv": 0, "clean": true}
+{"ep": 67, "reached": false, "collided": true, "min_clr": -0.155, "interv": 0, "clean": false, "culprit": {"cls": "vehicle", "r": 1.83, "in_track": false, "track_dist": null, "n_ready": 0, "n_live": 0, "bearing_deg": 144.9, "in_cone": false, "speed": 8.33, "decision": "no-shield"}}
+{"ep": 68, "reached": true, "collided": false, "min_clr": 11.162, "interv": 0, "clean": true}
+{"ep": 69, "reached": true, "collided": false, "min_clr": 8.29, "interv": 0, "clean": true}
+{"ep": 70, "reached": true, "collided": false, "min_clr": 0.936, "interv": 0, "clean": true}
+{"ep": 71, "reached": false, "collided": true, "min_clr": -1.323, "interv": 0, "clean": false, "culprit": {"cls": "vehicle", "r": 2.87, "in_track": false, "track_dist": null, "n_ready": 0, "n_live": 0, "bearing_deg": 128.7, "in_cone": false, "speed": 8.33, "decision": "no-shield"}}
+{"ep": 72, "reached": true, "collided": false, "min_clr": 6.005, "interv": 0, "clean": true}
+{"ep": 73, "reached": false, "collided": false, "min_clr": 2.575, "interv": 0, "clean": false}
+{"ep": 74, "reached": false, "collided": true, "min_clr": -0.186, "interv": 0, "clean": false, "culprit": {"cls": "static", "r": 0.31, "in_track": true, "track_dist": 0.04, "n_ready": 7, "n_live": 7, "bearing_deg": -40.9, "in_cone": true, "speed": 0.0, "decision": "no-shield"}}
+{"ep": 75, "reached": true, "collided": false, "min_clr": 11.843, "interv": 0, "clean": true}
+{"ep": 76, "reached": true, "collided": false, "min_clr": 9.6, "interv": 0, "clean": true}
+{"ep": 77, "reached": true, "collided": false, "min_clr": 9.648, "interv": 0, "clean": true}
+{"ep": 78, "reached": true, "collided": false, "min_clr": 9.95, "interv": 0, "clean": true}
+{"ep": 79, "reached": true, "collided": false, "min_clr": 12.509, "interv": 0, "clean": true}
+{"ep": 80, "reached": true, "collided": false, "min_clr": 15.284, "interv": 0, "clean": true}
+{"ep": 81, "reached": true, "collided": false, "min_clr": 17.419, "interv": 0, "clean": true}
+{"ep": 82, "reached": true, "collided": false, "min_clr": 15.112, "interv": 0, "clean": true}
+{"ep": 83, "reached": true, "collided": false, "min_clr": 2.04, "interv": 0, "clean": true}
+{"ep": 84, "reached": false, "collided": true, "min_clr": -0.065, "interv": 0, "clean": false, "culprit": {"cls": "static", "r": 1.0, "in_track": true, "track_dist": 0.13, "n_ready": 2, "n_live": 2, "bearing_deg": 59.9, "in_cone": false, "speed": 0.0, "decision": "no-shield"}}
+{"ep": 85, "reached": true, "collided": false, "min_clr": 1.883, "interv": 0, "clean": true}
+{"ep": 86, "reached": false, "collided": true, "min_clr": -0.103, "interv": 0, "clean": false, "culprit": {"cls": "static", "r": 0.26, "in_track": true, "track_dist": 0.06, "n_ready": 8, "n_live": 8, "bearing_deg": 122.2, "in_cone": false, "speed": 0.0, "decision": "no-shield"}}
+{"ep": 87, "reached": true, "collided": false, "min_clr": 4.46, "interv": 0, "clean": true}
+{"ep": 88, "reached": true, "collided": false, "min_clr": 1.899, "interv": 0, "clean": true}
+{"ep": 89, "reached": true, "collided": false, "min_clr": 12.373, "interv": 0, "clean": true}
+{"ep": 90, "reached": false, "collided": false, "min_clr": 5.8, "interv": 0, "clean": false}
+{"ep": 91, "reached": false, "collided": true, "min_clr": -1.492, "interv": 0, "clean": false, "culprit": {"cls": "vehicle", "r": 2.3, "in_track": false, "track_dist": null, "n_ready": 0, "n_live": 0, "bearing_deg": 64.7, "in_cone": false, "speed": 8.33, "decision": "no-shield"}}
+{"ep": 92, "reached": true, "collided": false, "min_clr": 12.87, "interv": 0, "clean": true}
+{"ep": 93, "reached": true, "collided": false, "min_clr": 13.321, "interv": 0, "clean": true}
+{"ep": 94, "reached": true, "collided": false, "min_clr": 11.909, "interv": 0, "clean": true}
+{"ep": 95, "reached": false, "collided": true, "min_clr": -0.761, "interv": 0, "clean": false, "culprit": {"cls": "static", "r": 1.0, "in_track": true, "track_dist": 0.11, "n_ready": 3, "n_live": 4, "bearing_deg": 3.5, "in_cone": true, "speed": 0.0, "decision": "no-shield"}}
+{"ep": 96, "reached": true, "collided": false, "min_clr": 1.443, "interv": 0, "clean": true}
+{"ep": 97, "reached": true, "collided": false, "min_clr": 2.762, "interv": 0, "clean": true}
+{"ep": 98, "reached": true, "collided": false, "min_clr": 4.43, "interv": 0, "clean": true}
+{"ep": 99, "reached": true, "collided": false, "min_clr": 0.868, "interv": 0, "clean": true}
+{"ep": 100, "reached": true, "collided": false, "min_clr": 8.611, "interv": 0, "clean": true}
