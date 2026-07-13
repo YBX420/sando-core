@@ -304,6 +304,7 @@ def run_replay(movers, ep, mode="ours", calib=None, predict=True, max_vel=3.0, m
     counts = {k: 0 for k in ("straight", "around_l", "around_r", "over", "climb", "evade", "cret", "native", "sando")}
     _stick = {}                                      # SMOOTH=1 incumbent-maneuver state (kind/age)
     _v3st = {}                                        # DECIDE=v3 CPL incumbent (warm-start) state
+    _v2esc = {}                                       # V2_ESC=1: pre-certified escape branch for v2
     rta = dict(certified_ticks=0, violations=0)      # RTA failure rate: cert-passed tick followed by
     #                                                  a clearance violation within the SAME trust window
     hist = []
@@ -624,6 +625,40 @@ def run_replay(movers, ep, mode="ours", calib=None, predict=True, max_vel=3.0, m
                                                    cruise_z=CRUISE_Z, horizon=HORIZON, delta=DELTA)
                 if kind in ("around_l2", "around_r2"):
                     kind = kind[:-1]                        # counts/HUD keep the l/r bucket names
+                if os.environ.get("V2_ESC", "0") == "1":
+                    # v2 escape tree: the tournament's evade is an UNCERTIFIED flee; replace it with
+                    # a certified maneuver when one exists. Commit ticks pre-certify a contingency
+                    # branch from the predicted commit-end state (obstacles advanced one tick,
+                    # staleness DELTA+DT -- exact time-frame shift); evade ticks fly L1.5 (fresh
+                    # dodge grid) or L2 (the stored pre-certified branch).
+                    import local_lattice as _LL2
+                    if kind == "evade":
+                        _ep2 = _LL2.escape_fallback(p_d, v_d, a_d, cyl, max_acc, DT, DELTA,
+                                                    v_max=max_vel)
+                        if _ep2 is not None:
+                            p_ref, v_ref, a_ref = _LL2.plan_eval(_ep2, DT)
+                            _v2esc["fb"] = {"plan": _ep2, "t": DT}
+                            kind = "brake"
+                            counts["brake_esc"] = counts.get("brake_esc", 0) + 1
+                        else:
+                            _fb2 = _v2esc.get("fb")
+                            if _fb2 is not None and _fb2["t"] + DT <= _fb2["plan"][2]:
+                                _fb2["t"] += DT
+                                p_ref, v_ref, a_ref = _LL2.plan_eval(_fb2["plan"], _fb2["t"])
+                                kind = "brake"
+                                counts["brake_stale"] = counts.get("brake_stale", 0) + 1
+                    else:
+                        _rr2 = ego.eval(min(_v2s * DT, max(ego.duration() - 1e-3, 0.0)))
+                        if _rr2 is not None:
+                            _bp2 = _LL2.precertify_branch(
+                                np.asarray(_rr2[0], float), _v2s * np.asarray(_rr2[1], float),
+                                _v2s * _v2s * np.asarray(_rr2[2], float), cyl, max_acc, DT, DELTA,
+                                v_max=max_vel)
+                            if _bp2 is not None:
+                                _v2esc["fb"] = {"plan": _bp2, "t": 0.0}
+                            else:
+                                _v2esc.pop("fb", None)      # no certified contingency from here: an
+                                #   emergency next tick is a genuine evade, not a stale-branch ride
             elif SMOOTH and cont_cert:
                 _strict = lambda: SL.cert_clear(ego, cyl, tau=TAU, delta=DELTA + SMOOTH_MARGIN)
                 kind = SL.maneuver_decide_sticky(ego, p_d, v_d, a_d, goal, ztop, clear_fn, _stick,

@@ -213,6 +213,29 @@ def escape_fallback(p, v, a, cyl, a_max, dt=DT, delta=DT, angles=(45.0, 90.0), h
     return (segs, durs, t_cert)
 
 
+def precertify_branch(p, v, a, cyl, a_max, dt=DT, delta=DT, angles=(45.0, 90.0), hops=(1.5, 3.0),
+                      v_max=3.0):
+    """Pre-certify a contingency branch that STARTS one tick ahead (v2 escape tree): (p,v,a) is the
+    predicted commit-end state; obstacles are advanced by dt and the keep-out staleness by dt
+    (c(t)=c0+vel*t at absolute t equals (c0+vel*dt)+vel*t' at branch time t', and R+v_eff*(t+delta)
+    equals R+v_eff*(t'+(delta+dt)) -- exact time-frame shift, no new assumptions). Straight
+    decelerate-to-rest first, then the dodge grid. Returns (segs, durs, t_cert) or None."""
+    cyl_adv = [(np.asarray(c0, float) + np.asarray(vel, float) * dt + 0.5 * np.asarray(acc, float) * dt * dt,
+                np.asarray(vel, float) + np.asarray(acc, float) * dt, acc, R, zc, veff)
+               for (c0, vel, acc, R, zc, veff) in cyl]
+    d_eff = delta + dt
+    prim = quintic3(p, v, a, p, v * 0.0, np.zeros(3), T_P)
+    segs, durs, tc = make_composite(prim, a_max, dt)
+    ok, _m, who = certify_composite(segs, durs, cyl_adv, tc, d_eff, want_who=True)
+    if ok:
+        return (segs, durs, tc)
+    r = try_escapes(prim, a_max, dt, cyl_adv, d_eff, who, angles, hops, v_max)
+    if r is None:
+        return None
+    segs, durs, tc, _, _ = r
+    return (segs, durs, tc)
+
+
 def _nearest_cyl(p, cyl):
     """Index of the planar-nearest cylinder (refuter proxy for the fallback escape order)."""
     if not cyl:
