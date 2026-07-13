@@ -222,7 +222,8 @@ def precertify_branch(p, v, a, cyl, a_max, dt=DT, delta=DT, angles=(45.0, 90.0),
     decelerate-to-rest first, then the dodge grid. Returns (segs, durs, t_cert) or None."""
     cyl_adv = [(np.asarray(ent[0], float) + np.asarray(ent[1], float) * dt
                 + 0.5 * np.asarray(ent[2], float) * dt * dt,
-                np.asarray(ent[1], float) + np.asarray(ent[2], float) * dt) + tuple(ent[3:6])
+                np.asarray(ent[1], float) + np.asarray(ent[2], float) * dt,
+                np.asarray(ent[2], float)) + tuple(ent[3:6])
                for ent in cyl]   # v4 ellipse field (ent[6]) deliberately DROPPED: the escape tree
     #   certifies against the isotropic circle (a superset of the ellipse at the same q -- sound,
     #   just conservative; branch certs and the main gate may disagree only toward more caution)
