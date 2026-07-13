@@ -457,6 +457,12 @@ def maneuver_decide_v2(ego, p_d, v_d, a_d, goal, ztop, cyl, state,
         return extra_gate() if extra_gate is not None else True
 
     _tau_speed = os.environ.get("TAU_SPEED", "0") == "1"
+    _fov_on = os.environ.get("FOV_RET", "0") == "1"
+    if _fov_on:
+        # sensor cone mirrored from the perception front-end defaults (perception.py from_env);
+        # the tournament has no live handle on the front-end object, only its published dials
+        _fov_cos = math.cos(math.radians(min(float(os.environ.get("PERCEPT_FOV_DEG", "45.0")), 180.0)))
+        _fov_rng = float(os.environ.get("PERCEPT_RANGE", "10.0"))
 
     def _cert_at(s, strict=False):
         dd = d + (strict_margin if strict else 0.0)
@@ -483,6 +489,37 @@ def maneuver_decide_v2(ego, p_d, v_d, a_d, goal, ztop, cyl, state,
         if rr is None:
             return -1e9
         return float(np.dot(np.asarray(rr[0], float)[:2] - p_d[:2], gdir))
+
+    def _fov_ret(s):
+        """FOV-retention of the CURRENT ego spline flown at warp s: the share of (moving keep-out,
+        sample time) pairs the yaw-to-path sensor cone keeps in view across the trust window.
+        Heading proxy = plan velocity direction (the executor yaws to the commanded path, so the
+        cone follows it within a tick). Statics are skipped (a remembered tree cannot be 'lost');
+        young frozen plates DO count via veff>0 -- they are exactly the tracks that need looks to
+        mature. Samples beyond sensor range score neither way; no relevant threat -> neutral 1.0."""
+        hits = tot = 0
+        hd = gdir
+        for k in range(1, 6):
+            tw = tau * k / 5.0
+            rr = ego.eval(min(s * tw, max(ego.duration() - 1e-3, 0.0)))
+            if rr is None:
+                continue
+            pp = np.asarray(rr[0], float)[:2]
+            ve = np.asarray(rr[1], float)[:2]
+            if float(np.hypot(*ve)) > 0.3:
+                hd = ve / float(np.hypot(*ve))
+            for (c0, vv, aa, R, zc, veff) in cyl:
+                if float(np.hypot(vv[0], vv[1])) <= 0.3 and veff <= 1e-6:
+                    continue
+                ct = (np.asarray(c0, float)[:2] + np.asarray(vv, float)[:2] * tw
+                      + 0.5 * np.asarray(aa, float)[:2] * tw * tw)
+                dv = ct - pp; dn = float(np.linalg.norm(dv))
+                if dn < 1e-6 or dn > _fov_rng:
+                    continue
+                tot += 1
+                if float(dv @ hd) / dn >= _fov_cos:
+                    hits += 1
+        return hits / tot if tot else 1.0
 
     # ESCAPE-PRESSURE TRIGGER (ESC_TRIG=1): a closing pocket kills EVERY candidate once shut --
     # vertical/wide escapes must be taken while they still certify. Signal = the gap to the nearest
@@ -581,17 +618,29 @@ def maneuver_decide_v2(ego, p_d, v_d, a_d, goal, ztop, cyl, state,
         # LEXICOGRAPHIC rank (speed first): a full-speed detour beats ANY slowdown -- pure
         # window-progress scoring is myopic (slow-and-straight outscores fast-but-sideways over
         # 0.75 s, then stays slow: harness time +45%). Slowdowns only beat evade.
-        if os.environ.get("SAFETY_BAND", "0") == "1":
-            # GapWeave S2 (user band ruling: surplus clearance beyond floor+0.5m is WASTE -- trade
-            # it for straightness/speed): quantized-progress ties broken by SMALLER excess margin.
-            _tc = min(tau, 0.30 + 0.5 * s_ok + 0.05) if _tau_speed else tau
-            _dd = d
-            _mok, _m = (cert_clear_margin(ego, cyl, tau=_tc, delta=_dd) if s_ok >= 0.999
-                        else cert_clear_warp_margin(ego, cyl, s_ok, tau=_tc, delta=_dd))
-            _excess = max(0.0, (_m if np.isfinite(_m) else 5.0) - 0.5)
-            key = (s_ok, round(sc / 0.15), -min(_excess, 5.0))
-            if key > (best[1], best[2], best[3] if len(best) > 3 else -1e9):
-                best = (dk, s_ok, round(sc / 0.15), -min(_excess, 5.0))
+        _band = os.environ.get("SAFETY_BAND", "0") == "1"
+        if _band or _fov_on:
+            key = [s_ok, round(sc / 0.15)]
+            if _fov_on:
+                # FOV-retention tiebreak (perception-aware tournament, Mueller lineage 2026-07-13):
+                # among equal-speed equal-progress candidates prefer the detour that KEEPS moving
+                # threats inside the sensor cone. Losing the threat starts a KF coast; coast
+                # inflates the calibrated tube; fat tubes kill the NEXT certificates. Preference
+                # only -- speed-first rank and every certificate untouched.
+                key.append(round(_fov_ret(s_ok), 2))
+            if _band:
+                # GapWeave S2 (user band ruling: surplus clearance beyond floor+0.5m is WASTE --
+                # trade it for straightness/speed): ties broken by SMALLER excess margin.
+                _tc = min(tau, 0.30 + 0.5 * s_ok + 0.05) if _tau_speed else tau
+                _dd = d
+                _mok, _m = (cert_clear_margin(ego, cyl, tau=_tc, delta=_dd) if s_ok >= 0.999
+                            else cert_clear_warp_margin(ego, cyl, s_ok, tau=_tc, delta=_dd))
+                _excess = max(0.0, (_m if np.isfinite(_m) else 5.0) - 0.5)
+                key.append(-min(_excess, 5.0))
+            key = tuple(key)
+            _prev = tuple(best[1:]) + (-1e9,) * (len(key) - len(best) + 1)
+            if key > _prev:
+                best = (dk,) + key
         elif (s_ok, sc) > (best[1], best[2]):
             best = (dk, s_ok, sc)
         if dk == "straight" and s_ok >= 0.999:

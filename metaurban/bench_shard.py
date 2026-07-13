@@ -56,7 +56,8 @@ for scn_name in POOL:
                        goal=[round(float(x), 2) for x in ep["goal"][:2]],
                        collided=bool(r["collided"]), min_clr=round(float(r["min_clr"]), 3),
                        t=round(float(r["time_s"]), 1), emerg=emerg,
-                       clean=bool(r["reached"] and not r["collided"] and emerg == 0))
+                       clean=bool(r["reached"] and not r["collided"] and emerg == 0),
+                       coast=int(cnt.get("coast_ticks", 0)), trk=int(cnt.get("trk_ticks", 0)))
         except Exception as e:
             row = dict(scn=scn_name, seed=sd, cfg=args.config, error=type(e).__name__)
         out.write(json.dumps(row) + "\n"); out.flush()

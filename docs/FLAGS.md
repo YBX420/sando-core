@@ -35,3 +35,9 @@
 | `V3_ESC_HOP` | 1.5,3.0 | 逃生距离网格(m);3.0 才打得过 head-on 中距(quintic 时长 vs 管增速的赛跑) |
 | `V3_ESC_TOPK` | 12 | 逃生树每拍候选预算(按意图进度取 top-K,hover 永远重试) |
 | `V2_ESC`(replay,V11 可用) | off | **逃生树接 v2/V11**:提交拍预证下一拍应急分支(障碍前推+DELTA+DT 时间系平移),evade 拍飞 L1.5 新鲜逃生/L2 预证分支。probe:evade 38→37、gauntlet 快 2.1s、14 拍无证→有证、0 撞;行为净收益小(v2 evade 集中在深口袋物理区),**主要收益=组合定理记账(evade 支瘦身)**;345 集待判。 |
+
+## FOV-retention 锦标赛打分(FOV_RET,2026-07-13)
+| 开关 | 默认 | 判决 |
+|---|---|---|
+| `FOV_RET`(replay+渲染,v2 锦标赛) | off | **感知感知 tiebreak**(Mueller 谱系,paper review 灵感#1):全网格打分 key 变 (速度, 进度/0.15 量化, FOV 保持率[, −excess if SAFETY_BAND])——同速同进度候选间选"移动威胁留在 45°×10m 视锥内"的绕行方向。保持率=信任窗 5 采样 × 移动 keep-out(\|v\|>0.3 或 veff>0;静物不计;超量程不计;无威胁=1.0 中性),朝向=计划速度方向(yaw-to-path 代理)。只动偏好:速度优先字典序、证书语义、incumbent 粘性全不动。因果链主张:coast 占比↓→λ-SHAPE-H 半径紧→干净抵达↑(用 COAST_LOG 测)。345 集 AB 判决:待跑。 |
+| `COAST_LOG` | off | 纯诊断:counts.trk_ticks/coast_ticks(ready 非 static track 的 coast 拍账),bench_shard 行加 coast/trk 字段。门控原因:counts 在字节回归哈希内。 |

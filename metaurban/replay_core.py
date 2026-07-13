@@ -58,6 +58,8 @@ CRET_GLIDE = os.environ.get("CRET_GLIDE", "0") == "1"   # task#7: on 'evade', tr
 #   mover-speed-limited freezes into certified slow progress. Default OFF = frozen behaviour.
 CRET_GLIDE_SMIN = float(os.environ.get("CRET_GLIDE_SMIN", "0.10"))
 VERDICT3_LOG = os.environ.get("VERDICT3_LOG", "0") == "1"
+COAST_LOG = os.environ.get("COAST_LOG", "0") == "1"   # counts.trk_ticks/coast_ticks: coast-share
+#   ledger for the FOV-retention causal chain (gated: counts is in the byte-regression hash)
 CALIB_V2 = os.environ.get("CALIB_V2", "0") == "1"
 V_CAP = os.environ.get("V_CAP", "0") == "1"
 PING = os.environ.get("PING", "0") == "1"   # 终末嗡鸣 v0: when a track is NEAR, split the tick into
@@ -414,6 +416,16 @@ def run_replay(movers, ep, mode="ours", calib=None, predict=True, max_vel=3.0, m
                           for i in idx]
                 ptracks = percept_fe.step(p_d[:2], hd, gt_cyl)
                 percepts = [(tr.trk, tr.xy, tr.r, tr.h, tr.cls) for tr in ptracks]
+                if COAST_LOG:
+                    # coast ledger (FOV-retention causal chain, 2026-07-13): the share of tracked
+                    # mover-ticks spent coasting is the FIRST measurable the retention tiebreak is
+                    # built to shrink (coast share -> calibrated radius -> clean arrival). Gated:
+                    # counts is part of the byte-regression hash.
+                    for _ctr in ptracks:
+                        if _ctr.trk.ready and str(_ctr.cls) != "static":
+                            counts["trk_ticks"] = counts.get("trk_ticks", 0) + 1
+                            if _ctr.trk.miss > 0:
+                                counts["coast_ticks"] = counts.get("coast_ticks", 0) + 1
                 if PERCEPT_A2 is not None:
                     # A2 presence-miss, FUTURE-REACH qualification (theta2 2026-07-07): a mover is
                     # dangerous at tick t iff its ACTUAL GT future enters the drone's reachable ball
