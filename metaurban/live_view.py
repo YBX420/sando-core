@@ -263,6 +263,7 @@ def main():
                 self.end_headers()
                 self.wfile.write(body)
 
+        socketserver.ThreadingTCPServer.allow_reuse_address = True     # survive TIME_WAIT restarts
         _srv = socketserver.ThreadingTCPServer(("0.0.0.0", args.port), _H)
         _srv.daemon_threads = True
         threading.Thread(target=_srv.serve_forever, daemon=True).start()
