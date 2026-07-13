@@ -8,10 +8,12 @@
 set -e
 SC="$(cd "$(dirname "$0")/../.." && pwd)"
 cd /media/boxuan/Data2/projects/metaurban
+MODE="--serve"                                  # 默认浏览器推流;传 --live 则本地 pygame 窗口(不再起 serve)
+case " $* " in *" --live "*) MODE="";; esac
 exec env DISPLAY="${DISPLAY:-:1}" \
   PYTHONPATH=/media/boxuan/Data2/projects/metaurban \
   LD_PRELOAD="$HOME/miniconda3/envs/sando/lib/libstdc++.so.6" \
   HUMANOID_NO_IDLE="${HUMANOID_NO_IDLE:-60}" \
   "$HOME/miniconda3/envs/metaurban/bin/python" -u \
-  "$SC/metaurban/render_3d_video.py" --maneuver --clear_spawn --serve --loop_scene \
+  "$SC/metaurban/render_3d_video.py" --maneuver --clear_spawn $MODE --loop_scene \
   --seed 7 --w 560 --h 350 "$@"

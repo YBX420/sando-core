@@ -1738,6 +1738,7 @@ os.makedirs(os.path.join(_HERE, "out"), exist_ok=True)
 _MP4_OUT = os.environ.get("OUT_MP4") or os.path.join(_HERE, "out", "drone_3d.mp4")  # per-job override -> safe parallel renders
 writer = imageio.get_writer(_MP4_OUT, fps=args.fps) if args.mp4 else None
 WIN = "MetaUrban x SANDO — REAL-TIME 3D (FPV + 3rd person + planned path)"
+_LIVE_PG = {}                      # --live pygame window state (lazy init at first composed frame)
 
 # ---- real-time MJPEG-over-HTTP view (robust where cv2 windows are black on software GL) ----------
 import threading
@@ -2244,8 +2245,20 @@ while not quit_now:
                 if writer is not None: writer.close()
                 env.close(); sys.exit(0)
         if args.live:
-            cv2.imshow(WIN, frame)
-            if (cv2.waitKey(1) & 0xFF) in (27, ord('q')): quit_now = True; break
+            # pygame window, NOT cv2.imshow: cv2's Qt backend deadlocks/black-screens next to Panda3D
+            # in the same process (the historical "--live is black" pit) -- pygame coexists fine.
+            import pygame as _pg
+            if _LIVE_PG.get("s") is None:
+                _pg.display.init()
+                _LIVE_PG["s"] = _pg.display.set_mode((frame.shape[1], frame.shape[0]))
+                _pg.display.set_caption(WIN)
+            _surf = _pg.image.frombuffer(np.ascontiguousarray(frame[..., ::-1]).tobytes(),
+                                         (frame.shape[1], frame.shape[0]), "RGB")
+            _LIVE_PG["s"].blit(_surf, (0, 0)); _pg.display.flip()
+            for _e in _pg.event.get():
+                if _e.type == _pg.QUIT or (_e.type == _pg.KEYDOWN and _e.key in (_pg.K_ESCAPE, _pg.K_q)):
+                    quit_now = True
+            if quit_now: break
         if os.environ.get("MAN_TRACE") == "1" and (iters % 20 == 0):
             print(f"[trace] t={t:5.1f}s p=({p_d[0]:6.1f},{p_d[1]:6.1f},{p_d[2]:4.1f}) "
                   f"dgoal={np.linalg.norm(p_d[:2]-GOAL[:2]):5.1f}m wp_i={wp_i} kind={man_kind} "
