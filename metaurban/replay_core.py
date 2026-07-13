@@ -774,8 +774,23 @@ def run_replay(movers, ep, mode="ours", calib=None, predict=True, max_vel=3.0, m
             if tick_clr < 1e17 and tick_clr < 0.0:
                 rta["violations"] += 1               # flew a CERT-PASSED plan into a violation
         if tick_cb is not None:
+            # rich payload for live viewers (live_view.py): committed traj + keep-out cylinders +
+            # counts. Everything stays inside this guard -- the default path (tick_cb=None) is untouched.
+            _cbc = cyl if "cyl" in locals() else []
+            _cbtraj = None
+            if ego is not None:
+                try:
+                    _dur = max(ego.duration() - 1e-3, 0.0)
+                    _rr = [ego.eval(_dur * k / 24.0) for k in range(25)]
+                    _cbtraj = [np.asarray(r0[0], float) for r0 in _rr if r0 is not None]
+                except Exception:
+                    _cbtraj = None
             tick_cb(dict(tick=tick, t=t, p=p_d.copy(), kind=kind,
-                         clr=(tick_clr if tick_clr < 1e17 else None)))
+                         clr=(tick_clr if tick_clr < 1e17 else None),
+                         v=v_d.copy(), org=org.copy(), goal=goal.copy(),
+                         traj=_cbtraj, counts=dict(counts),
+                         cyl=[(np.asarray(c[0], float)[:2].copy(), np.asarray(c[1], float)[:2].copy(),
+                               float(c[3]), float(c[5])) for c in _cbc]))
         if record:
             _v3 = None
             if VERDICT3_LOG and kind == "evade" and cont_cert:
