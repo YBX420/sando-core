@@ -797,10 +797,21 @@ def run_replay(movers, ep, mode="ours", calib=None, predict=True, max_vel=3.0, m
                     _cbtraj = [np.asarray(r0[0], float) for r0 in _rr if r0 is not None]
                 except Exception:
                     _cbtraj = None
+            _esc = None                                # V2_ESC: the pre-certified escape branch in hand
+            try:
+                _fb_cb = _v2esc.get("fb") if isinstance(_v2esc, dict) else None
+                if _fb_cb is not None:
+                    import local_lattice as _LLcb
+                    _edur = float(_fb_cb["plan"][2]); _et0 = float(_fb_cb.get("t", 0.0))
+                    _esc = [np.asarray(_LLcb.plan_eval(_fb_cb["plan"],
+                                                       _et0 + (_edur - _et0) * k / 12.0)[0], float)
+                            for k in range(13)]
+            except Exception:
+                _esc = None
             tick_cb(dict(tick=tick, t=t, p=p_d.copy(), kind=kind,
                          clr=(tick_clr if tick_clr < 1e17 else None),
                          v=v_d.copy(), org=org.copy(), goal=goal.copy(),
-                         traj=_cbtraj, counts=dict(counts),
+                         traj=_cbtraj, counts=dict(counts), esc=_esc,
                          cyl=[(np.asarray(c[0], float)[:2].copy(), np.asarray(c[1], float)[:2].copy(),
                                float(c[3]), float(c[5])) for c in _cbc]))
         if record:

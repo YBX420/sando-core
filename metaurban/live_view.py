@@ -73,8 +73,8 @@ class Live:
             raise SystemExit
         with self.lock:
             self.latest = info
-            self.trail.append((np.asarray(info["p"][:2], float) + info["org"],
-                               KINDC.get(info["kind"], (200, 200, 200))))
+            self.trail.append((float(info["p"][0] + info["org"][0]), float(info["p"][1] + info["org"][1]),
+                               float(info["p"][2]), info["kind"]))
         while not self.run_evt.is_set():      # paused: block the control loop itself
             if self.stop:
                 raise SystemExit
@@ -147,6 +147,10 @@ def main():
     ap.add_argument("--ticks", type=int, default=0, help="auto-quit after N ticks (self-test)")
     ap.add_argument("--shot", default=None, help="TICK:PATH — save a screenshot once tick >= TICK")
     ap.add_argument("--dummy", action="store_true", help="SDL dummy video driver (headless self-test)")
+    ap.add_argument("--serve", action="store_true",
+                    help="ALSO serve an RViz-style 3D wireframe view over HTTP (live_view3d.html + /state)")
+    ap.add_argument("--port", type=int, default=8090, help="port for --serve")
+    ap.add_argument("--loop", action="store_true", help="restart the episode forever (continuous viewing)")
     ap.add_argument("--stack", default="v11esc", choices=sorted(STACKS),
                     help="switch preset applied via setdefault (default: active V11 + escape tree)")
     args = ap.parse_args()
@@ -175,13 +179,21 @@ def main():
     live = Live(args.speed)
 
     def worker():
-        try:
-            live.done = RC.run_replay(movers, ep, mode=args.mode, tick_cb=live.cb,
-                                      max_vel=float(scn["drone"].get("max_vel", 3.0)))
-        except SystemExit:
-            pass
-        except Exception:
-            live.err = traceback.format_exc()
+        while True:
+            try:
+                live.done = RC.run_replay(movers, ep, mode=args.mode, tick_cb=live.cb,
+                                          max_vel=float(scn["drone"].get("max_vel", 3.0)))
+            except SystemExit:
+                return
+            except Exception:
+                live.err = traceback.format_exc()
+                return
+            if not args.loop or live.stop:
+                return
+            time.sleep(1.5)                          # let the DONE banner breathe, then restart
+            with live.lock:
+                live.trail.clear(); live.latest = None; live.done = None
+            live._lt = live._lw = None
 
     pg.init()
     screen = pg.display.set_mode((args.w, args.h))
@@ -202,6 +214,59 @@ def main():
 
     th = threading.Thread(target=worker, daemon=True)
     th.start()
+
+    if args.serve:                                # RViz-style 3D wireframe over HTTP (live_view3d.html)
+        import http.server
+        import socketserver
+        _html = open(os.path.join(MU, "live_view3d.html"), "rb").read()
+
+        def state_json():
+            with live.lock:
+                info = live.latest; tr = list(live.trail)[-600:]
+                done = live.done is not None; rtf = live.rtf; err = live.err is not None
+            t_now = info["t"] if info else ep["t0"]
+            mv = []
+            for i in range(len(movers.m)):
+                if movers.present(i, t_now):
+                    q = movers.pos(i, t_now); m = movers.m[i]
+                    mv.append([float(q[0]), float(q[1]), float(m.get("r", 0.3)),
+                               float(m.get("h", 1.8)), str(m.get("cls", "pedestrian"))])
+            st = dict(t=float(t_now), start=[float(x) for x in ep["start"]],
+                      goal=[float(x) for x in ep["goal"]], movers=mv, trail=tr,
+                      rtf=rtf, speed=live.speed, done=done, err=err, tau=tau_ghost)
+            if info:
+                o = info["org"]
+                st.update(tick=int(info["tick"]), kind=info["kind"],
+                          clr=(float(info["clr"]) if info["clr"] is not None else None),
+                          p=[float(info["p"][0] + o[0]), float(info["p"][1] + o[1]), float(info["p"][2])],
+                          v=[float(x) for x in info["v"]], counts=info["counts"],
+                          traj=[[float(q[0] + o[0]), float(q[1] + o[1]), float(q[2])]
+                                for q in (info["traj"] or [])],
+                          esc=([[float(q[0] + o[0]), float(q[1] + o[1]), float(q[2])]
+                                for q in info["esc"]] if info.get("esc") else None),
+                          cyl=[[float(c[0][0] + o[0]), float(c[0][1] + o[1]),
+                                float(c[1][0]), float(c[1][1]), float(c[2]), float(c[3])]
+                               for c in info["cyl"]])
+            return st
+
+        class _H(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *a):
+                pass
+            def do_GET(self):
+                if self.path.startswith("/state"):
+                    body, ctype = json.dumps(state_json()).encode(), "application/json"
+                else:
+                    body, ctype = _html, "text/html; charset=utf-8"
+                self.send_response(200)
+                self.send_header("Content-Type", ctype)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+        _srv = socketserver.ThreadingTCPServer(("0.0.0.0", args.port), _H)
+        _srv.daemon_threads = True
+        threading.Thread(target=_srv.serve_forever, daemon=True).start()
+        print(f"[live] 3D RViz view: http://localhost:{args.port}", flush=True)
     clock = pg.time.Clock()
     follow = args.follow
     scaled_film = None                        # (surface, topleft_world) cache, rebuilt on zoom change
@@ -282,9 +347,13 @@ def main():
                 pts = [w2s(np.asarray(q[:2], float) + info["org"], cen, ppm) for q in info["traj"]]
                 if len(pts) > 1:
                     pg.draw.lines(screen, (80, 230, 130), False, pts, 2)
-            # trail + drone
-            for (xy, col) in trail[-800:]:
-                pg.draw.circle(screen, col, w2s(xy, cen, ppm), 2)
+            # pre-certified escape branch in hand (V2_ESC), then trail + drone
+            if info.get("esc"):
+                pts = [w2s(np.asarray(q[:2], float) + info["org"], cen, ppm) for q in info["esc"]]
+                if len(pts) > 1:
+                    pg.draw.lines(screen, (255, 180, 60), False, pts, 2)
+            for (tx0, ty0, _tz, tk) in trail[-800:]:
+                pg.draw.circle(screen, KINDC.get(tk, (200, 200, 200)), w2s((tx0, ty0), cen, ppm), 2)
             pg.draw.circle(screen, (245, 245, 245), w2s(p_dw, cen, ppm), max(3, int(0.25 * ppm)))
             v = np.asarray(info["v"][:2], float)
             pg.draw.line(screen, (250, 220, 90), w2s(p_dw, cen, ppm), w2s(p_dw + v * 0.8, cen, ppm), 2)

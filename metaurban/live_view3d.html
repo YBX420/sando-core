@@ -1,0 +1,113 @@
+<!doctype html>
+<!-- live_view3d — RViz-style 3D wireframe view of the replay-face stack (served by live_view.py --serve).
+     Zero dependencies: hand-rolled 3D->2D projection on a 2D canvas. Drag = orbit, wheel = zoom,
+     F = follow drone, dblclick = reset. Polls /state at 10 Hz. -->
+<html><head><meta charset="utf-8"><title>sando live 3D</title>
+<style>
+  html,body{margin:0;height:100%;background:#101216;overflow:hidden}
+  canvas{display:block}
+  #hud{position:fixed;top:8px;left:10px;font:13px monospace;color:#c8d0da;background:rgba(12,13,16,.78);
+       padding:8px 10px;border-radius:4px;white-space:pre;pointer-events:none}
+  #fire{position:fixed;top:8px;right:12px;font:bold 15px monospace;color:#ff5050;display:none}
+</style></head><body>
+<canvas id="cv"></canvas><div id="hud">connecting…</div><div id="fire">ESC TREE FIRED</div>
+<script>
+"use strict";
+const cv = document.getElementById("cv"), ctx = cv.getContext("2d");
+let W, H; function rs(){ W = cv.width = innerWidth; H = cv.height = innerHeight; }
+addEventListener("resize", rs); rs();
+
+let S = null, yaw = 0.9, pitch = 0.85, dist = 45, tgt = null, follow = false;
+let prevEsc = 0, fireUntil = 0;
+const KC = {straight:"#5adc78", around_l:"#50c8e6", around_r:"#50c8e6", over:"#788cff", climb:"#788cff",
+            brake:"#ffaa3c", cret:"#c8c878", evade:"#f05050", cpl:"#dc6ef0", native:"#a0a0aa", sando:"#a0a0aa"};
+
+function P(w){                                   // world (z-up) -> screen [x, y, scale]
+  const dx = w[0]-tgt[0], dy = w[1]-tgt[1], dz = (w[2]||0)-tgt[2];
+  const cy = Math.cos(yaw), sy = Math.sin(yaw), cp = Math.cos(pitch), sp = Math.sin(pitch);
+  const x1 =  dx*cy + dy*sy, y1 = -dx*sy + dy*cy;
+  const depth = y1*cp + dz*sp + dist, up = -y1*sp + dz*cp;
+  if (depth < 0.3) return null;
+  const s = (H*1.15)/depth;
+  return [W/2 + x1*s, H*0.55 - up*s, s];
+}
+function line(pts, col, wd, dash){
+  ctx.strokeStyle = col; ctx.lineWidth = wd||1.5; ctx.setLineDash(dash||[]);
+  ctx.beginPath(); let pen = false;
+  for (const q of pts){ const a = P(q); if(!a){ pen=false; continue; }
+    pen ? ctx.lineTo(a[0],a[1]) : ctx.moveTo(a[0],a[1]); pen = true; }
+  ctx.stroke(); ctx.setLineDash([]);
+}
+function ring(cx0, cy0, z, r, col, wd){
+  const pts = []; for (let k=0; k<=28; k++){ const a = k/28*2*Math.PI;
+    pts.push([cx0 + r*Math.cos(a), cy0 + r*Math.sin(a), z]); }
+  line(pts, col, wd);
+}
+function cyl(cx0, cy0, r, h, col, wd){
+  ring(cx0, cy0, 0, r, col, wd); ring(cx0, cy0, h, r, col, wd);
+  for (let k=0; k<4; k++){ const a = k/4*2*Math.PI + 0.4;
+    line([[cx0+r*Math.cos(a), cy0+r*Math.sin(a), 0],[cx0+r*Math.cos(a), cy0+r*Math.sin(a), h]], col, wd*0.7); }
+}
+function dot(w, col, r){ const a = P(w); if(!a) return;
+  ctx.fillStyle = col; ctx.beginPath(); ctx.arc(a[0], a[1], r, 0, 7); ctx.fill(); }
+
+function draw(){
+  ctx.fillStyle = "#101216"; ctx.fillRect(0, 0, W, H);
+  if (!S || !tgt){ requestAnimationFrame(draw); return; }
+  const g0x = Math.floor((tgt[0]-40)/5)*5, g0y = Math.floor((tgt[1]-40)/5)*5;   // 5 m ground grid
+  for (let i=0; i<=16; i++){
+    line([[g0x+5*i, g0y, 0],[g0x+5*i, g0y+80, 0]], "#1e2127", 1);
+    line([[g0x, g0y+5*i, 0],[g0x+80, g0y+5*i, 0]], "#1e2127", 1);
+  }
+  ring(S.goal[0], S.goal[1], 0, 0.8, "#5adc78", 2);                              // goal + flag
+  line([[S.goal[0], S.goal[1], 0],[S.goal[0], S.goal[1], 2.2]], "#5adc78", 1.5);
+  dot(S.start, "#787f8a", 3);
+  for (const m of (S.movers||[]))                                               // GT movers
+    cyl(m[0], m[1], m[2], m[3], m[4]==="vehicle" ? "#ffa55a" : "#6eafff", 1.4);
+  for (const c of (S.cyl||[])){                                                 // conformal keep-outs
+    cyl(c[0], c[1], c[4], 2.5, "#eb5050", 1.8);
+    ring(c[0]+c[2]*S.tau, c[1]+c[3]*S.tau, 0, c[4]+c[5]*S.tau, "#7a2828", 1.2); // trust-window ghost
+    line([[c[0], c[1], 0],[c[0]+c[2], c[1]+c[3], 0]], "#eb5050", 1.2);
+  }
+  if (S.traj && S.traj.length > 1) line(S.traj, "#50e682", 2.2);                 // committed B-spline
+  const firing = performance.now() < fireUntil;
+  if (S.esc && S.esc.length > 1)                                                // pre-certified escape branch
+    line(S.esc, firing ? "#ff4040" : "#ffb43c", firing ? 3.5 : 1.8, [6,5]);
+  for (const q of (S.trail||[])) dot(q, KC[q[3]]||"#c8c8c8", 1.6);              // trail by decision kind
+  if (S.p){
+    line([[S.p[0], S.p[1], 0], S.p], "#586070", 1);                              // altitude drop-line
+    dot(S.p, "#f5f5f5", 4);
+    if (S.v) line([S.p, [S.p[0]+S.v[0]*0.8, S.p[1]+S.v[1]*0.8, S.p[2]+S.v[2]*0.8]], "#fadc5a", 2);
+    if (follow){ tgt[0] += (S.p[0]-tgt[0])*0.08; tgt[1] += (S.p[1]-tgt[1])*0.08; }
+  }
+  document.getElementById("fire").style.display = firing ? "block" : "none";
+  requestAnimationFrame(draw);
+}
+async function poll(){
+  try {
+    const r = await fetch("/state"); S = await r.json();
+    if (!tgt) tgt = [(S.start[0]+S.goal[0])/2, (S.start[1]+S.goal[1])/2, 0.8];
+    const esc_n = (S.counts?.brake_esc||0) + (S.counts?.brake_stale||0);
+    if (esc_n > prevEsc) fireUntil = performance.now() + 1200;
+    prevEsc = esc_n;
+    const c = S.counts || {}, cs = Object.entries(c).filter(([k,v])=>v>0).map(([k,v])=>k+":"+v).join(" ");
+    document.getElementById("hud").textContent =
+      `t=${(S.t??0).toFixed(1)}s  tick=${S.tick??"-"}  kind=${S.kind??"-"}  clr=${S.clr==null?"--":S.clr.toFixed(2)+"m"}\n`+
+      `|v|=${S.v?Math.hypot(...S.v).toFixed(2):"-"}m/s  rt=${S.rtf?S.rtf.toFixed(2)+"x":"--"}  speed=${S.speed}x\n`+
+      `${cs}\n`+
+      `esc branch: ${S.esc ? "ARMED (dashed)" : "none"}${S.done ? "   [EPISODE DONE]" : ""}\n`+
+      `drag=orbit  wheel=zoom  F=follow  dblclick=reset`;
+  } catch(e){ document.getElementById("hud").textContent = "state poll failed: " + e; }
+  setTimeout(poll, 100);
+}
+let drag = null;
+cv.onmousedown = e => drag = [e.clientX, e.clientY];
+onmouseup = () => drag = null;
+onmousemove = e => { if(!drag) return;
+  yaw += (e.clientX-drag[0])*0.008; pitch = Math.min(1.45, Math.max(0.12, pitch+(e.clientY-drag[1])*0.006));
+  drag = [e.clientX, e.clientY]; };
+cv.onwheel = e => { dist = Math.min(220, Math.max(6, dist*Math.exp(e.deltaY*0.0012))); e.preventDefault(); };
+ondblclick = () => { if(S) tgt=[(S.start[0]+S.goal[0])/2,(S.start[1]+S.goal[1])/2,0.8]; dist=45; yaw=0.9; pitch=0.85; };
+onkeydown = e => { if (e.key==="f"||e.key==="F") follow = !follow; };
+poll(); draw();
+</script></body></html>
