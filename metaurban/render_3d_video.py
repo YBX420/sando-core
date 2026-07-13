@@ -92,6 +92,10 @@ if os.environ.get("ORACLE_THIN", "0") == "1":
     os.environ.setdefault("EGO_TDYN", "1")
     os.environ.setdefault("EGO_TDYN_PAD", "0.2")
     os.environ.setdefault("EGO_MANDSAFE", "0.15")
+    # EGO_TAU_DYN deliberately NOT defaulted on: encounter-time cert windows tested WORSE on seed7
+    # (0.75s fixed 8.4s / 1.25s cap 8.8s / 2.5s cap 10.6s + 3s wake-crawl) -- the s=0 "he might stop"
+    # pearl freezes the mover's current spot for the WHOLE window, so a longer window kills the
+    # around candidates it was meant to enable. See FLAGS.md.
     os.environ.setdefault("CALIB_FILE_V6", os.path.join(os.path.dirname(_HERE), "out", "conformal", "calib_v6_thin.json"))
 if args.maneuver:
     args.ego = True; args.ego_safe = False   # the no-HOLD tournament REPLACES the ego_safe HOLD wrapper
@@ -859,7 +863,7 @@ def _kf_movers_realistic(p_d, t_sim, cam_heading):
             kv = np.array([v2[0], v2[1], 0.0])
             if not EGO_PREDICT:
                 kv = np.zeros(3)
-            pred = kc0[None, :] + np.linspace(0.0, EGO_TAU_TRUST, 6)[:, None] * kv[None, :]
+            pred = kc0[None, :] + np.linspace(0.0, _tau_now(), 6)[:, None] * kv[None, :]
             _ELL_TRK[oid] = (99, False, str(cls))           # mature, never coasting -> shape always eligible
             out.append((oid, kc0, (float(kv[0]), float(kv[1]), 0.0), float(r),
                         EGO_PERCLASS_DSAFE.get(cls, 0.8)))
@@ -882,7 +886,7 @@ def _kf_movers_realistic(p_d, t_sim, cam_heading):
         if tr.trk.ready:
             kc0, kv, _ka = tr.trk.state()
             kc0 = np.array([kc0[0], kc0[1], zc])
-            pred = tr.trk.predict(np.linspace(0.0, EGO_TAU_TRUST, 6))
+            pred = tr.trk.predict(np.linspace(0.0, _tau_now(), 6))
         else:
             kc0, kv = p3(tr.xy, zc), np.zeros(3)
             pred = np.asarray([kc0, kc0])
@@ -901,7 +905,7 @@ def _kf_movers_realistic(p_d, t_sim, cam_heading):
                                                  tr.miss > 0 and _ORA_MAP.get(tr.id) == gt[0]):
                 kc0 = np.array([gt[1][0], gt[1][1], zc])    # exact sim pos/vel; detection timing unchanged
                 kv = np.array([gt[2][0], gt[2][1], 0.0])
-                pred = kc0[None, :] + np.linspace(0.0, EGO_TAU_TRUST, 6)[:, None] * kv[None, :]
+                pred = kc0[None, :] + np.linspace(0.0, _tau_now(), 6)[:, None] * kv[None, :]
             if KFDBG and tr.cls == "pedestrian":
                 gs = (f"gt=({gt[1][0]:7.2f},{gt[1][1]:7.2f}) gtv=({gt[2][0]:6.2f},{gt[2][1]:6.2f}) d={gt_d:5.2f}"
                       if gt is not None else "gt=NONE")
@@ -960,7 +964,7 @@ def kf_movers(p_d, t_sim, cam_heading=None):
         trk.r_obs, trk.d_safe = r, d                                       # stash so out-of-cone memory needs no GT read
         if trk.ready:
             kc0, kv, _ka = trk.state()                                      # KF-smoothed centre + velocity
-            pred = trk.predict(np.linspace(0.0, EGO_TAU_TRUST, 6))          # KF-PREDICTED future trajectory
+            pred = trk.predict(np.linspace(0.0, _tau_now(), 6))          # KF-PREDICTED future trajectory
         else:
             kc0, kv = np.asarray(c3, float), np.zeros(3)
             pred = np.asarray([kc0, kc0])
@@ -969,7 +973,7 @@ def kf_movers(p_d, t_sim, cam_heading=None):
         if GT_ORACLE:                                                      # diagnostic: exact sim pos/vel, no noise/lag
             kc0 = np.asarray(c3, float)
             kv = np.array([gt_vel[0], gt_vel[1], 0.0])
-            pred = kc0[None, :] + np.linspace(0.0, EGO_TAU_TRUST, 6)[:, None] * kv[None, :]
+            pred = kc0[None, :] + np.linspace(0.0, _tau_now(), 6)[:, None] * kv[None, :]
         if KFDBG and _cls == "pedestrian":
             print(f"[KFDBG] t={t_sim:6.2f} {oid} n={trk.n:3d} "
                   f"gt=({c3[0]:7.2f},{c3[1]:7.2f}) gtv=({gt_vel[0]:6.2f},{gt_vel[1]:6.2f}) "
@@ -998,7 +1002,7 @@ def kf_movers(p_d, t_sim, cam_heading=None):
             if oid in _ELL_TRK:                                            # coasting -> ellipse ineligible
                 _ELL_TRK[oid] = (_ELL_TRK[oid][0], True, _ELL_TRK[oid][2])
             out.append((oid, kc0, (float(kv[0]), float(kv[1]), 0.0), r_mem, trk.d_safe))
-            pred = trk.predict(np.linspace(0.0, EGO_TAU_TRUST, 6))
+            pred = trk.predict(np.linspace(0.0, _tau_now(), 6))
             _KF_PRED.append((kc0[:2].copy(), kc0[:2].copy(), [(float(p[0]), float(p[1])) for p in pred], float(kc0[2])))
     return out
 
@@ -1200,6 +1204,17 @@ EGO_TDYN = os.environ.get("EGO_TDYN", "0") == "1"     # TIME-AWARE movers: solve
 #   have vacated; the pearl-chain cert still gates every commit (s=0 pearl keeps "he might stop" honest)
 EGO_TDYN_W = float(os.environ.get("EGO_TDYN_W", "10.0"))
 EGO_TDYN_PAD = float(os.environ.get("EGO_TDYN_PAD", "0.6"))   # hinge pad past r+d_safe (cert-scale reach)
+EGO_TAU_DYN = os.environ.get("EGO_TAU_DYN", "0") == "1"       # SPEED-MATCHED horizon: cert window & capsule
+#   tip stretch to the ENCOUNTER time (relative-motion CPA, clipped [tau, EGO_TAU_MAX]) instead of the
+#   fixed 0.75s -- at 8 m/s the fixed window sees 6m, the meeting point sits beyond it, and the only
+#   certifiable candidate is "brake and wait". q-tilde/v_eff are calibrated at tau=0.75: beyond that the
+#   KF arm is UNCHARTED coverage -- sound today only on the oracle arms (zero estimation error).
+EGO_TAU_MAX = float(os.environ.get("EGO_TAU_MAX", "2.5"))
+_TAU_NOW = [EGO_TAU_TRUST]                                    # per-tick dynamic horizon (drawing + pred reads)
+
+
+def _tau_now():
+    return _TAU_NOW[0] if EGO_TAU_DYN else EGO_TAU_TRUST
 assert not (MAN_ELLIPSE and MAN_CAPSULE), "ELLIPSE=1 and CAPSULE=1 are mutually exclusive"
 _ELL_V5 = {}; _ELL_VMIN = 0.5; _ELL_TRK = {}      # _ELL_TRK: oid -> (kf_age, coasting, cls)
 _CAP_V6 = {}; _CAP_K = 4
@@ -1269,8 +1284,8 @@ def _cap_ring(oid, kc0, vel, r_obs):
     if c is None:
         return None
     q6, veff6, _K, rear = c
-    rad = float(r_obs) + MAN_DSAFE + q6 + veff6 * (EGO_TAU_TRUST + REPLAN_DT)
-    tip = np.asarray(kc0[:2], float) + np.asarray(vel[:2], float) * EGO_TAU_TRUST
+    rad = float(r_obs) + MAN_DSAFE + q6 + veff6 * (_tau_now() + REPLAN_DT)
+    tip = np.asarray(kc0[:2], float) + np.asarray(vel[:2], float) * _tau_now()
     c0 = np.asarray(kc0[:2], float)
     sp = float(np.hypot(*(tip - c0)))
     u = (tip - c0) / sp if sp > 1e-6 else np.array([1.0, 0.0])
@@ -1278,7 +1293,7 @@ def _cap_ring(oid, kc0, vel, r_obs):
     if rear is not None and sp > 1e-6:
         # v6.1: FLAT rear -- the wake boundary sits at the (constant) rear-overrun quantile +
         # body/standoff behind the mover, not at the full growing q̃ cap
-        back = float(rear[0]) + float(rear[1]) * (EGO_TAU_TRUST + REPLAN_DT) + float(r_obs) + MAN_DSAFE
+        back = float(rear[0]) + float(rear[1]) * (_tau_now() + REPLAN_DT) + float(r_obs) + MAN_DSAFE
         bl = c0 - u * back
         n = np.array([-u[1], u[0]])
         pts = [(float(bl[0] + n[0] * rad), float(bl[1] + n[1] * rad)),
@@ -1474,6 +1489,18 @@ def ego_maneuver_replan(p_d, v_d, a_d, cur_wp, t_sim):
         ego.set_moving_obstacles(np.asarray(_rows, float).reshape(-1, 8), EGO_TDYN_W if _rows else 0.0)
         if KFDBG:
             print(f"[TDYN] t={t_sim:6.2f} fed {len(_rows)} movers w={EGO_TDYN_W}", flush=True)
+    if EGO_TAU_DYN:
+        # SPEED-MATCHED horizon: stretch the cert window / capsule tip to the latest ENCOUNTER time
+        # (relative-motion CPA) among tracked movers -- "the length is when the two will meet"
+        _tm = EGO_TAU_TRUST
+        _vd2 = np.asarray(v_d[:2], float)
+        for (_o, c3, vel, _r, _ds2) in movers:
+            _dp = np.array([c3[0] - p_d[0], c3[1] - p_d[1]])
+            _dv = np.array([vel[0], vel[1]]) - _vd2
+            _dvn = float(_dv @ _dv)
+            if _dvn > 1e-6:
+                _tm = max(_tm, float(np.clip(-(_dp @ _dv) / _dvn, 0.0, EGO_TAU_MAX)))
+        _TAU_NOW[0] = _tm
     if os.environ.get("MAN_SPAWNDBG") == "1" and _SPAWNDBG[0] < 4:
         _SPAWNDBG[0] += 1
         n360 = int(len(STATIC_CLOUD)) if len(STATIC_CLOUD) else 0
@@ -1671,7 +1698,7 @@ def ego_maneuver_replan(p_d, v_d, a_d, cur_wp, t_sim):
         kind, s_v2 = _SL.maneuver_decide_v2(
             ego, p_d, v_d, a_d, np.asarray(cur_wp, float), z_top, _cyl, _MAN_V2,
             cruise_z=CRUISE_Z, horizon=L, straight_clip=EGO_HOR,
-            tau=EGO_TAU_TRUST, delta=REPLAN_DT, carrot="angle",
+            tau=_tau_now(), delta=REPLAN_DT, carrot="angle",
             speeds=(1.0, 0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3),   # CCF-granularity warp grid (cert is 7us)
             extra_gate=lambda: static_clear() and mover_clear_flown())
         if kind in ("around_l2", "around_r2"):
@@ -1680,6 +1707,9 @@ def ego_maneuver_replan(p_d, v_d, a_d, cur_wp, t_sim):
             kind = "hold"                       # renderer semantics: never blind-flee into buildings
         dur = ego.duration()
         pts = [ego.eval(u)[0] for u in np.linspace(0, dur, 24)] if (kind != "hold" and dur > 1e-3) else None
+        if KFDBG and (kind == "hold" or s_v2 < 0.999):
+            print(f"[MANDBG] t={t_sim:6.2f} kind={kind} gear={s_v2:.2f} ncyl={len(_cyl)} "
+                  f"p=({p_d[0]:6.2f},{p_d[1]:6.2f}) v={float(np.hypot(v_d[0], v_d[1])):.2f}", flush=True)
         return kind, pts, (float(s_v2) if kind != "hold" else 1.0)
 
     chosen = None; man_g = 1.0
