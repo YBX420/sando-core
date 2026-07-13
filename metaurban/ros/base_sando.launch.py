@@ -91,9 +91,15 @@ def generate_launch_description():
         }
 
         # Choose the world file based on the provided environment.
-        world_file = world_mapping.get(env_value, 'easy_forest.world')
-        # SANDO: worlds served from OUR repo copy (metaurban/ros/worlds/), not the mighty install
-        world_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'worlds', world_file)
+        # SANDO: worlds served from OUR repo copy (metaurban/ros/worlds/), not the mighty install.
+        # ANY world basename is a valid env (ls ros/worlds/): the legacy alias table applies first,
+        # then '<env>.world'; only a genuinely unknown name falls back to easy_forest (loudly).
+        _worlds_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'worlds')
+        world_file = world_mapping.get(env_value, env_value + '.world')
+        if not os.path.exists(os.path.join(_worlds_dir, world_file)):
+            print(f"[base_sando] env '{env_value}': no {world_file} in ros/worlds -> easy_forest.world")
+            world_file = 'easy_forest.world'
+        world_path = os.path.join(_worlds_dir, world_file)
 
         use_rviz = convert_str_to_bool(LaunchConfiguration('use_rviz').perform(context))
         use_dyn_obs = convert_str_to_bool(LaunchConfiguration('use_dyn_obs').perform(context))
