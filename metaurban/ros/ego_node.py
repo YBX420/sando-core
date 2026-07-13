@@ -52,6 +52,9 @@ class EgoNode(Node):
         self.declare_parameter("horizon", 7.5)
         self.declare_parameter("inflation", 0.4)
         self.declare_parameter("cruise_z", 3.0)
+        self.declare_parameter("goal_x", float("nan"))   # set these to fly WITHOUT any term_goal
+        self.declare_parameter("goal_y", float("nan"))   # publisher (standalone launch); a later
+        self.declare_parameter("goal_z", float("nan"))   # term_goal message still overrides them
         gp = lambda k: float(self.get_parameter(k).value)
         # one big map covering the 105 m easy_forest corridor (char grid: ~28 MB, fine)
         self.ego = EGOPlanner(map_origin=(-15, -40, -0.5), map_size=(140, 80, 9),
@@ -60,8 +63,16 @@ class EgoNode(Node):
         self.cruise_z = gp("cruise_z")
         self.horizon = gp("horizon")
 
+        self.declare_parameter("accum_sec", 4.0)     # livox is a SPARSE rotating scan: one frame sees
+        self.accum_sec = gp("accum_sec")             # a sliver of the forest. Keep a rolling window of
+        self.accum = []                              # map-frame frames (plus the ACL mapper grid) so the
+        self.occ_pts = None                          # planner's map is persistent, not last-slice-only.
+
         self.p = self.v = None
         self.goal = None
+        if not math.isnan(gp("goal_x")):
+            self.goal = np.array([gp("goal_x"), gp("goal_y"),
+                                  gp("goal_z") if not math.isnan(gp("goal_z")) else self.cruise_z])
         self.cloud_msg = None
         self.a_est = np.zeros(3)
         self.commit_t = None
@@ -75,6 +86,7 @@ class EgoNode(Node):
         self.create_subscription(PoseStamped, "term_goal", self.cb_goal, 10)
         self.create_subscription(PointCloud2, "mid360_PointCloud2", self.cb_cloud,
                                  qos_profile_sensor_data)
+        self.create_subscription(PointCloud2, "occupancy_grid", self.cb_occ, 5)
         self.pub_goal = self.create_publisher(Goal, "goal", 10)
         self.pub_path = self.create_publisher(Path, "ego_traj", 1)
         self.create_timer(0.30, self.replan)
@@ -93,13 +105,8 @@ class EgoNode(Node):
             self.reached = False
         self.goal = g
 
-    def cb_cloud(self, m):
-        self.cloud_msg = m
-
-    def cloud_in_map(self):
-        m = self.cloud_msg
-        if m is None:
-            return None
+    def _to_map(self, m):
+        """PointCloud2 -> Nx3 map-frame points (identity if already in map), z/nan filtered."""
         try:
             tr = self.tfb.lookup_transform("map", m.header.frame_id, rclpy.time.Time())
         except Exception:
@@ -111,12 +118,33 @@ class EgoNode(Node):
         if pts.size == 0:
             return np.zeros((0, 3))
         pts = pts @ R.T + np.array([t.x, t.y, t.z])
-        keep = (pts[:, 2] > 0.3) & (pts[:, 2] < 7.5)                 # cut ground + canopy
+        return pts[(pts[:, 2] > 0.3) & (pts[:, 2] < 7.5)]            # cut ground + canopy
+
+    def cb_cloud(self, m):
+        pts = self._to_map(m)
+        if pts is None:
+            return
+        now = time.monotonic()
+        self.accum.append((now, pts))
+        while self.accum and now - self.accum[0][0] > self.accum_sec:
+            self.accum.pop(0)
+
+    def cb_occ(self, m):
+        self.occ_pts = self._to_map(m)
+
+    def cloud_in_map(self):
+        parts = [f for _, f in self.accum]
+        if self.occ_pts is not None:
+            parts.append(self.occ_pts)
+        if not parts:
+            return None
+        pts = np.concatenate(parts, axis=0)
         if self.p is not None:
-            keep &= np.linalg.norm(pts[:, :2] - self.p[:2], axis=1) < 25.0
-        pts = pts[keep]
-        if len(pts) > 15000:
-            pts = pts[:: len(pts) // 15000 + 1]
+            pts = pts[np.linalg.norm(pts[:, :2] - self.p[:2], axis=1) < 25.0]
+        if len(pts):                                                  # 0.1 m voxel dedup, cap volume
+            pts = np.unique(np.round(pts * 10.0).astype(np.int32), axis=0).astype(np.float64) / 10.0
+        if len(pts) > 40000:
+            pts = pts[:: len(pts) // 40000 + 1]
         return pts
 
     def replan(self):
