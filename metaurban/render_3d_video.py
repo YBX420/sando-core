@@ -92,6 +92,10 @@ if os.environ.get("ORACLE_THIN", "0") == "1":
     os.environ.setdefault("EGO_TDYN", "1")
     os.environ.setdefault("EGO_TDYN_PAD", "0.2")
     os.environ.setdefault("EGO_MANDSAFE", "0.15")
+    os.environ.setdefault("EGO_PLANHI", "1.5")  # exact velocity -> the meet-point lead can reach 1.5s out
+    #   (seed7: 8.5 -> 7.4s, min_clr 1.72 -> 1.97, switches 4 -> 2). KF arm stays at 0.7: leading a NOISY
+    #   velocity 1.5s out plants the footprint wrong (11.0s vs 10.6, churn up) -- lead length must match
+    #   estimation quality.
     # EGO_TAU_DYN deliberately NOT defaulted on: encounter-time cert windows tested WORSE on seed7
     # (0.75s fixed 8.4s / 1.25s cap 8.8s / 2.5s cap 10.6s + 3s wake-crawl) -- the s=0 "he might stop"
     # pearl freezes the mover's current spot for the WHOLE window, so a longer window kills the
@@ -863,7 +867,7 @@ def _kf_movers_realistic(p_d, t_sim, cam_heading):
             kv = np.array([v2[0], v2[1], 0.0])
             if not EGO_PREDICT:
                 kv = np.zeros(3)
-            pred = kc0[None, :] + np.linspace(0.0, _tau_now(), 6)[:, None] * kv[None, :]
+            pred = kc0[None, :] + np.linspace(0.0, _pred_tend(kc0, kv, p_d), 6)[:, None] * kv[None, :]
             _ELL_TRK[oid] = (99, False, str(cls))           # mature, never coasting -> shape always eligible
             out.append((oid, kc0, (float(kv[0]), float(kv[1]), 0.0), float(r),
                         EGO_PERCLASS_DSAFE.get(cls, 0.8)))
@@ -886,7 +890,7 @@ def _kf_movers_realistic(p_d, t_sim, cam_heading):
         if tr.trk.ready:
             kc0, kv, _ka = tr.trk.state()
             kc0 = np.array([kc0[0], kc0[1], zc])
-            pred = tr.trk.predict(np.linspace(0.0, _tau_now(), 6))
+            pred = tr.trk.predict(np.linspace(0.0, _pred_tend(kc0, kv, p_d), 6))
         else:
             kc0, kv = p3(tr.xy, zc), np.zeros(3)
             pred = np.asarray([kc0, kc0])
@@ -905,7 +909,7 @@ def _kf_movers_realistic(p_d, t_sim, cam_heading):
                                                  tr.miss > 0 and _ORA_MAP.get(tr.id) == gt[0]):
                 kc0 = np.array([gt[1][0], gt[1][1], zc])    # exact sim pos/vel; detection timing unchanged
                 kv = np.array([gt[2][0], gt[2][1], 0.0])
-                pred = kc0[None, :] + np.linspace(0.0, _tau_now(), 6)[:, None] * kv[None, :]
+                pred = kc0[None, :] + np.linspace(0.0, _pred_tend(kc0, kv, p_d), 6)[:, None] * kv[None, :]
             if KFDBG and tr.cls == "pedestrian":
                 gs = (f"gt=({gt[1][0]:7.2f},{gt[1][1]:7.2f}) gtv=({gt[2][0]:6.2f},{gt[2][1]:6.2f}) d={gt_d:5.2f}"
                       if gt is not None else "gt=NONE")
@@ -1215,6 +1219,20 @@ _TAU_NOW = [EGO_TAU_TRUST]                                    # per-tick dynamic
 
 def _tau_now():
     return _TAU_NOW[0] if EGO_TAU_DYN else EGO_TAU_TRUST
+
+
+_VD_NOW = [np.zeros(3)]   # drone velocity this tick (set in ego_maneuver_replan; drawing-side TTC reads)
+
+
+def _pred_tend(kc0, kv, p_d):
+    """Per-mover DRAW horizon: out to the encounter time (relative-motion CPA vs the drone's current
+    velocity, capped 3s) so the orange forecast shows the meeting point the avoidance lead actually
+    uses -- the cert window stays EGO_TAU_TRUST; this is visualisation truth only."""
+    dp = np.asarray(kc0[:2], float) - np.asarray(p_d[:2], float)
+    dv = np.asarray(kv[:2], float) - np.asarray(_VD_NOW[0][:2], float)
+    dvn = float(dv @ dv)
+    tcpa = float(np.clip(-(dp @ dv) / dvn, 0.0, 3.0)) if dvn > 1e-6 else 0.0
+    return max(_tau_now(), tcpa)
 assert not (MAN_ELLIPSE and MAN_CAPSULE), "ELLIPSE=1 and CAPSULE=1 are mutually exclusive"
 _ELL_V5 = {}; _ELL_VMIN = 0.5; _ELL_TRK = {}      # _ELL_TRK: oid -> (kf_age, coasting, cls)
 _CAP_V6 = {}; _CAP_K = 4
@@ -1480,6 +1498,7 @@ def ego_maneuver_replan(p_d, v_d, a_d, cur_wp, t_sim):
     # PERCEPTION heading = body-mounted depth cam (quad.yaw), IDENTICAL to native's fov_cloud(p_d, quad.yaw): ours and
     # native must see through the same forward cone (static AND mover detection) so the only A/B variable is the cert.
     cam_heading = float(quad.yaw)
+    _VD_NOW[0] = np.asarray(v_d, float)                    # drawing-side TTC reads the real drone velocity
     movers = kf_movers(p_d, t_sim, cam_heading)            # cone-DETECTED movers + their KF prediction (the safety layer)
     ego.update_cloud(_man_cloud(p_d, cam_heading, t_sim, movers), p_d)
     if EGO_TDYN:                                           # feed mover polys to the solver's time-aligned term
