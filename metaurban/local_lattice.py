@@ -224,9 +224,10 @@ def precertify_branch(p, v, a, cyl, a_max, dt=DT, delta=DT, angles=(45.0, 90.0),
                 + 0.5 * np.asarray(ent[2], float) * dt * dt,
                 np.asarray(ent[1], float) + np.asarray(ent[2], float) * dt,
                 np.asarray(ent[2], float)) + tuple(ent[3:6])
-               for ent in cyl]   # v4 ellipse field (ent[6]) deliberately DROPPED: the escape tree
-    #   certifies against the isotropic circle (a superset of the ellipse at the same q -- sound,
-    #   just conservative; branch certs and the main gate may disagree only toward more caution)
+               + ((ent[6],) if len(ent) > 6 and ent[6] is not None and isinstance(ent[6][0], str) else ())
+               for ent in cyl]   # v5 ellipse field deliberately DROPPED (isotropic circle superset =
+    #   sound, just conservative). v6 "cap" tag MUST be kept: its q̃ is a dist-to-segment quantity,
+    #   only sound under the pearl cover -- certify_composite loops the pearls for tagged movers.
     d_eff = delta + dt
     prim = quintic3(p, v, a, p, v * 0.0, np.zeros(3), T_P)
     segs, durs, tc = make_composite(prim, a_max, dt)
@@ -303,6 +304,24 @@ def certify_composite(segs, durs, cyl, t_cert, delta, tau=None, want_who=False):
     m_min = np.inf
     for i, ent in enumerate(cyl):
         (c0, vel, acc, R, zc, veff) = ent[:6]
+        if len(ent) > 6 and ent[6] is not None and isinstance(ent[6][0], str) and ent[6][0] == "cap":
+            # v6 capsule: pearl-string cover (q̃ is dist-to-segment; a plain centred circle at this
+            # radius would be optimistic). s=0 pearl doubles as the frozen-current conjunct.
+            _K = int(ent[6][1])
+            hp = hc = True; mp = mc = np.inf
+            for sg in ([k / (_K - 1.0) for k in range(_K)] if _K > 1 else [1.0]):
+                hs, ms = Certifier.certify_horizontal(ctrl, t0s, du, c0, R,
+                                                      vel=tuple(np.asarray(vel, float) * sg), acc=(0, 0, 0),
+                                                      t_hi=th, v_eff=veff, delta=delta, n_axes=2)
+                mp = mc = min(mp, float(ms))
+                if not hs:
+                    hp = hc = False
+                    break
+            vo, mv = Certifier.certify_above(ctrl, t0s, du, z_clear=zc, t_hi=th, v_eff_z=0.0, delta=delta)
+            if not ((hp and hc) or vo):
+                return (False, -1.0, i) if want_who else (False, -1.0)
+            m_min = min(m_min, max(min(mp, mc), mv) / max(2.0 * R, 1e-6))
+            continue
         hp, mp = Certifier.certify_horizontal(ctrl, t0s, du, c0, R, vel=vel, acc=acc,
                                               t_hi=th, v_eff=veff, delta=delta, n_axes=2)
         hc, mc = Certifier.certify_horizontal(ctrl, t0s, du, c0, R, vel=(0, 0, 0),

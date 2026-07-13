@@ -60,8 +60,11 @@ def build_cylinders(movers, calib, predict=True, track_margin=0.0, calib_v2=None
     MAN_TRACK=0.473 but the headless DYN arms certified the PLANNED spline with NO margin while the
     quad FLIES up to ~delta_track away -- 'flown == certified' hole). Kinematic arms pass 0."""
     use_plates = os.environ.get("PLATES", "0") == "1"
-    use_ellipse = os.environ.get("ELLIPSE", "0") == "1"   # v4 motion-frame ELLIPTICAL keep-out
+    use_ellipse = os.environ.get("ELLIPSE", "0") == "1"   # v5 motion-frame ELLIPTICAL keep-out
     #   (mature moving tracks only; needs calib_v5 entries carrying 'kappa' -- see load_calib_v5)
+    use_capsule = os.environ.get("CAPSULE", "0") == "1"   # v6 CAPSULE keep-out (segment + pearls;
+    #   needs calib_v6 entries carrying capsule=True -- see load_calib_v6)
+    assert not (use_ellipse and use_capsule), "ELLIPSE=1 and CAPSULE=1 are mutually exclusive"
     agemin_ped = int(os.environ.get("AGEMIN_PED", "0")) or age_min   # ped early maturity (age2-3
     #   q95 covered by the mature tube at every horizon, designC 2026-07-07) -- gated exploratory
     cyl = []; ztop = CRUISE_Z
@@ -106,6 +109,17 @@ def build_cylinders(movers, calib, predict=True, track_margin=0.0, calib_v2=None
         R = float(r_obs) + R_DRONE + D_SAFE_H + q + track_margin
         zc = float(h) + REACH_PAD + R_DRONE + D_SAFE_V + q + track_margin
         ent7 = ()
+        if (use_capsule and predict and _mature_arm and calib_v2 is not None
+                and str(cls) in ("pedestrian", "vehicle")
+                and (calib_v2.get(cls) or {}).get("capsule")):
+            # CAPSULE keep-out (v6): segment [mover's current position, KF tip c0+v*t] ⊕ q̃ --
+            # the along-axis endpoints are the mover's BACK and the prediction's APEX (no wall
+            # behind a walker). Certified as a K-pearl cover: obs_vel = s*v per pearl, the pearl
+            # gap |v|*t/(2(K-1)) folded into v_eff. q̃/veff here are dist-to-segment calibrated.
+            _K = int((calib_v2.get(cls) or {}).get("n_pearls", 4))
+            _sp = float(np.hypot(vv[0], vv[1]))
+            veff = veff + _sp / (2.0 * max(_K - 1, 1))
+            ent7 = (("cap", _K),)
         if (use_ellipse and predict and _mature_arm and calib_v2 is not None
                 and str(cls) in ("pedestrian", "vehicle")):
             # ELLIPTICAL keep-out (v4): trust the KF direction only when the track is mature,
@@ -127,9 +141,22 @@ def _ell_of(ent, ego):
     """7th optional cyl field = (kappa, ux, uy, R_warp) from build_cylinders under ELLIPSE=1.
     None when absent OR the planner lacks the aniso entry point (isotropic R is a superset of the
     ellipse at the same calibrated q, so falling back is sound, just fatter)."""
-    if len(ent) > 6 and ent[6] is not None and getattr(ego, "certify_horizontal_aniso", None) is not None:
+    if (len(ent) > 6 and ent[6] is not None and not isinstance(ent[6][0], str)
+            and getattr(ego, "certify_horizontal_aniso", None) is not None):
         return ent[6]
     return None
+
+
+def _cap_of(ent):
+    """7th field == ("cap", K): v6 capsule pearl count, else None. NB there is NO sound isotropic
+    fallback here -- q̃ is a dist-to-segment quantity; a mover tagged cap MUST be pearl-certified."""
+    if len(ent) > 6 and ent[6] is not None and isinstance(ent[6][0], str) and ent[6][0] == "cap":
+        return int(ent[6][1])
+    return None
+
+
+def _cap_grid(K):
+    return [k / (K - 1.0) for k in range(K)] if K > 1 else [1.0]
 
 
 def cert_clear(ego, cyl, tau=TAU, delta=None):
@@ -139,16 +166,29 @@ def cert_clear(ego, cyl, tau=TAU, delta=None):
     d = tau if delta is None else delta
     for ent in cyl:
         (c0, vv, aa, R, zc, veff) = ent[:6]
-        ell = _ell_of(ent, ego)
-        if ell is not None:
-            _k, _ux, _uy, _rw = ell
-            hp, _ = ego.certify_horizontal_aniso(obs_c0=c0, R=_rw, obs_vel=vv, obs_acc=aa, t_hi=tau,
-                                                 v_eff=veff, delta=d, ux=_ux, uy=_uy, kappa=_k)
-            hc, _ = ego.certify_horizontal_aniso(obs_c0=c0, R=_rw, obs_vel=(0, 0, 0), t_hi=tau,
-                                                 v_eff=veff, delta=d, ux=_ux, uy=_uy, kappa=_k)
+        cap = _cap_of(ent)
+        if cap is not None:
+            # v6 capsule: pearl-string cover of segment [c0, c0+v*t] ⊕ q̃ -- s=0 IS the old
+            # frozen-current conjunct, s=1 the predicted tube, at the collapsed radius.
+            hb = True
+            for s in _cap_grid(cap):
+                hs, _ = ego.certify_horizontal(obs_c0=c0, R=R, obs_vel=tuple(np.asarray(vv, float) * s),
+                                               obs_acc=(0, 0, 0), t_hi=tau, v_eff=veff, delta=d)
+                if not hs:
+                    hb = False
+                    break
+            hp = hc = hb
         else:
-            hp, _ = ego.certify_horizontal(obs_c0=c0, R=R, obs_vel=vv, obs_acc=aa, t_hi=tau, v_eff=veff, delta=d)
-            hc, _ = ego.certify_horizontal(obs_c0=c0, R=R, obs_vel=(0, 0, 0), t_hi=tau, v_eff=veff, delta=d)
+            ell = _ell_of(ent, ego)
+            if ell is not None:
+                _k, _ux, _uy, _rw = ell
+                hp, _ = ego.certify_horizontal_aniso(obs_c0=c0, R=_rw, obs_vel=vv, obs_acc=aa, t_hi=tau,
+                                                     v_eff=veff, delta=d, ux=_ux, uy=_uy, kappa=_k)
+                hc, _ = ego.certify_horizontal_aniso(obs_c0=c0, R=_rw, obs_vel=(0, 0, 0), t_hi=tau,
+                                                     v_eff=veff, delta=d, ux=_ux, uy=_uy, kappa=_k)
+            else:
+                hp, _ = ego.certify_horizontal(obs_c0=c0, R=R, obs_vel=vv, obs_acc=aa, t_hi=tau, v_eff=veff, delta=d)
+                hc, _ = ego.certify_horizontal(obs_c0=c0, R=R, obs_vel=(0, 0, 0), t_hi=tau, v_eff=veff, delta=d)
         vo, _ = ego.certify_above(z_clear=zc, t_hi=tau, v_eff_z=0.0, delta=d)
         if not ((hp and hc) or vo):
             return False
@@ -170,8 +210,21 @@ def cert_verdict3(ego, cyl, tau=TAU, delta=None):
         return "refuted" if a == b == "refuted" else "unknown"
     d = tau if delta is None else delta
     overall = "certified"; details = []
-    for ent in cyl:                                   # NB diagnostic twin stays ISOTROPIC (ellipse field ignored;
-        (c0, vv, aa, R, zc, veff) = ent[:6]           # verdicts may be more conservative than the v4 gate)
+    for ent in cyl:                                   # NB diagnostic twin stays ISOTROPIC for the ellipse
+        (c0, vv, aa, R, zc, veff) = ent[:6]           # (conservative); CAPSULE movers get the pearl AND --
+        cap = _cap_of(ent)                            # q̃ as a plain centred circle would be optimistic
+        if cap is not None:
+            hs3 = "certified"
+            for sg in _cap_grid(cap):
+                h3, _m3 = ego.certify_horizontal3(obs_c0=c0, R=R, obs_vel=tuple(np.asarray(vv, float) * sg),
+                                                  obs_acc=(0, 0, 0), t_hi=tau, v_eff=veff, delta=d)
+                hs3 = _and(hs3, h3)
+            vo3, mv3 = ego.certify_above3(z_clear=zc, t_hi=tau, v_eff_z=0.0, delta=d)
+            mover = _or(hs3, vo3)
+            details.append(dict(horiz_pred=hs3, horiz_cur=hs3, above=vo3, verdict=mover,
+                                margins=(0.0, 0.0, round(float(mv3), 4))))
+            overall = _and(overall, mover)
+            continue
         hp, mp = ego.certify_horizontal3(obs_c0=c0, R=R, obs_vel=vv, obs_acc=aa, t_hi=tau, v_eff=veff, delta=d)
         hc, mc = ego.certify_horizontal3(obs_c0=c0, R=R, obs_vel=(0, 0, 0), t_hi=tau, v_eff=veff, delta=d)
         vo, mv = ego.certify_above3(z_clear=zc, t_hi=tau, v_eff_z=0.0, delta=d)
@@ -366,15 +419,25 @@ def cert_clear_warp(ego, cyl, s, tau=TAU, delta=None):
     s = float(s)
     for ent in cyl:
         (c0, vv, aa, R, zc, veff) = ent[:6]
-        ell = _ell_of(ent, ego)
-        if ell is not None:                     # retime and the constant whitening map commute:
-            _k, _ux, _uy, _rw = ell             # slip identity + ellipse compose soundly
-            hp, _ = ego.certify_horizontal_aniso(obs_c0=c0, R=_rw, obs_vel=tuple(np.asarray(vv, float) / s),
-                                                 obs_acc=(0, 0, 0), t_hi=s * tau, v_eff=veff / s, delta=d * s,
-                                                 ux=_ux, uy=_uy, kappa=_k)
+        cap = _cap_of(ent)
+        if cap is not None:                     # retime commutes with the pearl cover too
+            hp = True
+            for sg in _cap_grid(cap):
+                hs, _ = ego.certify_horizontal(obs_c0=c0, R=R, obs_vel=tuple(np.asarray(vv, float) * sg / s),
+                                               obs_acc=(0, 0, 0), t_hi=s * tau, v_eff=veff / s, delta=d * s)
+                if not hs:
+                    hp = False
+                    break
         else:
-            hp, _ = ego.certify_horizontal(obs_c0=c0, R=R, obs_vel=tuple(np.asarray(vv, float) / s),
-                                           obs_acc=(0, 0, 0), t_hi=s * tau, v_eff=veff / s, delta=d * s)
+            ell = _ell_of(ent, ego)
+            if ell is not None:                 # retime and the constant whitening map commute:
+                _k, _ux, _uy, _rw = ell         # slip identity + ellipse compose soundly
+                hp, _ = ego.certify_horizontal_aniso(obs_c0=c0, R=_rw, obs_vel=tuple(np.asarray(vv, float) / s),
+                                                     obs_acc=(0, 0, 0), t_hi=s * tau, v_eff=veff / s, delta=d * s,
+                                                     ux=_ux, uy=_uy, kappa=_k)
+            else:
+                hp, _ = ego.certify_horizontal(obs_c0=c0, R=R, obs_vel=tuple(np.asarray(vv, float) / s),
+                                               obs_acc=(0, 0, 0), t_hi=s * tau, v_eff=veff / s, delta=d * s)
         vo, _ = ego.certify_above(z_clear=zc, t_hi=s * tau, v_eff_z=0.0, delta=d * s)
         if not (hp or vo):
             return False
@@ -388,8 +451,18 @@ def cert_clear_margin(ego, cyl, tau=TAU, delta=None):
     ok_all, m_min = True, float("inf")
     for ent in cyl:
         (c0, vv, aa, R, zc, veff) = ent[:6]
-        ell = _ell_of(ent, ego)
-        if ell is not None:
+        cap = _cap_of(ent)
+        ell = None if cap is not None else _ell_of(ent, ego)
+        if cap is not None:
+            hp = hc = True; mp = mc = float("inf")
+            for sg in _cap_grid(cap):
+                hs, ms = ego.certify_horizontal(obs_c0=c0, R=R, obs_vel=tuple(np.asarray(vv, float) * sg),
+                                                obs_acc=(0, 0, 0), t_hi=tau, v_eff=veff, delta=d)
+                mp = mc = min(mp, float(ms))
+                if not hs:
+                    hp = hc = False
+                    break
+        elif ell is not None:
             _k, _ux, _uy, _rw = ell             # margins in the warped metric, normalised by 2*R_warp
             hp, mp = ego.certify_horizontal_aniso(obs_c0=c0, R=_rw, obs_vel=vv, obs_acc=aa, t_hi=tau,
                                                   v_eff=veff, delta=d, ux=_ux, uy=_uy, kappa=_k)
@@ -416,8 +489,18 @@ def cert_clear_warp_margin(ego, cyl, s, tau=TAU, delta=None):
     m_min = float("inf")
     for ent in cyl:
         (c0, vv, aa, R, zc, veff) = ent[:6]
-        ell = _ell_of(ent, ego)
-        if ell is not None:
+        cap = _cap_of(ent)
+        ell = None if cap is not None else _ell_of(ent, ego)
+        if cap is not None:
+            hp = True; mp = float("inf")
+            for sg in _cap_grid(cap):
+                hs, ms = ego.certify_horizontal(obs_c0=c0, R=R, obs_vel=tuple(np.asarray(vv, float) * sg / s),
+                                                obs_acc=(0, 0, 0), t_hi=s * tau, v_eff=veff / s, delta=d * s)
+                mp = min(mp, float(ms))
+                if not hs:
+                    hp = False
+                    break
+        elif ell is not None:
             _k, _ux, _uy, _rw = ell
             hp, mp = ego.certify_horizontal_aniso(obs_c0=c0, R=_rw, obs_vel=tuple(np.asarray(vv, float) / s),
                                                   obs_acc=(0, 0, 0), t_hi=s * tau, v_eff=veff / s, delta=d * s,
@@ -752,6 +835,32 @@ def load_calib_v2(eps=0.05):
                                else (float(lv["q_conformal"]), float(lv["v_eff"]))),
                         plates=plates, status=lv.get("status", "ok"))
     out["_meta"] = dict(sha=rep.get("provenance", {}).get("config_sha"), eps=eps)
+    return out
+
+
+def load_calib_v6(eps=0.05):
+    """v6 CAPSULE (segment conformal) consumer: same entry shape as v2 plus capsule=True and
+    n_pearls. The mature law's q̃/v_eff are DIST-TO-SEGMENT quantities -- only sound when the cert
+    covers the whole segment [c0, c0+v*t] (pearl string), never as a plain centred circle."""
+    path = (os.environ.get("CALIB_FILE_V6") or os.path.join(_OUTDIR, "calib_v6.json"))
+    rep = json.load(open(path))
+    out = {}
+    npearl = int(rep.get("n_pearls", 4))
+    for cls in ("pedestrian", "vehicle", "animal", "static"):
+        lv = rep.get("groups", {}).get(cls, {}).get("levels", {}).get(str(eps), {})
+        if "q_conformal" not in lv:
+            print(f"[calib_v6] class '{cls}' UNCALIBRATED at eps={eps} -> FAIL-CLOSED (uncertifiable)",
+                  flush=True)
+            out[cls] = dict(mature=(1e6, 0.0), young=(1e6, 0.0), plates=[], status="UNCALIBRATED",
+                            capsule=False, n_pearls=npearl)
+            continue
+        yy = rep.get("young", {}).get(cls, {}).get(str(eps))
+        out[cls] = dict(mature=(float(lv["q_conformal"]), float(lv["v_eff"])),
+                        young=((float(yy["q0y"]), float(yy["growth"])) if yy
+                               else (float(lv["q_conformal"]), float(lv["v_eff"]))),
+                        plates=[], status=lv.get("status", "ok"),
+                        capsule=(cls in ("pedestrian", "vehicle")), n_pearls=npearl)
+    out["_meta"] = dict(sha=rep.get("provenance", {}).get("shape_hash"), eps=eps, gen="v6")
     return out
 
 

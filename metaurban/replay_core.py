@@ -252,6 +252,11 @@ def run_replay(movers, ep, mode="ours", calib=None, predict=True, max_vel=3.0, m
     it runs inside the control loop."""
     calib = calib or (SL.load_calib() if CALIB_V2 else load_calib())
     calib_v2 = SL.load_calib_v2() if CALIB_V2 else None
+    if os.environ.get("CAPSULE", "0") == "1":            # v6 CAPSULE (segment) conformal:
+        # keep-out = [mover's back, KF tip] ⊕ q̃, pearl-string certified in safety_layer.
+        assert CALIB_V2, "CAPSULE=1 requires CALIB_V2=1 (v6 calibrated under the FS3C-R code laws)"
+        assert os.environ.get("ELLIPSE", "0") != "1"
+        calib_v2 = SL.load_calib_v6()
     if os.environ.get("ELLIPSE", "0") == "1":            # v5 ELLIPTICAL motion-frame conformal:
         # entries carry per-class kappa; build_cylinders turns mature moving tracks into ellipse
         # keep-outs. Requires the CALIB_V2 static-stationary code law (v5 harvested under it).
@@ -506,12 +511,21 @@ def run_replay(movers, ep, mode="ours", calib=None, predict=True, max_vel=3.0, m
                                 _ec = abs(float(_err[0] * (-_udir[1]) + _err[1] * _udir[0]))
                             else:
                                 _ea, _ec = resid, 0.0      # direction undefined: spd column gates it out
+                            # CAPSULE residual (v6): distance from the true position to the SEGMENT
+                            # [anchor c0, predicted tip] -- a stopping/slowing mover scores ~0 (it sits
+                            # by the segment start) instead of paying the full along-track miss. The
+                            # deployed capsule keep-out (segment + q̃) certifies against exactly this.
+                            _sv = pred - np.asarray(_c0k[:2], float)
+                            _s2 = float(_sv @ _sv)
+                            _w = pos_l(gi, t + dh) - np.asarray(_c0k[:2], float)
+                            _tt = min(1.0, max(0.0, float(_w @ _sv) / _s2)) if _s2 > 1e-12 else 0.0
+                            _esg = float(np.hypot(*(_w - _tt * _sv)))
                             PERCEPT_HARVEST.append((float(dh), resid, int(tr.trk.n),
                                                     str(tr.cls), int(_HARV_EP[0]), d_drone)
                                                    + ((_HARV_SCN[0], int(_QUAL_MEMO.get(gi, True)),
                                                        int(tr.trk.miss > 0),          # coast flag (theta3)
                                                        float(getattr(tr.trk, "sigma_v", 0.0)),
-                                                       _ea, _ec, _spd)                # motion-frame cols (v4)
+                                                       _ea, _ec, _spd, _esg)          # motion-frame + capsule
                                                       if _HARV_V2 else ()))
             else:
                 percepts = [(trackers[i], dets[i], movers.m[i]["r"], movers.m[i]["h"], movers.m[i]["cls"])
