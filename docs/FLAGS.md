@@ -39,5 +39,5 @@
 ## FOV-retention 锦标赛打分(FOV_RET,2026-07-13)
 | 开关 | 默认 | 判决 |
 |---|---|---|
-| `FOV_RET`(replay+渲染,v2 锦标赛) | off | **感知感知 tiebreak**(Mueller 谱系,paper review 灵感#1):全网格打分 key 变 (速度, 进度/0.15 量化, FOV 保持率[, −excess if SAFETY_BAND])——同速同进度候选间选"移动威胁留在 45°×10m 视锥内"的绕行方向。保持率=信任窗 5 采样 × 移动 keep-out(\|v\|>0.3 或 veff>0;静物不计;超量程不计;无威胁=1.0 中性),朝向=计划速度方向(yaw-to-path 代理)。只动偏好:速度优先字典序、证书语义、incumbent 粘性全不动。因果链主张:coast 占比↓→λ-SHAPE-H 半径紧→干净抵达↑(用 COAST_LOG 测)。345 集 AB 判决:待跑。 |
+| `FOV_RET`(replay+渲染,v2 锦标赛) | off | **感知感知 tiebreak**(Mueller 谱系,paper review 灵感#1):全网格打分 key 变 (速度, 进度/0.15 量化, FOV 保持率[, −excess if SAFETY_BAND])——同速同进度候选间选"移动威胁留在 45°×10m 视锥内"的绕行方向。保持率=信任窗 5 采样 × 移动 keep-out(\|v\|>0.3 或 veff>0;静物不计;超量程不计;无威胁=1.0 中性),朝向=计划速度方向(yaw-to-path 代理)。只动偏好:速度优先字典序、证书语义、incumbent 粘性全不动。因果链主张:coast 占比↓→λ-SHAPE-H 半径紧→干净抵达↑(用 COAST_LOG 测)。345 集 AB 判决(07-13,rows_fov*0713 配对):**不采纳为默认**——干净 68.4→68.1%(翻好 0/翻坏 1)、coast 占比 34.33→34.55%(因果链第一环没兑现:tiebreak 只在速度+进度打平时咬合,345 集仅 45 集行为有变)、唯一真收益 evade −33 且 props_alley 一场 −34(遮挡巷保视野=少晚发现);零星变坏 climb_trap +4/roundabout_rush +3。与 GAP_CARROT 同命;复活路径=进 CPL-v3 候选连续评分(方向感知基元待办同批)。 |
 | `COAST_LOG` | off | 纯诊断:counts.trk_ticks/coast_ticks(ready 非 static track 的 coast 拍账),bench_shard 行加 coast/trk 字段。门控原因:counts 在字节回归哈希内。 |
