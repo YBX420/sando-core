@@ -6,7 +6,7 @@
 # ros/state_to_rviz.py → /sando/markers)⇄ rviz2。conda 与 ROS 零混装。
 set -e
 MU="$(cd "$(dirname "$0")/.." && pwd)"
-SCN="${1:-scenarios/full/gauntlet.json}"; shift 2>/dev/null || true
+SCN="${1:-scenarios/full/sparse_field.json}"; shift 2>/dev/null || true
 source /opt/ros/humble/setup.bash
 
 env DISPLAY="${DISPLAY:-:1}" "$HOME/miniconda3/envs/metaurban/bin/python" \
