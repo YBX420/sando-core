@@ -84,6 +84,15 @@ ap.add_argument("--scenario", type=str, default=None,
 ap.add_argument("--no_crowd", action="store_true",
                 help="minimal native crowd (deterministic benchmark: scripted movers only; ORCA needs >=1 human)")
 args = ap.parse_args()
+if os.environ.get("ORACLE_THIN", "0") == "1":
+    # one-switch oracle-thin arm (gt_thin twin on the render face): omniscient perception + near-zero
+    # tube + small standoff + time-aware EGO. The thin tube is ONLY sound with zero estimation error,
+    # so this flag FORCES GT_ORACLE=1 -- never combine the thin calib with the KF arm by hand.
+    os.environ["GT_ORACLE"] = "1"
+    os.environ.setdefault("EGO_TDYN", "1")
+    os.environ.setdefault("EGO_TDYN_PAD", "0.2")
+    os.environ.setdefault("EGO_MANDSAFE", "0.15")
+    os.environ.setdefault("CALIB_FILE_V6", os.path.join(os.path.dirname(_HERE), "out", "conformal", "calib_v6_thin.json"))
 if args.maneuver:
     args.ego = True; args.ego_safe = False   # the no-HOLD tournament REPLACES the ego_safe HOLD wrapper
 if args.slip:

@@ -57,3 +57,4 @@
 | `EGO_TDYN_PAD` | 0.6 | 铰链半径 pad:r_clear=r_obs+d_safe(per-class)+PAD。**必须证书尺度**——r+0.45 的环尺度铰链在锦标赛保持的 ~1.5m 间距外永不激活(728/728 replan 字节同,已验教训) |
 | `GT_ORACLE`(渲染面) | off | **全场全知诊断臂**:绕过感知前端(无锥/限距/遮挡/丢检/成熟度门),SENSE_R=30m 内所有 mover 从第 0 拍喂精确 GT 位置+速度(humanoid 引擎 o.velocity 恒 0,真速度=GT 位置逐拍差分 _GT_VELFD)。诊断链条阶梯:KF 14.1s → 传感器门内真值 9.9s → 全场全知 8.5s(seed7)=感知侧占总时长 40%。**非部署臂,纯上限标尺** |
 | `KFDBG` | off | 逐拍 GT-vs-KF 行人对拍打印(gt/gtv/det/kf/kfv/miss),诊断 KF 滞后/coast 漂移/两点差分垃圾初速用 |
+| `ORACLE_THIN`(渲染面) | off | **一键全知薄管臂(gt_thin 渲染面双胞胎)**:强制 GT_ORACLE=1 + 默认 EGO_TDYN=1/PAD=0.2/EGO_MANDSAFE=0.15 + CALIB_FILE_V6=out/conformal/calib_v6_thin.json(全类 q̃=0.05, v_eff=0.1, young/rear 同薄)。对人需求距离 ≈0.7m(默认标定 ≈2.0m)。**薄管只在零估计误差前提下 sound,故开关强绑全知——严禁手动把 thin 标定配 KF 臂**。seed7:8.4s / min_clr 1.90m / 0 撞(管大小在全知+时间维下已非瓶颈,剩余时间=路线物理)。 |
