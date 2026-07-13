@@ -42,8 +42,8 @@
 | `FOV_RET`(replay+渲染,v2 锦标赛) | off | **感知感知 tiebreak**(Mueller 谱系,paper review 灵感#1):全网格打分 key 变 (速度, 进度/0.15 量化, FOV 保持率[, −excess if SAFETY_BAND])——同速同进度候选间选"移动威胁留在 45°×10m 视锥内"的绕行方向。保持率=信任窗 5 采样 × 移动 keep-out(\|v\|>0.3 或 veff>0;静物不计;超量程不计;无威胁=1.0 中性),朝向=计划速度方向(yaw-to-path 代理)。只动偏好:速度优先字典序、证书语义、incumbent 粘性全不动。因果链主张:coast 占比↓→λ-SHAPE-H 半径紧→干净抵达↑(用 COAST_LOG 测)。345 集 AB 判决(07-13,rows_fov*0713 配对):**不采纳为默认**——干净 68.4→68.1%(翻好 0/翻坏 1)、coast 占比 34.33→34.55%(因果链第一环没兑现:tiebreak 只在速度+进度打平时咬合,345 集仅 45 集行为有变)、唯一真收益 evade −33 且 props_alley 一场 −34(遮挡巷保视野=少晚发现);零星变坏 climb_trap +4/roundabout_rush +3。与 GAP_CARROT 同命;复活路径=进 CPL-v3 候选连续评分(方向感知基元待办同批)。 |
 | `COAST_LOG` | off | 纯诊断:counts.trk_ticks/coast_ticks(ready 非 static track 的 coast 拍账),bench_shard 行加 coast/trk 字段。门控原因:counts 在字节回归哈希内。 |
 
-## 椭圆管(v4 λ-SHAPE-HE 运动系各向异性 conformal,2026-07-13)
+## 椭圆管(v5 λ-SHAPE-HE 运动系各向异性 conformal,2026-07-13;注意 v4=LCP-alpha/v4b 另一条线)
 | 开关 | 默认 | 判决 |
 |---|---|---|
-| `ELLIPSE`(replay,需 `CALIB_V2=1`) | off | **运动系椭圆 keep-out**:成熟(age≥4)、非 zombie、\|v\|≥v_min_dir(0.5)的 ped/veh track,管从圆改椭圆——沿 KF 速度方向半轴 A(t)=R+v_eff·(t+Δ),横向 A(t)/κ(κ=标定冻结长短轴比,calib_v4.json)。实现=白化代换:横轴拉伸 κ 的常数线性映射同时作用于承诺 B-spline 段与障碍多项式(`ego_certify_horizontal_aniso`,Bernstein 结构保持),圆内核原判交照跑;体半径按 R_w=κ·r_geom+q 折入(横向精确、沿向保守 sound)。接入 cert_clear/warp/margin 四门;verdict3 诊断与 v2 逃生树保持各向同性(圆⊇椭圆,保守 sound)。young/static/慢速一律圆(标定镜像同一判定)。收割新列 ea/ec/spd(harvest_v2 designE/foldE/testE 折),标定 calibrate_ellipse.py。κ=1 与各向同性字节同判(冒烟已证);字节回归 12/12(关)。345 集 AB 待跑。 |
-| `CALIB_FILE_V4` | out/conformal/calib_v4.json | v4 标定文件路径覆盖(冒烟/对照用) |
+| `ELLIPSE`(replay,需 `CALIB_V2=1`) | off | **运动系椭圆 keep-out**:成熟(age≥4)、非 zombie、\|v\|≥v_min_dir(0.5)的 ped/veh track,管从圆改椭圆——沿 KF 速度方向半轴 A(t)=R+v_eff·(t+Δ),横向 A(t)/κ(κ=标定冻结长短轴比,calib_v5.json)。实现=白化代换:横轴拉伸 κ 的常数线性映射同时作用于承诺 B-spline 段与障碍多项式(`ego_certify_horizontal_aniso`,Bernstein 结构保持),圆内核原判交照跑;体半径按 R_w=κ·r_geom+q 折入(横向精确、沿向保守 sound)。接入 cert_clear/warp/margin 四门;verdict3 诊断与 v2 逃生树保持各向同性(圆⊇椭圆,保守 sound)。young/static/慢速一律圆(标定镜像同一判定)。收割新列 ea/ec/spd(harvest_v2 designCR/designE/E2/foldE/testE),标定 calibrate_ellipse.py(设计域=designCR,κ ped 2.07 / veh 1.17,λ=2.363@ε.05,testE 覆盖 95.8%)。κ=1 与各向同性字节同判(冒烟已证);字节回归 12/12(关)。345 集 AB 待跑。 |
+| `CALIB_FILE_V5` | out/conformal/calib_v5.json | v5 标定文件路径覆盖(冒烟/v5-iso 消融对照用) |

@@ -61,7 +61,7 @@ def build_cylinders(movers, calib, predict=True, track_margin=0.0, calib_v2=None
     quad FLIES up to ~delta_track away -- 'flown == certified' hole). Kinematic arms pass 0."""
     use_plates = os.environ.get("PLATES", "0") == "1"
     use_ellipse = os.environ.get("ELLIPSE", "0") == "1"   # v4 motion-frame ELLIPTICAL keep-out
-    #   (mature moving tracks only; needs calib_v4 entries carrying 'kappa' -- see load_calib_v4)
+    #   (mature moving tracks only; needs calib_v5 entries carrying 'kappa' -- see load_calib_v5)
     agemin_ped = int(os.environ.get("AGEMIN_PED", "0")) or age_min   # ped early maturity (age2-3
     #   q95 covered by the mature tube at every horizon, designC 2026-07-07) -- gated exploratory
     cyl = []; ztop = CRUISE_Z
@@ -755,19 +755,19 @@ def load_calib_v2(eps=0.05):
     return out
 
 
-def load_calib_v4(eps=0.05):
-    """lambda-SHAPE-HE (v4, ELLIPTICAL motion-frame conformal) consumer: same entry shape as
+def load_calib_v5(eps=0.05):
+    """lambda-SHAPE-HE (v5, ELLIPTICAL motion-frame conformal) consumer: same entry shape as
     load_calib_v2 PLUS per-class 'kappa' (frozen along/cross aspect, >=1) and the shared
     'v_min_dir' (KF speed below which the direction is untrusted -> isotropic circle).
     FAIL-CLOSED like v2: missing class = q0 1e6, kappa 1."""
-    path = (os.environ.get("CALIB_FILE_V4") or os.path.join(_OUTDIR, "calib_v4.json"))
+    path = (os.environ.get("CALIB_FILE_V5") or os.path.join(_OUTDIR, "calib_v5.json"))
     rep = json.load(open(path))                     # missing file = hard crash, intended
     out = {}
     vmin = float(rep.get("v_min_dir", 0.5))
     for cls in ("pedestrian", "vehicle", "animal", "static"):
         lv = rep.get("groups", {}).get(cls, {}).get("levels", {}).get(str(eps), {})
         if "q_conformal" not in lv:
-            print(f"[calib_v4] class '{cls}' UNCALIBRATED at eps={eps} -> FAIL-CLOSED (uncertifiable)",
+            print(f"[calib_v5] class '{cls}' UNCALIBRATED at eps={eps} -> FAIL-CLOSED (uncertifiable)",
                   flush=True)
             out[cls] = dict(mature=(1e6, 0.0), young=(1e6, 0.0), plates=[], status="UNCALIBRATED",
                             kappa=1.0, v_min_dir=vmin)
@@ -778,7 +778,7 @@ def load_calib_v4(eps=0.05):
                                else (float(lv["q_conformal"]), float(lv["v_eff"]))),
                         plates=[], status=lv.get("status", "ok"),
                         kappa=float(rep.get("kappa", {}).get(cls, 1.0)), v_min_dir=vmin)
-    out["_meta"] = dict(sha=rep.get("provenance", {}).get("shape_hash"), eps=eps, gen="v4")
+    out["_meta"] = dict(sha=rep.get("provenance", {}).get("shape_hash"), eps=eps, gen="v5")
     return out
 
 

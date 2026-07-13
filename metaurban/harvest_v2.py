@@ -20,7 +20,7 @@ import zlib
 ap = argparse.ArgumentParser()
 ap.add_argument("--mode", choices=["foldB", "test", "vehA", "foldB2", "test2", "foldB3", "test3",
                                    "foldB4", "test4", "designC", "designD", "foldB5", "test5", "foldB6", "test6", "foldB7", "test7", "foldB8", "test8",
-                                   "designE", "foldE", "testE"], required=True)
+                                   "designCR", "designE", "designE2", "foldE", "testE"], required=True)
 ap.add_argument("--shard", type=int, default=0)
 ap.add_argument("--nshard", type=int, default=1)
 args = ap.parse_args()
@@ -80,9 +80,19 @@ elif args.mode == "foldB8":
     jobs = [(n, CFG["SEEDS_FOLDB8"][n]) for n in POOL]
 elif args.mode == "test8":
     jobs = [(n, s) for n in POOL for s in CFG["SEEDS_TEST8"][n]]
+elif args.mode == "designCR":  # designC REPLICA (identical seeds) under TODAY's runtime -- drift forensics:
+    #   separates 'the deployed stack changed since 07-07' from 'fresh-seed sampling noise'. Writes its
+    #   own files; the historical designC npys (v3 provenance) are never touched.
+    import zlib as _z
+    jobs = [(n, 100_000_000 + _z.crc32(f"{n}|C{k}".encode()) % 9_000_000) for n in POOL for k in range(4)]
 elif args.mode == "designE":   # v4 ellipse: motion-frame shape+kappa data (design domain, fresh 2e8 seeds)
     import zlib as _z
     jobs = [(n, 200_000_000 + _z.crc32(f"{n}|E{k}".encode()) % 9_000_000) for n in POOL for k in range(4)]
+elif args.mode == "designE2":  # designE noise-halving wave: +4 fresh seeds/scenario. The slope gate on a
+    #   4-seed design sample sits inside its own sampling noise (designE jackknife spread 0.75-0.96 vs
+    #   the 10% tolerance); E∪E2 doubles the design data, the GATE RULE ITSELF stays untouched.
+    import zlib as _z
+    jobs = [(n, 200_000_000 + _z.crc32(f"{n}|E2{k}".encode()) % 9_000_000) for n in POOL for k in range(4)]
 elif args.mode == "foldE":     # v4 ellipse: lambda ranking fold (fresh seeds, 2/scenario for rank slack)
     import zlib as _z
     jobs = [(n, 200_000_000 + _z.crc32(f"{n}|EB{k}".encode()) % 9_000_000) for n in POOL for k in range(2)]

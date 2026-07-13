@@ -1,4 +1,4 @@
-"""calibrate_ellipse — lambda-SHAPE-HE (v4): MOTION-FRAME ELLIPTICAL conformal, the 4th-gen calibration.
+"""calibrate_ellipse — lambda-SHAPE-HE (v5): MOTION-FRAME ELLIPTICAL conformal, the 5th-gen calibration (v4 = LCP-alpha/affine, a DIFFERENT line).
 
 The v3 machinery verbatim (frozen shapes from the design domain, ONE scalar lambda-hat from a fresh
 fold, single shared rank, empty flights count) with ONE change of scalar score: for ELIGIBLE rows
@@ -13,7 +13,7 @@ applies the ellipse under the SAME predicate (mature, non-zombie, |v| >= v_min_d
 stays a circle. The cross-pool stability gate still runs on the ISOTROPIC slopes vs the registered
 historical values (pool sanity is a property of the data, not of the norm).
 
-Needs designE/foldE/testE harvests (motion-frame ea/ec/spd columns; older folds lack them).
+Needs designE/foldE/testE harvests (motion-frame ea/ec/spd columns; older folds lack them). NB calib_v4.json belongs to the LCP-alpha/v4b line -- this file writes calib_v5.json.
 """
 import hashlib
 import json
@@ -74,7 +74,15 @@ def _sanity(D):
 
 
 if __name__ == "__main__":
-    D = V3.load("designE")
+    # Design domain = designCR: the SAME preregistered designC seed recipe v3 froze its shapes from,
+    # re-harvested deterministically under today's runtime to pick up the motion-frame columns
+    # (replication check: identical row count + slope 1.003 == the 07-07 designC harvest). This
+    # keeps v3 -> v4 a single-variable change (circle -> ellipse norm) with the SAME design domain
+    # and the SAME cross-pool gate verdict -- no domain resampling mixed in. Forensics note
+    # (2026-07-13): fresh-seed waves E/E2 measured ped-M slopes 0.888/0.842 vs C's 1.003 --
+    # wave-level sigma ~8% against a 10% gate tolerance; the gate itself needs a governance review
+    # (harvest_{designE,designE2}_v2_s*.npy kept as evidence), but that is NOT this file's call.
+    D = V3.load("designCR")
     if "ea" not in D.dtype.names:
         raise SystemExit("designE harvest lacks motion-frame columns; re-harvest with the v4 replay_core")
     _sanity(D)
@@ -92,7 +100,7 @@ if __name__ == "__main__":
     _sanity(V3.load("foldE"))
     SB, ST = V3.flight_sups(B, sh), V3.flight_sups(T, sh)
     n = len(SB)
-    out = dict(provenance=dict(spec="lambda-SHAPE-HE v4 (motion-frame ellipse)", shape_hash=sh_hash,
+    out = dict(provenance=dict(spec="lambda-SHAPE-HE v5 (motion-frame ellipse)", shape_hash=sh_hash,
                                n_flights=n, fold="E", date="2026-07-13"),
                kappa=kap, v_min_dir=V_MIN_DIR, groups={}, young={}, flags=[])
     vals = np.sort(np.array(list(SB.values())))
@@ -128,6 +136,6 @@ if __name__ == "__main__":
                       f"{kap[cls]} = {lam*(bM+vM*0.3)/kap[cls]:.2f} m")
     att = sorted(((v, kk) for kk, v in SB.items()), reverse=True)[:10]
     json.dump([dict(sup=round(v, 3), scn=kk[0], ep=kk[1]) for v, kk in att],
-              open("out/conformal/v4_sup_attribution.json", "w"), indent=1)
-    json.dump(out, open(os.path.join("..", "out", "conformal", "calib_v4.json"), "w"), indent=1)
-    print("[calib] wrote ../out/conformal/calib_v4.json + v4 sup attribution table")
+              open("out/conformal/v5_sup_attribution.json", "w"), indent=1)
+    json.dump(out, open(os.path.join("..", "out", "conformal", "calib_v5.json"), "w"), indent=1)
+    print("[calib] wrote ../out/conformal/calib_v5.json + v5 sup attribution table")

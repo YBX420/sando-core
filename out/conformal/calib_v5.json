@@ -1,0 +1,101 @@
+{
+ "provenance": {
+  "spec": "lambda-SHAPE-HE v5 (motion-frame ellipse)",
+  "shape_hash": "9ed9a2212b5cb16f",
+  "n_flights": 98,
+  "fold": "E",
+  "date": "2026-07-13"
+ },
+ "kappa": {
+  "pedestrian": 2.07,
+  "vehicle": 1.17
+ },
+ "v_min_dir": 0.5,
+ "groups": {
+  "pedestrian": {
+   "levels": {
+    "0.05": {
+     "q_conformal": 0.9619,
+     "v_eff": 3.0109,
+     "status": "ok"
+    },
+    "0.1": {
+     "q_conformal": 0.8505,
+     "v_eff": 2.6621,
+     "status": "ok"
+    }
+   }
+  },
+  "vehicle": {
+   "levels": {
+    "0.05": {
+     "q_conformal": 1.1486,
+     "v_eff": 2.4106,
+     "status": "ok"
+    },
+    "0.1": {
+     "q_conformal": 1.0155,
+     "v_eff": 2.1314,
+     "status": "ok"
+    }
+   }
+  },
+  "animal": {
+   "levels": {
+    "0.05": {
+     "status": "UNCALIBRATED"
+    },
+    "0.1": {
+     "status": "UNCALIBRATED"
+    }
+   }
+  },
+  "static": {
+   "levels": {
+    "0.05": {
+     "q_conformal": 0.6381,
+     "v_eff": 0.0,
+     "status": "ok"
+    },
+    "0.1": {
+     "q_conformal": 0.5642,
+     "v_eff": 0.0,
+     "status": "ok"
+    }
+   }
+  }
+ },
+ "young": {
+  "pedestrian": {
+   "0.05": {
+    "q0y": 1.0,
+    "growth": 2.2
+   },
+   "0.1": {
+    "q0y": 0.884,
+    "growth": 2.2
+   }
+  },
+  "vehicle": {
+   "0.05": {
+    "q0y": 1.04,
+    "growth": 11.0
+   },
+   "0.1": {
+    "q0y": 0.919,
+    "growth": 11.0
+   }
+  },
+  "static": {
+   "0.05": {
+    "q0y": 0.638,
+    "growth": 0.0
+   },
+   "0.1": {
+    "q0y": 0.564,
+    "growth": 0.0
+   }
+  }
+ },
+ "flags": []
+}

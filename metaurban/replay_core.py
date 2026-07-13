@@ -252,11 +252,11 @@ def run_replay(movers, ep, mode="ours", calib=None, predict=True, max_vel=3.0, m
     it runs inside the control loop."""
     calib = calib or (SL.load_calib() if CALIB_V2 else load_calib())
     calib_v2 = SL.load_calib_v2() if CALIB_V2 else None
-    if os.environ.get("ELLIPSE", "0") == "1":            # v4 ELLIPTICAL motion-frame conformal:
+    if os.environ.get("ELLIPSE", "0") == "1":            # v5 ELLIPTICAL motion-frame conformal:
         # entries carry per-class kappa; build_cylinders turns mature moving tracks into ellipse
-        # keep-outs. Requires the CALIB_V2 static-stationary code law (v4 harvested under it).
-        assert CALIB_V2, "ELLIPSE=1 requires CALIB_V2=1 (v4 calibrated under the FS3C-R code laws)"
-        calib_v2 = SL.load_calib_v4()
+        # keep-outs. Requires the CALIB_V2 static-stationary code law (v5 harvested under it).
+        assert CALIB_V2, "ELLIPSE=1 requires CALIB_V2=1 (v5 calibrated under the FS3C-R code laws)"
+        calib_v2 = SL.load_calib_v5()
     # work in a LOCAL frame centred on the corridor midpoint: MetaUrban world coords span hundreds of metres,
     # so a global grid would be billions of voxels. Translate everything by -org -> a small local map suffices.
     org = 0.5 * (ep["start"][:2] + ep["goal"][:2])
