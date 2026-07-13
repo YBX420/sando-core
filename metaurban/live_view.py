@@ -11,10 +11,11 @@ the same code path behind every headline number) paced to the WALL CLOCK, and dr
   drone + trail        trail coloured by the per-tick decision kind (straight/around/brake/evade/…)
   HUD                  t / kind / clearance / speed / counts / measured realtime factor
 
-All the usual env knobs (PERCEPT_*, DECIDE, CALIB_V2, V2_ESC, …) apply — set them BEFORE launch.
+By default the ACTIVE stack (V11 + escape tree, --stack v11esc) is applied via os.environ.setdefault —
+any knob you export yourself still wins, and --stack none runs the frozen v1 default.
 
+  ./ops/live.sh scenarios/bench/street_busy_s0.json            # one-liner (sets DISPLAY + env)
   ~/miniconda3/envs/metaurban/bin/python live_view.py scenarios/full/gauntlet.json
-  env DECIDE=v2 CALIB_V2=1 ... python live_view.py scenarios/full/crossers.json --speed 2
   python live_view.py scenarios/full/crossers.json --dummy --ticks 30 --shot 18:/tmp/s.png   # headless self-test
 
 keys: SPACE pause | F follow drone | +/- sim speed | S screenshot | Q/ESC quit
@@ -39,6 +40,17 @@ KINDC = {"straight": (90, 220, 120), "around_l": (80, 200, 230), "around_r": (80
          "native": (160, 160, 170), "sando": (160, 160, 170)}
 CLSC = {"pedestrian": (110, 175, 255), "ped": (110, 175, 255),
         "vehicle": (255, 165, 90), "veh": (255, 165, 90), "static": (130, 130, 140)}
+
+# switch presets (applied with setdefault: your own env exports always win). CALIB_FILE is consumed
+# verbatim by safety_layer.load_calib_v2 -> must be ABSOLUTE (R/out/conformal, not M/out/conformal).
+_CALIB_V3 = os.path.join(os.path.dirname(MU), "out", "conformal", "calib_v3.json")
+_V11 = dict(DECIDE="v2", CALIB_V2="1", CALIB_FILE=_CALIB_V3, DELTA_OVR="0.05",
+            YOUNG_TTL="2", SPEEDS_CRAWL="1", TAU_SPEED="1", CPA_CLOUD="1", ESC_TRIG="1")
+STACKS = {
+    "v11esc": dict(_V11, V2_ESC="1"),                              # active V11 + escape tree
+    "v11": _V11,
+    "none": {},                                                    # frozen v1 default
+}
 
 
 class Live:
@@ -135,9 +147,15 @@ def main():
     ap.add_argument("--ticks", type=int, default=0, help="auto-quit after N ticks (self-test)")
     ap.add_argument("--shot", default=None, help="TICK:PATH — save a screenshot once tick >= TICK")
     ap.add_argument("--dummy", action="store_true", help="SDL dummy video driver (headless self-test)")
+    ap.add_argument("--stack", default="v11esc", choices=sorted(STACKS),
+                    help="switch preset applied via setdefault (default: active V11 + escape tree)")
     args = ap.parse_args()
     if args.dummy:
         os.environ["SDL_VIDEODRIVER"] = "dummy"
+    for k, v in STACKS[args.stack].items():
+        os.environ.setdefault(k, v)                    # BEFORE importing replay_core (knobs bind at import)
+    print(f"[live] stack={args.stack} " +
+          " ".join(f"{k}={os.environ[k]}" for k in STACKS["v11esc"] if k in os.environ), flush=True)
 
     import pygame as pg
     import replay_core as RC
@@ -289,8 +307,9 @@ def main():
                         f" min_clr={d.get('min_clr', 0):.2f}", (255, 210, 90)))
         if live.err:
             hud.append(("STACK ERROR — see terminal", (255, 80, 80)))
-            print(live.err, file=sys.stderr)
-            live.err = None
+            if not getattr(live, "err_printed", False):
+                print(live.err, file=sys.stderr)
+                live.err_printed = True             # keep live.err set: the --ticks exit check needs it
         if hud:
             back = pg.Surface((max(font.size(t)[0] for t, _ in hud) + 16, 17 * len(hud) + 10))
             back.fill((12, 13, 16)); back.set_alpha(200)
