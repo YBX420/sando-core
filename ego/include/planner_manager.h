@@ -37,6 +37,9 @@ namespace ego_planner
     void setOptParams(double l1, double l2, double l3, double l4, double d0, double mv, double ma, int order) {
       bspline_optimizer_rebound_->setParamsManual(l1, l2, l3, l4, d0, mv, ma, order);
     }
+    void setMovingObstacles(const std::vector<BsplineOptimizer::MovingObs> &obs, double lambda) {
+      bspline_optimizer_rebound_->setMovingObstacles(obs, lambda);
+    }
 
     PlanParameters pp_;
     LocalTrajData local_data_;

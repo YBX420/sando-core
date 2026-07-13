@@ -804,6 +804,8 @@ EGO_PREDICT = os.environ.get("EGO_PREDICT", "1") == "1"
 
 
 _PFE_MEMO = {"t": None, "out": None, "pred": None}
+_GT_VELFD = {}   # GT oid -> (last_pos2, last_t): finite-diff true velocity (engine o.velocity is 0 for humanoids)
+_ORA_MAP = {}    # track id -> GT oid matched while detected (oracle's omniscient coast during miss ticks)
 
 
 def _kf_movers_realistic(p_d, t_sim, cam_heading):
@@ -822,14 +824,44 @@ def _kf_movers_realistic(p_d, t_sim, cam_heading):
         return _PFE_MEMO["out"]
     _KF_PRED = []
     cyls = []
+    gtl = []                                                # GT (pos2, vel2) rows aligned with cyls (oracle/debug only)
     for _oid, cls, pos, vel, size in native_objects():
         if cls == "static" or EGO_PERCLASS_DSAFE.get(cls) is None:
             continue
-        cyls.append((np.asarray(pos[:2], float), 0.5 * float(max(size[0], size[1])), float(size[2]), cls))
+        p2 = np.asarray(pos[:2], float)
+        cyls.append((p2, 0.5 * float(max(size[0], size[1])), float(size[2]), cls))
+        # engine o.velocity is 0 for animation-driven humanoids -> true velocity = GT position finite-diff
+        prev = _GT_VELFD.get(_oid)
+        v_fd = (p2 - prev[0]) / (t_sim - prev[1]) if (prev is not None and t_sim > prev[1]) else np.zeros(2)
+        _GT_VELFD[_oid] = (p2.copy(), t_sim)
+        gtl.append((_oid, p2, v_fd))
     for a in animals:
         pos = a.p0 + a.vel * t_sim
         cyls.append((np.asarray(pos[:2], float), 0.5 * float(max(a.size[0], a.size[1])), float(a.size[2]),
                      getattr(a, "cls_name", "animal")))
+        gtl.append((getattr(a, "id", id(a)), np.asarray(pos[:2], float), np.asarray(a.vel[:2], float)))
+    if GT_ORACLE:                                           # full-field omniscience: bypass the sensor front-end
+        out = []                                            # entirely (no cone/range/occlusion/miss, no KF, no
+        for (xy, r, h, cls), (oid, p2, v2) in zip(cyls, gtl):   # track-maturity gates) -- every mover in SENSE_R
+            if float(np.hypot(*(p2 - p_d[:2]))) > SENSE_R:      # is tracked exactly from tick 0
+                continue
+            zc = 0.5 * float(h)
+            kc0 = np.array([p2[0], p2[1], zc])
+            kv = np.array([v2[0], v2[1], 0.0])
+            if not EGO_PREDICT:
+                kv = np.zeros(3)
+            pred = kc0[None, :] + np.linspace(0.0, EGO_TAU_TRUST, 6)[:, None] * kv[None, :]
+            _ELL_TRK[oid] = (99, False, str(cls))           # mature, never coasting -> shape always eligible
+            out.append((oid, kc0, (float(kv[0]), float(kv[1]), 0.0), float(r),
+                        EGO_PERCLASS_DSAFE.get(cls, 0.8)))
+            _KF_PRED.append((p2.copy(), p2.copy(), [(float(p[0]), float(p[1])) for p in pred], zc)
+                            + ((_ell_ring(oid, kc0, kv, r),) if MAN_ELLIPSE else
+                               ((_cap_ring(oid, kc0, kv, r),) if MAN_CAPSULE else ())))
+            if KFDBG and cls == "pedestrian":
+                print(f"[KFDBG] t={t_sim:6.2f} {oid} ORACLE gt=({p2[0]:7.2f},{p2[1]:7.2f}) "
+                      f"gtv=({v2[0]:6.2f},{v2[1]:6.2f})", flush=True)
+        _PFE_MEMO["t"], _PFE_MEMO["out"], _PFE_MEMO["pred"] = t_sim, out, _KF_PRED
+        return out
     tracks = _PFE.step(p_d[:2], (np.cos(cam_heading), np.sin(cam_heading)), cyls)
     out = []
     for tr in tracks:
@@ -847,6 +879,25 @@ def _kf_movers_realistic(p_d, t_sim, cam_heading):
             pred = np.asarray([kc0, kc0])
         if not EGO_PREDICT:                                 # A/B ablation: reactive, no forecast
             kv = np.zeros(3); pred = np.asarray([kc0, kc0])
+        if GT_ORACLE or KFDBG:                              # nearest-GT association (track ids are NOT GT ids)
+            gt = min(gtl, key=lambda g: float(np.hypot(*(g[1] - kc0[:2])))) if gtl else None
+            gt_d = float(np.hypot(*(gt[1] - kc0[:2]))) if gt is not None else 1e9
+            if tr.miss == 0 and gt is not None and gt_d <= 2.0:
+                _ORA_MAP[tr.id] = gt[0]                     # remember the GT identity while detected...
+            elif tr.miss > 0 and tr.id in _ORA_MAP:         # ...so coasting is omniscient too (no KF drift in the
+                by_oid = {g[0]: g for g in gtl}             #    upper bound; the CA coast integrates garbage young-
+                gt = by_oid.get(_ORA_MAP[tr.id], gt)        #    track accel and runs away quadratically)
+                gt_d = float(np.hypot(*(gt[1] - kc0[:2]))) if gt is not None else 1e9
+            if GT_ORACLE and gt is not None and (tr.miss == 0 and gt_d <= 2.0 or
+                                                 tr.miss > 0 and _ORA_MAP.get(tr.id) == gt[0]):
+                kc0 = np.array([gt[1][0], gt[1][1], zc])    # exact sim pos/vel; detection timing unchanged
+                kv = np.array([gt[2][0], gt[2][1], 0.0])
+                pred = kc0[None, :] + np.linspace(0.0, EGO_TAU_TRUST, 6)[:, None] * kv[None, :]
+            if KFDBG and tr.cls == "pedestrian":
+                gs = (f"gt=({gt[1][0]:7.2f},{gt[1][1]:7.2f}) gtv=({gt[2][0]:6.2f},{gt[2][1]:6.2f}) d={gt_d:5.2f}"
+                      if gt is not None else "gt=NONE")
+                print(f"[KFDBG] t={t_sim:6.2f} trk{tr.id} n={tr.trk.n:3d} miss={tr.miss} {gs} "
+                      f"kf=({kc0[0]:7.2f},{kc0[1]:7.2f}) kfv=({kv[0]:6.2f},{kv[1]:6.2f})", flush=True)
         r_eff = tr.r + (MAN_MEM_K * tr.trk.pos_sigma if tr.miss > 0 else 0.0)
         _ELL_TRK[f"trk{tr.id}"] = (int(tr.trk.n), tr.miss > 0, str(tr.cls))   # v5 ellipse eligibility
         out.append((f"trk{tr.id}", kc0, (float(kv[0]), float(kv[1]), 0.0), float(r_eff), d_safe))
@@ -880,17 +931,17 @@ def kf_movers(p_d, t_sim, cam_heading=None):
             continue
         d = EGO_PERCLASS_DSAFE.get(cls)
         if d is not None:
-            raw.append((oid, c3, 0.5 * float(max(size[0], size[1])), d, cls))
+            raw.append((oid, c3, 0.5 * float(max(size[0], size[1])), d, cls, np.asarray(vel[:2], float)))
     for a in animals:
         pos = a.p0 + a.vel * t_sim
         c3 = p3(pos, a.size[2] * 0.5)
         if seen(c3):
             raw.append((getattr(a, "id", id(a)), c3, 0.5 * float(max(a.size[0], a.size[1])),
                         EGO_PERCLASS_DSAFE.get(getattr(a, "cls_name", "animal"), EGO_PERCLASS_DSAFE["animal"]),
-                        getattr(a, "cls_name", "animal")))
+                        getattr(a, "cls_name", "animal"), np.asarray(a.vel[:2], float)))
     out = []
     fresh = set()                                                          # oids DETECTED in-cone this tick
-    for (oid, c3, r, d, _cls) in raw:
+    for (oid, c3, r, d, _cls, gt_vel) in raw:
         fresh.add(oid)
         det = np.asarray(c3, float) + _KF_RNG.normal(0, KF_MEAS_NOISE, 3)   # NOISY detection -> the filter's input
         trk = _KF.get(oid)
@@ -906,6 +957,15 @@ def kf_movers(p_d, t_sim, cam_heading=None):
             pred = np.asarray([kc0, kc0])
         if not EGO_PREDICT:                                                # A/B ablation: reactive, no forecast
             kv = np.zeros(3); pred = np.asarray([kc0, kc0])                # certify the mover as STATIC at its current KF centre
+        if GT_ORACLE:                                                      # diagnostic: exact sim pos/vel, no noise/lag
+            kc0 = np.asarray(c3, float)
+            kv = np.array([gt_vel[0], gt_vel[1], 0.0])
+            pred = kc0[None, :] + np.linspace(0.0, EGO_TAU_TRUST, 6)[:, None] * kv[None, :]
+        if KFDBG and _cls == "pedestrian":
+            print(f"[KFDBG] t={t_sim:6.2f} {oid} n={trk.n:3d} "
+                  f"gt=({c3[0]:7.2f},{c3[1]:7.2f}) gtv=({gt_vel[0]:6.2f},{gt_vel[1]:6.2f}) "
+                  f"det=({det[0]:7.2f},{det[1]:7.2f}) kf=({kc0[0]:7.2f},{kc0[1]:7.2f}) "
+                  f"kfv=({kv[0]:6.2f},{kv[1]:6.2f})", flush=True)
         _ELL_TRK[oid] = (int(trk.n), False, str(_cls))                     # v5 ellipse eligibility
         out.append((oid, kc0, (float(kv[0]), float(kv[1]), 0.0), r, d))
         _KF_PRED.append((det[:2].copy(), kc0[:2].copy(), [(float(p[0]), float(p[1])) for p in pred], float(c3[2]))
@@ -1123,6 +1183,14 @@ _MAN_V2 = {}
 MAN_ELLIPSE = os.environ.get("ELLIPSE", "0") == "1"
 MAN_CAPSULE = os.environ.get("CAPSULE", "0") == "1"   # v6: keep-out = [mover's back, KF tip] ⊕ q̃,
 #   pearl-string certified through the SHARED _SL tournament (the "cap" 7th cyl field)
+GT_ORACLE = os.environ.get("GT_ORACLE", "0") == "1"   # diagnostic: skip noisy-detection+KF, feed exact
+#   sim pos/vel as kc0/kv (upper bound on prediction quality -- separates KF lag/noise from shape/cert issues)
+KFDBG = os.environ.get("KFDBG", "0") == "1"           # diagnostic: per-tick GT-vs-KF dump for pedestrian tracks
+EGO_TDYN = os.environ.get("EGO_TDYN", "0") == "1"     # TIME-AWARE movers: solver-level time-aligned penalty
+#   (EGO-Swarm/MIGHTY-style) replaces the mover occupancy rings -- EGO may plan THROUGH space a mover will
+#   have vacated; the pearl-chain cert still gates every commit (s=0 pearl keeps "he might stop" honest)
+EGO_TDYN_W = float(os.environ.get("EGO_TDYN_W", "10.0"))
+EGO_TDYN_PAD = float(os.environ.get("EGO_TDYN_PAD", "0.6"))   # hinge pad past r+d_safe (cert-scale reach)
 assert not (MAN_ELLIPSE and MAN_CAPSULE), "ELLIPSE=1 and CAPSULE=1 are mutually exclusive"
 _ELL_V5 = {}; _ELL_VMIN = 0.5; _ELL_TRK = {}      # _ELL_TRK: oid -> (kf_age, coasting, cls)
 _CAP_V6 = {}; _CAP_K = 4
@@ -1327,6 +1395,9 @@ def _man_cloud(p_d, heading, t_sim, movers):
     v_nom = np.array([np.cos(heading), np.sin(heading)]) * MAN_VCRUISE   # drone's nominal motion
     _vf_a = float(os.environ.get("VF_EMA", "0"))
     for (_oid, c3, vel, r_obs, d_safe) in movers:
+        if EGO_TDYN:
+            continue    # time-aware solver term owns the movers -- no occupancy rings (they would re-freeze
+            #             the swept corridor spatially and defeat the time dimension); statics stay in the map
         if _vf_a > 0:
             # PLANNER-FEED velocity EMA (cert cylinders keep the raw KF; calibration matches raw).
             # Measurement noise -> per-tick velocity wiggle -> t_cpa ring wiggle -> reference
@@ -1385,6 +1456,15 @@ def ego_maneuver_replan(p_d, v_d, a_d, cur_wp, t_sim):
     cam_heading = float(quad.yaw)
     movers = kf_movers(p_d, t_sim, cam_heading)            # cone-DETECTED movers + their KF prediction (the safety layer)
     ego.update_cloud(_man_cloud(p_d, cam_heading, t_sim, movers), p_d)
+    if EGO_TDYN:                                           # feed mover polys to the solver's time-aligned term
+        # hinge radius must reach CERT scale (r + per-class d_safe + pad), not the ring's r+0.45: the
+        # tournament keeps the drone ~1.5m off movers, so a smaller hinge never activates (verified:
+        # 728/728 replans byte-identical with the small radius)
+        _rows = [[c3[0], c3[1], c3[2], vel[0], vel[1], vel[2], r_obs + _ds + EGO_TDYN_PAD, 2.0 * c3[2]]
+                 for (_o, c3, vel, r_obs, _ds) in movers]
+        ego.set_moving_obstacles(np.asarray(_rows, float).reshape(-1, 8), EGO_TDYN_W if _rows else 0.0)
+        if KFDBG:
+            print(f"[TDYN] t={t_sim:6.2f} fed {len(_rows)} movers w={EGO_TDYN_W}", flush=True)
     if os.environ.get("MAN_SPAWNDBG") == "1" and _SPAWNDBG[0] < 4:
         _SPAWNDBG[0] += 1
         n360 = int(len(STATIC_CLOUD)) if len(STATIC_CLOUD) else 0

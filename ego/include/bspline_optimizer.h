@@ -74,6 +74,14 @@ namespace ego_planner
     void setWaypoints(const vector<Eigen::Vector3d> &waypts,
                       const vector<int> &waypt_idx); // N-2 constraints at most
 
+    // TIME-AWARE moving obstacles (EGO-Swarm-style time-aligned penalty, MIGHTY J_dyn hinge):
+    // each control point i lives at t_i since traj start; penalise xy clearance to c0 + v*t_i.
+    // lambda = 0 or empty obs -> cost path untouched (byte-identical default).
+    struct MovingObs { Eigen::Vector3d c0, v; double r_clear, z_top; };
+    void setMovingObstacles(const std::vector<MovingObs> &obs, double lambda) {
+      moving_obs_ = obs; lambda_moving_ = lambda;
+    }
+
     void optimize();
 
     Eigen::MatrixXd getControlPoints();
@@ -117,6 +125,8 @@ namespace ego_planner
     double lambda2_, new_lambda2_; // distance weight
     double lambda3_;               // feasibility weight
     double lambda4_;               // curve fitting
+    std::vector<MovingObs> moving_obs_;   // time-aware mover polys (traj-start-aligned)
+    double lambda_moving_{0.0};           // moving-obstacle weight; 0 = term off
 
     int a;
     //
@@ -142,6 +152,7 @@ namespace ego_planner
     void calcFeasibilityCost(const Eigen::MatrixXd &q, double &cost,
                              Eigen::MatrixXd &gradient);
     void calcDistanceCostRebound(const Eigen::MatrixXd &q, double &cost, Eigen::MatrixXd &gradient, int iter_num, double smoothness_cost);
+    void calcMovingObstacleCost(const Eigen::MatrixXd &q, double &cost, Eigen::MatrixXd &gradient);
     void calcFitnessCost(const Eigen::MatrixXd &q, double &cost, Eigen::MatrixXd &gradient);
     bool check_collision_and_rebound(void);
 

@@ -62,6 +62,22 @@ void ego_set_params(void* h, double max_vel, double max_acc, double max_jerk, do
   m->setOptParams(l1, l2, l3, l4, dist0, max_vel, max_acc, order);
 }
 
+void ego_set_moving_obstacles(void* h, double* rows, int n, double lambda) {
+  // rows: n x 8 [c0x c0y c0z vx vy vz r_clear z_top]; obstacle polys are aligned to the NEXT replan's
+  // t=0 (feed current KF/GT state right before ego_replan). n=0 or lambda=0 -> term off (default path).
+  std::vector<ego_planner::BsplineOptimizer::MovingObs> v;
+  v.reserve(n > 0 ? n : 0);
+  for (int i = 0; i < n; ++i) {
+    const double* r = rows + 8 * i;
+    ego_planner::BsplineOptimizer::MovingObs m;
+    m.c0 = Eigen::Vector3d(r[0], r[1], r[2]);
+    m.v = Eigen::Vector3d(r[3], r[4], r[5]);
+    m.r_clear = r[6]; m.z_top = r[7];
+    v.push_back(m);
+  }
+  ((EGOPlannerManager*)h)->setMovingObstacles(v, lambda);
+}
+
 void ego_update_cloud(void* h, double* pts, int n, double* cam) {
   auto* m = (EGOPlannerManager*)h;
   std::vector<Eigen::Vector3d> cloud; cloud.reserve(n);

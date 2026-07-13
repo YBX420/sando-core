@@ -49,6 +49,10 @@ try:    # BEHIND-THE-MOVER half-plane (v6.1 rear-slim capsule); absent in a stal
                            C.c_double, C.c_double, C.c_double, C.c_double, _d)
 except AttributeError:
     _certify_behind = None
+try:    # TIME-AWARE moving obstacles (EGO-Swarm-style solver term, 2026-07); absent in a stale .so
+    _set_moving = _sig("ego_set_moving_obstacles", None, C.c_void_p, _d, C.c_int, C.c_double)
+except AttributeError:
+    _set_moving = None
 _destroy = _sig("ego_destroy", None, C.c_void_p)
 
 
@@ -74,6 +78,15 @@ class EGOPlanner:
         cloud = np.ascontiguousarray(np.asarray(cloud_xyz, np.float64).reshape(-1, 3))
         n = cloud.shape[0]; cp = cloud.ctypes.data_as(_d) if n else _d()
         _c, cam = _p(cam_pos); _update_cloud(self._h, cp, int(n), cam)
+
+    def set_moving_obstacles(self, rows, lam):
+        """rows: (n, 8) [c0x c0y c0z vx vy vz r_clear z_top], time-aligned to the next replan's t=0.
+        n=0 or lam=0 clears the term. No-op on a stale .so (missing export)."""
+        if _set_moving is None:
+            return
+        r = np.ascontiguousarray(np.asarray(rows, np.float64).reshape(-1, 8))
+        n = r.shape[0]; rp = r.ctypes.data_as(_d) if n else _d()
+        _set_moving(self._h, rp, int(n), float(lam))
 
     def replan(self, start, vel, acc, goal, goal_vel=(0, 0, 0), random_poly=False):
         _a, sp = _p(start); _b, sv = _p(vel); _c, sa = _p(acc); _d2, gp = _p(goal); _e, gv = _p(goal_vel)

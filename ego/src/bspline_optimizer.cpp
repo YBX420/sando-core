@@ -393,6 +393,44 @@ namespace ego_planner
     }
   }
 
+  void BsplineOptimizer::calcMovingObstacleCost(const Eigen::MatrixXd &q, double &cost, Eigen::MatrixXd &gradient)
+  {
+    // TIME-AWARE mover penalty: control point i sits at t_i = ((order-1)/2 + (i-order+1)) * interval
+    // since traj start (EGO-Swarm's glb_time convention); each mover is a cylinder riding its constant-
+    // velocity poly c0 + v*t. Same cubic hinge as the static rebound cost, xy-gradient only; a control
+    // point above the mover's top keeps zero cost so certified fly-over stays available.
+    cost = 0.0;
+    int end_idx = q.cols() - order_;
+    for (auto i = order_; i < end_idx; ++i)
+    {
+      double t_i = ((double)(order_ - 1) / 2.0 + (i - order_ + 1)) * bspline_interval_;
+      for (const auto &ob : moving_obs_)
+      {
+        if (q(2, i) > ob.z_top + 0.3)
+          continue;
+        double demarcation = ob.r_clear;
+        double a = 3 * demarcation, b = -3 * pow(demarcation, 2), c = pow(demarcation, 3);
+        Eigen::Vector3d op = ob.c0 + ob.v * t_i;
+        double dx = q(0, i) - op(0), dy = q(1, i) - op(1);
+        double dist = sqrt(dx * dx + dy * dy);
+        double dist_err = ob.r_clear - dist;
+        if (dist_err < 0 || dist < 1e-6)
+          continue;
+        Eigen::Vector3d dist_grad(dx / dist, dy / dist, 0.0);
+        if (dist_err < demarcation)
+        {
+          cost += pow(dist_err, 3);
+          gradient.col(i) += -3.0 * dist_err * dist_err * dist_grad;
+        }
+        else
+        {
+          cost += a * dist_err * dist_err + b * dist_err + c;
+          gradient.col(i) += -(2.0 * a * dist_err + b) * dist_grad;
+        }
+      }
+    }
+  }
+
   void BsplineOptimizer::calcFitnessCost(const Eigen::MatrixXd &q, double &cost, Eigen::MatrixXd &gradient)
   {
 
@@ -1091,6 +1129,15 @@ namespace ego_planner
     //printf("origin %f %f %f %f\n", f_smoothness, f_distance, f_feasibility, f_combine);
 
     Eigen::MatrixXd grad_3D = lambda1_ * g_smoothness + new_lambda2_ * g_distance + lambda3_ * g_feasibility;
+
+    if (lambda_moving_ > 0.0 && !moving_obs_.empty())
+    {
+      double f_moving = 0.0;
+      Eigen::MatrixXd g_moving = Eigen::MatrixXd::Zero(3, cps_.size);
+      calcMovingObstacleCost(cps_.points, f_moving, g_moving);
+      f_combine += lambda_moving_ * f_moving;
+      grad_3D += lambda_moving_ * g_moving;
+    }
     memcpy(grad, grad_3D.data() + 3 * order_, n * sizeof(grad[0]));
   }
 
