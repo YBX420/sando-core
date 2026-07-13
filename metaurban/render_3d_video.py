@@ -524,7 +524,12 @@ def draw_predictions():
     0.75 s trust horizon = where the drone routes AROUND. No KF -> only the white jitter, no orange forecast."""
     for ch in pred_root.getChildren(): ch.removeNode()
     ORG, ORGd = (1.0, 0.55, 0.0, 1.0), (1.0, 0.4, 0.0, 1.0)
-    for (det_xy, now_xy, pred, hz) in _KF_PRED:
+    for _kp in _KF_PRED:
+        (det_xy, now_xy, pred, hz) = _kp[:4]
+        ring = _kp[4] if len(_kp) > 4 else None            # v5 ELLIPSE arm: keep-out footprint outline
+        if ring:
+            pred_root.attachNewNode(_polyline([(x, y, GROUND_Z + 0.05) for (x, y) in ring],
+                                              (0.15, 0.9, 0.9, 1.0), 5.0))   # cyan ellipse = certified keep-out
         top = max(1.8, float(hz) if hz else 1.8)
         trail = [(float(x), float(y), GROUND_Z + 0.03) for (x, y) in pred]
         if len(trail) >= 2:
@@ -843,9 +848,11 @@ def _kf_movers_realistic(p_d, t_sim, cam_heading):
         if not EGO_PREDICT:                                 # A/B ablation: reactive, no forecast
             kv = np.zeros(3); pred = np.asarray([kc0, kc0])
         r_eff = tr.r + (MAN_MEM_K * tr.trk.pos_sigma if tr.miss > 0 else 0.0)
+        _ELL_TRK[f"trk{tr.id}"] = (int(tr.trk.n), tr.miss > 0, str(tr.cls))   # v5 ellipse eligibility
         out.append((f"trk{tr.id}", kc0, (float(kv[0]), float(kv[1]), 0.0), float(r_eff), d_safe))
         _KF_PRED.append((np.asarray(tr.xy[:2], float).copy(), np.asarray(kc0[:2], float).copy(),
-                         [(float(p[0]), float(p[1])) for p in pred], float(zc)))
+                         [(float(p[0]), float(p[1])) for p in pred], float(zc))
+                        + ((_ell_ring(f"trk{tr.id}", kc0, kv, tr.r),) if MAN_ELLIPSE else ()))
     _PFE_MEMO["t"], _PFE_MEMO["out"], _PFE_MEMO["pred"] = t_sim, out, _KF_PRED
     return out
 
@@ -872,16 +879,17 @@ def kf_movers(p_d, t_sim, cam_heading=None):
             continue
         d = EGO_PERCLASS_DSAFE.get(cls)
         if d is not None:
-            raw.append((oid, c3, 0.5 * float(max(size[0], size[1])), d))
+            raw.append((oid, c3, 0.5 * float(max(size[0], size[1])), d, cls))
     for a in animals:
         pos = a.p0 + a.vel * t_sim
         c3 = p3(pos, a.size[2] * 0.5)
         if seen(c3):
             raw.append((getattr(a, "id", id(a)), c3, 0.5 * float(max(a.size[0], a.size[1])),
-                        EGO_PERCLASS_DSAFE.get(getattr(a, "cls_name", "animal"), EGO_PERCLASS_DSAFE["animal"])))
+                        EGO_PERCLASS_DSAFE.get(getattr(a, "cls_name", "animal"), EGO_PERCLASS_DSAFE["animal"]),
+                        getattr(a, "cls_name", "animal")))
     out = []
     fresh = set()                                                          # oids DETECTED in-cone this tick
-    for (oid, c3, r, d) in raw:
+    for (oid, c3, r, d, _cls) in raw:
         fresh.add(oid)
         det = np.asarray(c3, float) + _KF_RNG.normal(0, KF_MEAS_NOISE, 3)   # NOISY detection -> the filter's input
         trk = _KF.get(oid)
@@ -897,8 +905,10 @@ def kf_movers(p_d, t_sim, cam_heading=None):
             pred = np.asarray([kc0, kc0])
         if not EGO_PREDICT:                                                # A/B ablation: reactive, no forecast
             kv = np.zeros(3); pred = np.asarray([kc0, kc0])                # certify the mover as STATIC at its current KF centre
+        _ELL_TRK[oid] = (int(trk.n), False, str(_cls))                     # v5 ellipse eligibility
         out.append((oid, kc0, (float(kv[0]), float(kv[1]), 0.0), r, d))
-        _KF_PRED.append((det[:2].copy(), kc0[:2].copy(), [(float(p[0]), float(p[1])) for p in pred], float(c3[2])))
+        _KF_PRED.append((det[:2].copy(), kc0[:2].copy(), [(float(p[0]), float(p[1])) for p in pred], float(c3[2]))
+                        + ((_ell_ring(oid, kc0, kv, r),) if MAN_ELLIPSE else ()))
     # ---- TRACK MEMORY: movers that just LEFT the cone are COASTED (extrapolated + covariance grown) and kept in the
     # cert/occupancy set for MAN_MEM_TICKS so 'straight' cannot instantly re-certify behind a mover still on a collision
     # course (forget-after-pass). Extrapolate-only: the centre/vel come from the coasted KF, never a fresh GT read.
@@ -914,6 +924,8 @@ def kf_movers(p_d, t_sim, cam_heading=None):
                 continue
             kc0, kv, _ka = trk.state()
             r_mem = trk.r_obs + MAN_MEM_K * trk.pos_sigma                  # covariance growth -> bigger keep-out tube
+            if oid in _ELL_TRK:                                            # coasting -> ellipse ineligible
+                _ELL_TRK[oid] = (_ELL_TRK[oid][0], True, _ELL_TRK[oid][2])
             out.append((oid, kc0, (float(kv[0]), float(kv[1]), 0.0), r_mem, trk.d_safe))
             pred = trk.predict(np.linspace(0.0, EGO_TAU_TRUST, 6))
             _KF_PRED.append((kc0[:2].copy(), kc0[:2].copy(), [(float(p[0]), float(p[1])) for p in pred], float(kc0[2])))
@@ -1101,6 +1113,59 @@ EGO_DECIDE = os.environ.get("EGO_DECIDE", "v2")   # unified tournament DEFAULT (
 #   (one shared implementation with the headless benchmark; absorbs CCF/CRET/FOVCAP speed patches)
 import safety_layer as _SL
 _MAN_V2 = {}
+# ---- v5 MOTION-FRAME ELLIPSE on the render face (ELLIPSE=1, default OFF -> byte-identical) ----
+# Mature (age>=4), non-coasting, moving (|v|>=v_min_dir) ped/veh tracks swap their mover law to the
+# calib_v5 ellipse: along-axis A(t)=R+v_eff*(t+d) on the KF velocity, cross A(t)/kappa. Carried as the
+# optional 7th cyl field into the SHARED _SL tournament (cert_clear/_warp dispatch the aniso cert).
+# Everything else (young/static/coasting/slow, vertical zc law) keeps today's production numbers.
+MAN_ELLIPSE = os.environ.get("ELLIPSE", "0") == "1"
+_ELL_V5 = {}; _ELL_VMIN = 0.5; _ELL_TRK = {}      # _ELL_TRK: oid -> (kf_age, coasting, cls)
+if MAN_ELLIPSE:
+    _v5 = _SL.load_calib_v5(eps=MAN_EPS)
+    for _c5 in ("pedestrian", "vehicle"):
+        _e5 = _v5.get(_c5) or {}
+        if "mature" in _e5 and _e5.get("status", "ok") != "UNCALIBRATED":
+            _ELL_V5[_c5] = (float(_e5["mature"][0]), float(_e5["mature"][1]), float(_e5.get("kappa", 1.0)))
+            _ELL_VMIN = float(_e5.get("v_min_dir", 0.5))
+    print(f"[3dv] ELLIPSE=1: v5 motion-frame ellipse (mature moving tracks) "
+          f"{ {c: v for c, v in _ELL_V5.items()} } v_min={_ELL_VMIN}", flush=True)
+
+
+def _ell_of_mover(oid, vel, r_obs):
+    """(kappa, ux, uy, R_warp, q5, veff5) for an ellipse-eligible mover, else None. The ONE render-face
+    eligibility predicate (mirrors build_cylinders + the v5 calibration): mature KF, not coasting,
+    class calibrated, speed >= v_min_dir."""
+    if not MAN_ELLIPSE:
+        return None
+    a = _ELL_TRK.get(oid)
+    if not a or a[0] < 4 or a[1]:
+        return None
+    ent = _ELL_V5.get(a[2])
+    if ent is None:
+        return None
+    q5, veff5, kap = ent
+    sp = float(np.hypot(vel[0], vel[1]))
+    if sp < _ELL_VMIN:
+        return None
+    # kap == 1 (e.g. the v5-iso ablation twin via CALIB_FILE_V5): the mover still SWAPS to the v5
+    # numbers -- same-generation circle -- but carries no ellipse field. Keeps the render A/B a
+    # single-variable (shape-only) comparison instead of stale-gen-1 circle vs modern-width ellipse.
+    rw = kap * (float(r_obs) + MAN_DSAFE + MAN_TRACK) + q5
+    return (kap, float(vel[0]) / sp, float(vel[1]) / sp, rw, q5, veff5)
+
+
+def _ell_ring(oid, kc0, vel, r_obs):
+    """Ground outline of the deployed keep-out ellipse at t=0 (drawn by draw_predictions on the
+    ELLIPSE arm as the visible proof of the motion-frame tube). None when the mover is a circle."""
+    e = _ell_of_mover(oid, vel, r_obs)
+    if e is None:
+        return None
+    kap, ux, uy, rw, _q5, veff5 = e
+    a = rw + veff5 * REPLAN_DT                # along semi-axis incl. the staleness charge
+    b = a / kap                               # cross-track: the thin side the drone may now use
+    return [(float(kc0[0] + a * np.cos(th) * ux - b * np.sin(th) * uy),
+             float(kc0[1] + a * np.cos(th) * uy + b * np.sin(th) * ux))
+            for th in np.linspace(0.0, 2.0 * np.pi, 33)]
 # HCT-D tracking-tube HARVEST: TRACK_HARVEST=1 logs per sub-step (window, delta=||flown-planned||, hodograph
 # features ||v||,||a||,lateral-accel) so a split-conformal tracking tube kappa*g can be calibrated off-line.
 _TRACKH = os.environ.get("TRACK_HARVEST") == "1"
@@ -1433,9 +1498,13 @@ def ego_maneuver_replan(p_d, v_d, a_d, cur_wp, t_sim):
         _cyl = []
         for (_oid, c3, vel, r_obs, d_safe) in movers:
             q_c, veff_c = PERCLASS_CONF.get(d_safe, (MAN_QCONF, MAN_VEFF))
+            _e7 = _ell_of_mover(_oid, vel, r_obs)
+            if _e7 is not None:                 # v5 arm: this mover's law = calib_v5 mature numbers
+                _k5, _ux5, _uy5, _rw5, q_c, veff_c = _e7
             _cyl.append((np.asarray(c3, float), np.array([float(vel[0]), float(vel[1]), 0.0]),
                          np.zeros(3), r_obs + MAN_DSAFE + q_c + MAN_TRACK,
-                         2.0 * float(c3[2]) + MAN_REACH_PAD + MAN_DSAFE_V + q_c + MAN_TRACK, veff_c))
+                         2.0 * float(c3[2]) + MAN_REACH_PAD + MAN_DSAFE_V + q_c + MAN_TRACK, veff_c)
+                        + (((_k5, _ux5, _uy5, _rw5),) if (_e7 is not None and _k5 > 1.0 + 1e-9) else ()))
         kind, s_v2 = _SL.maneuver_decide_v2(
             ego, p_d, v_d, a_d, np.asarray(cur_wp, float), z_top, _cyl, _MAN_V2,
             cruise_z=CRUISE_Z, horizon=L, straight_clip=EGO_HOR,
