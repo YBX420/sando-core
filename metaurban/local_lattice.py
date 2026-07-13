@@ -220,9 +220,12 @@ def precertify_branch(p, v, a, cyl, a_max, dt=DT, delta=DT, angles=(45.0, 90.0),
     (c(t)=c0+vel*t at absolute t equals (c0+vel*dt)+vel*t' at branch time t', and R+v_eff*(t+delta)
     equals R+v_eff*(t'+(delta+dt)) -- exact time-frame shift, no new assumptions). Straight
     decelerate-to-rest first, then the dodge grid. Returns (segs, durs, t_cert) or None."""
-    cyl_adv = [(np.asarray(c0, float) + np.asarray(vel, float) * dt + 0.5 * np.asarray(acc, float) * dt * dt,
-                np.asarray(vel, float) + np.asarray(acc, float) * dt, acc, R, zc, veff)
-               for (c0, vel, acc, R, zc, veff) in cyl]
+    cyl_adv = [(np.asarray(ent[0], float) + np.asarray(ent[1], float) * dt
+                + 0.5 * np.asarray(ent[2], float) * dt * dt,
+                np.asarray(ent[1], float) + np.asarray(ent[2], float) * dt) + tuple(ent[3:6])
+               for ent in cyl]   # v4 ellipse field (ent[6]) deliberately DROPPED: the escape tree
+    #   certifies against the isotropic circle (a superset of the ellipse at the same q -- sound,
+    #   just conservative; branch certs and the main gate may disagree only toward more caution)
     d_eff = delta + dt
     prim = quintic3(p, v, a, p, v * 0.0, np.zeros(3), T_P)
     segs, durs, tc = make_composite(prim, a_max, dt)
@@ -297,7 +300,8 @@ def certify_composite(segs, durs, cyl, t_cert, delta, tau=None, want_who=False):
     ctrl, t0s, du = monomial_to_bseg(coeffs, np.asarray(durs, float))
     th = t_cert if tau is None else tau
     m_min = np.inf
-    for i, (c0, vel, acc, R, zc, veff) in enumerate(cyl):
+    for i, ent in enumerate(cyl):
+        (c0, vel, acc, R, zc, veff) = ent[:6]
         hp, mp = Certifier.certify_horizontal(ctrl, t0s, du, c0, R, vel=vel, acc=acc,
                                               t_hi=th, v_eff=veff, delta=delta, n_axes=2)
         hc, mc = Certifier.certify_horizontal(ctrl, t0s, du, c0, R, vel=(0, 0, 0),

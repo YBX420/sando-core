@@ -170,6 +170,36 @@ int ego_certify_horizontal3(void* h, double* c0, double* vel, double* acc, doubl
   return v.certified ? 1 : (refuted ? -1 : 0);
 }
 
+// ANISOTROPIC (elliptical keep-out) twin of ego_certify_horizontal, for the v4 motion-frame conformal
+// calibration. Keep-out around the predicted centre is the ellipse with semi-axis A(t)=R+v_eff*(t+delta)
+// ALONG the mover's unit velocity (ux,uy) and A(t)/kappa ACROSS it. Sound substitution: stretch the
+// cross-track axis of BOTH the drone spline and the obstacle polynomial by kappa (a constant linear map,
+// Bernstein structure preserved), then the existing isotropic disc proof applies verbatim. The caller must
+// fold the kappa-inflated body radius into R (R = kappa*r_geom + q_along): |W(p-c)| > u(t) + kappa*r_geom
+// for all t implies no point of the body disc can touch the calibrated ellipse. Margin is in the WARPED
+// metric (gate/tie-break use only). (ux,uy) MUST be unit-length; kappa >= 1.
+int ego_certify_horizontal_aniso(void* h, double* c0, double* vel, double* acc, double R, double t_hi,
+                                 double v_eff, double delta, double ux, double uy, double kappa,
+                                 double* margin_out) {
+  auto* m = (EGOPlannerManager*)h;
+  auto segs = build_segs(m);
+  if (segs.empty()) { if (margin_out) *margin_out = -1.0; return 0; }
+  const double nx = -uy, ny = ux;                 // cross-track unit normal
+  const double g = kappa - 1.0;
+  auto W = [&](Eigen::Vector3d& p) {              // p += (kappa-1)*(p . n) n  on the horizontal plane
+    const double c = nx * p.x() + ny * p.y();
+    p.x() += g * c * nx; p.y() += g * c * ny;
+  };
+  for (auto& s : segs) for (auto& b : s.bern) W(b);
+  Eigen::Vector3d C0(c0[0], c0[1], c0[2]), V(vel[0], vel[1], vel[2]), A(acc[0], acc[1], acc[2]);
+  W(C0); W(V); W(A);
+  const double th = (t_hi > 0.0) ? t_hi : std::numeric_limits<double>::infinity();
+  auto v = sando::bcert::certify_segments_vs_sphere(segs, C0, V, A, R, th, /*maxdepth*/16,
+                                                    v_eff, delta, /*n_axes*/2);
+  if (margin_out) *margin_out = v.margin;
+  return v.certified ? 1 : 0;
+}
+
 int ego_certify_above3(void* h, double z_clear, double t_hi, double v_eff_z, double delta,
                        double bez_pad, double* margin_out) {
   auto* m = (EGOPlannerManager*)h;

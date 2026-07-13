@@ -252,6 +252,11 @@ def run_replay(movers, ep, mode="ours", calib=None, predict=True, max_vel=3.0, m
     it runs inside the control loop."""
     calib = calib or (SL.load_calib() if CALIB_V2 else load_calib())
     calib_v2 = SL.load_calib_v2() if CALIB_V2 else None
+    if os.environ.get("ELLIPSE", "0") == "1":            # v4 ELLIPTICAL motion-frame conformal:
+        # entries carry per-class kappa; build_cylinders turns mature moving tracks into ellipse
+        # keep-outs. Requires the CALIB_V2 static-stationary code law (v4 harvested under it).
+        assert CALIB_V2, "ELLIPSE=1 requires CALIB_V2=1 (v4 calibrated under the FS3C-R code laws)"
+        calib_v2 = SL.load_calib_v4()
     # work in a LOCAL frame centred on the corridor midpoint: MetaUrban world coords span hundreds of metres,
     # so a global grid would be billions of voxels. Translate everything by -org -> a small local map suffices.
     org = 0.5 * (ep["start"][:2] + ep["goal"][:2])
@@ -477,6 +482,12 @@ def run_replay(movers, ep, mode="ours", calib=None, predict=True, max_vel=3.0, m
                         d_drone = float(np.hypot(*(tr.xy[:2] - p_d[:2])))   # BINDING-REGION field:
                         # only movers close enough to collide within the trust window can make a
                         # certified tick unsafe -- the composition theorem's sup runs over these rows
+                        # MOTION-FRAME residual decomposition (v4 ellipse calibration): unit KF
+                        # velocity at the anchor defines along/cross; the deployed ellipse trusts
+                        # this SAME direction, so the calibration must score in the same frame.
+                        _c0k, _vk, _ak = tr.trk.state()
+                        _spd = float(np.hypot(_vk[0], _vk[1]))
+                        _udir = (np.asarray(_vk[:2], float) / _spd) if _spd > 1e-9 else None
                         for dh in _HARV_DELTAS:
                             if not movers.present(gi, t + dh):
                                 continue                    # mover leaves the world: nothing to predict
@@ -485,16 +496,22 @@ def run_replay(movers, ep, mode="ours", calib=None, predict=True, max_vel=3.0, m
                                 # present. Scoring statics with the CV extrapolation charged them
                                 # for KF velocity noise -> mover-sized tubes -> keep-out walls.
                                 # Calibration must match deployment: PERCLASS=1 deploys the same v=0.
-                                c0s, _v, _a = tr.trk.state()
-                                pred = np.asarray(c0s[:2], float)
+                                pred = np.asarray(_c0k[:2], float)
                             else:
                                 pred = tr.trk.predict([dh], model=PRED_MODEL)[0, :2]
-                            resid = float(np.hypot(*(pos_l(gi, t + dh) - pred)))
+                            _err = pos_l(gi, t + dh) - pred
+                            resid = float(np.hypot(*_err))
+                            if _udir is not None:          # |along| / |cross| in the motion frame
+                                _ea = abs(float(_err @ _udir))
+                                _ec = abs(float(_err[0] * (-_udir[1]) + _err[1] * _udir[0]))
+                            else:
+                                _ea, _ec = resid, 0.0      # direction undefined: spd column gates it out
                             PERCEPT_HARVEST.append((float(dh), resid, int(tr.trk.n),
                                                     str(tr.cls), int(_HARV_EP[0]), d_drone)
                                                    + ((_HARV_SCN[0], int(_QUAL_MEMO.get(gi, True)),
                                                        int(tr.trk.miss > 0),          # coast flag (theta3)
-                                                       float(getattr(tr.trk, "sigma_v", 0.0)))
+                                                       float(getattr(tr.trk, "sigma_v", 0.0)),
+                                                       _ea, _ec, _spd)                # motion-frame cols (v4)
                                                       if _HARV_V2 else ()))
             else:
                 percepts = [(trackers[i], dets[i], movers.m[i]["r"], movers.m[i]["h"], movers.m[i]["cls"])
@@ -547,7 +564,7 @@ def run_replay(movers, ep, mode="ours", calib=None, predict=True, max_vel=3.0, m
             else:
                 def clear_fn():                          # discrete-sampling gate (ablation): n_sample points only
                     dur = ego.duration()
-                    for (c0, vv, aa, R, zc, veff) in cyl:
+                    for (c0, vv, aa, R, zc, veff) in (ent[:6] for ent in cyl):
                         for s in np.linspace(0.0, min(TAU, dur), max(2, n_sample)):
                             r = ego.eval(s)
                             if r is None:

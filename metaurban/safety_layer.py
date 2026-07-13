@@ -60,6 +60,8 @@ def build_cylinders(movers, calib, predict=True, track_margin=0.0, calib_v2=None
     MAN_TRACK=0.473 but the headless DYN arms certified the PLANNED spline with NO margin while the
     quad FLIES up to ~delta_track away -- 'flown == certified' hole). Kinematic arms pass 0."""
     use_plates = os.environ.get("PLATES", "0") == "1"
+    use_ellipse = os.environ.get("ELLIPSE", "0") == "1"   # v4 motion-frame ELLIPTICAL keep-out
+    #   (mature moving tracks only; needs calib_v4 entries carrying 'kappa' -- see load_calib_v4)
     agemin_ped = int(os.environ.get("AGEMIN_PED", "0")) or age_min   # ped early maturity (age2-3
     #   q95 covered by the mature tube at every horizon, designC 2026-07-07) -- gated exploratory
     cyl = []; ztop = CRUISE_Z
@@ -69,6 +71,7 @@ def build_cylinders(movers, calib, predict=True, track_margin=0.0, calib_v2=None
         coast = mv[7] if len(mv) > 7 else None
         nis = mv[8] if len(mv) > 8 else None
         sigv = mv[9] if len(mv) > 9 else None
+        _mature_arm = False
         if calib_v2 is not None:
             ent = calib_v2.get(cls) or dict(mature=(1e6, 0.0), young=(1e6, 0.0), plates=[])
             _amin = agemin_ped if cls == "pedestrian" else age_min
@@ -86,6 +89,7 @@ def build_cylinders(movers, calib, predict=True, track_margin=0.0, calib_v2=None
                 vel = np.zeros(3); acc = np.zeros(3)   # young plate: FROZEN centre + fat growth
             else:
                 q, veff = ent["mature"]
+                _mature_arm = True
                 if use_plates and age is not None:
                     for (lo, hi, co, pq, pv) in ent.get("plates", []):
                         if lo <= age <= hi and (co is None or coast is None or int(co) == int(coast)):
@@ -101,17 +105,50 @@ def build_cylinders(movers, calib, predict=True, track_margin=0.0, calib_v2=None
             #   (KF v on a static is measurement noise; calib static law is v=0 -- must match)
         R = float(r_obs) + R_DRONE + D_SAFE_H + q + track_margin
         zc = float(h) + REACH_PAD + R_DRONE + D_SAFE_V + q + track_margin
-        cyl.append((np.asarray(c0, float), vv, aa, R, zc, veff)); ztop = max(ztop, zc + 0.2)
+        ent7 = ()
+        if (use_ellipse and predict and _mature_arm and calib_v2 is not None
+                and str(cls) in ("pedestrian", "vehicle")):
+            # ELLIPTICAL keep-out (v4): trust the KF direction only when the track is mature,
+            # non-zombie AND actually moving (calibration mirrors this exact predicate on the
+            # harvested KF anchor speed). Cross-track semi-axis = along/kappa; the drone-side
+            # geometry (body+standoff+tracking) must survive the cross-axis stretch, hence
+            # R_warp = kappa*r_geom + q (see certify_horizontal_aniso).
+            _e = calib_v2.get(cls) or {}
+            _kap = float(_e.get("kappa", 1.0))
+            _sp = float(np.hypot(vv[0], vv[1]))
+            if _kap > 1.0 + 1e-9 and _sp >= float(_e.get("v_min_dir", 0.5)):
+                _rw = _kap * (float(r_obs) + R_DRONE + D_SAFE_H + track_margin) + q
+                ent7 = ((_kap, float(vv[0]) / _sp, float(vv[1]) / _sp, _rw),)
+        cyl.append((np.asarray(c0, float), vv, aa, R, zc, veff) + ent7); ztop = max(ztop, zc + 0.2)
     return cyl, min(Z_CEIL, ztop)
+
+
+def _ell_of(ent, ego):
+    """7th optional cyl field = (kappa, ux, uy, R_warp) from build_cylinders under ELLIPSE=1.
+    None when absent OR the planner lacks the aniso entry point (isotropic R is a superset of the
+    ellipse at the same calibrated q, so falling back is sound, just fatter)."""
+    if len(ent) > 6 and ent[6] is not None and getattr(ego, "certify_horizontal_aniso", None) is not None:
+        return ent[6]
+    return None
 
 
 def cert_clear(ego, cyl, tau=TAU, delta=None):
     """The cylinder disjunction on ego's CURRENTLY-committed B-spline: per mover, (horiz-predicted AND
-    horiz-current) OR above. AND across movers."""
+    horiz-current) OR above. AND across movers. A mover carrying the v4 ellipse field is judged in the
+    whitened motion frame (cross-track semi-axis = along/kappa) -- same disjunction shape."""
     d = tau if delta is None else delta
-    for (c0, vv, aa, R, zc, veff) in cyl:
-        hp, _ = ego.certify_horizontal(obs_c0=c0, R=R, obs_vel=vv, obs_acc=aa, t_hi=tau, v_eff=veff, delta=d)
-        hc, _ = ego.certify_horizontal(obs_c0=c0, R=R, obs_vel=(0, 0, 0), t_hi=tau, v_eff=veff, delta=d)
+    for ent in cyl:
+        (c0, vv, aa, R, zc, veff) = ent[:6]
+        ell = _ell_of(ent, ego)
+        if ell is not None:
+            _k, _ux, _uy, _rw = ell
+            hp, _ = ego.certify_horizontal_aniso(obs_c0=c0, R=_rw, obs_vel=vv, obs_acc=aa, t_hi=tau,
+                                                 v_eff=veff, delta=d, ux=_ux, uy=_uy, kappa=_k)
+            hc, _ = ego.certify_horizontal_aniso(obs_c0=c0, R=_rw, obs_vel=(0, 0, 0), t_hi=tau,
+                                                 v_eff=veff, delta=d, ux=_ux, uy=_uy, kappa=_k)
+        else:
+            hp, _ = ego.certify_horizontal(obs_c0=c0, R=R, obs_vel=vv, obs_acc=aa, t_hi=tau, v_eff=veff, delta=d)
+            hc, _ = ego.certify_horizontal(obs_c0=c0, R=R, obs_vel=(0, 0, 0), t_hi=tau, v_eff=veff, delta=d)
         vo, _ = ego.certify_above(z_clear=zc, t_hi=tau, v_eff_z=0.0, delta=d)
         if not ((hp and hc) or vo):
             return False
@@ -133,7 +170,8 @@ def cert_verdict3(ego, cyl, tau=TAU, delta=None):
         return "refuted" if a == b == "refuted" else "unknown"
     d = tau if delta is None else delta
     overall = "certified"; details = []
-    for (c0, vv, aa, R, zc, veff) in cyl:
+    for ent in cyl:                                   # NB diagnostic twin stays ISOTROPIC (ellipse field ignored;
+        (c0, vv, aa, R, zc, veff) = ent[:6]           # verdicts may be more conservative than the v4 gate)
         hp, mp = ego.certify_horizontal3(obs_c0=c0, R=R, obs_vel=vv, obs_acc=aa, t_hi=tau, v_eff=veff, delta=d)
         hc, mc = ego.certify_horizontal3(obs_c0=c0, R=R, obs_vel=(0, 0, 0), t_hi=tau, v_eff=veff, delta=d)
         vo, mv = ego.certify_above3(z_clear=zc, t_hi=tau, v_eff_z=0.0, delta=d)
@@ -326,9 +364,17 @@ def cert_clear_warp(ego, cyl, s, tau=TAU, delta=None):
     yield. Statics (vel=0, veff=0) are warp-invariant -- slowing never fixes a static conflict."""
     d = (tau if delta is None else delta)
     s = float(s)
-    for (c0, vv, aa, R, zc, veff) in cyl:
-        hp, _ = ego.certify_horizontal(obs_c0=c0, R=R, obs_vel=tuple(np.asarray(vv, float) / s),
-                                       obs_acc=(0, 0, 0), t_hi=s * tau, v_eff=veff / s, delta=d * s)
+    for ent in cyl:
+        (c0, vv, aa, R, zc, veff) = ent[:6]
+        ell = _ell_of(ent, ego)
+        if ell is not None:                     # retime and the constant whitening map commute:
+            _k, _ux, _uy, _rw = ell             # slip identity + ellipse compose soundly
+            hp, _ = ego.certify_horizontal_aniso(obs_c0=c0, R=_rw, obs_vel=tuple(np.asarray(vv, float) / s),
+                                                 obs_acc=(0, 0, 0), t_hi=s * tau, v_eff=veff / s, delta=d * s,
+                                                 ux=_ux, uy=_uy, kappa=_k)
+        else:
+            hp, _ = ego.certify_horizontal(obs_c0=c0, R=R, obs_vel=tuple(np.asarray(vv, float) / s),
+                                           obs_acc=(0, 0, 0), t_hi=s * tau, v_eff=veff / s, delta=d * s)
         vo, _ = ego.certify_above(z_clear=zc, t_hi=s * tau, v_eff_z=0.0, delta=d * s)
         if not (hp or vo):
             return False
@@ -340,9 +386,19 @@ def cert_clear_margin(ego, cyl, tau=TAU, delta=None):
     certified floor (min over movers; deficit-squared margins normalised by 2R). inf when no cyl."""
     d = tau if delta is None else delta
     ok_all, m_min = True, float("inf")
-    for (c0, vv, aa, R, zc, veff) in cyl:
-        hp, mp = ego.certify_horizontal(obs_c0=c0, R=R, obs_vel=vv, obs_acc=aa, t_hi=tau, v_eff=veff, delta=d)
-        hc, mc = ego.certify_horizontal(obs_c0=c0, R=R, obs_vel=(0, 0, 0), t_hi=tau, v_eff=veff, delta=d)
+    for ent in cyl:
+        (c0, vv, aa, R, zc, veff) = ent[:6]
+        ell = _ell_of(ent, ego)
+        if ell is not None:
+            _k, _ux, _uy, _rw = ell             # margins in the warped metric, normalised by 2*R_warp
+            hp, mp = ego.certify_horizontal_aniso(obs_c0=c0, R=_rw, obs_vel=vv, obs_acc=aa, t_hi=tau,
+                                                  v_eff=veff, delta=d, ux=_ux, uy=_uy, kappa=_k)
+            hc, mc = ego.certify_horizontal_aniso(obs_c0=c0, R=_rw, obs_vel=(0, 0, 0), t_hi=tau,
+                                                  v_eff=veff, delta=d, ux=_ux, uy=_uy, kappa=_k)
+            R = _rw
+        else:
+            hp, mp = ego.certify_horizontal(obs_c0=c0, R=R, obs_vel=vv, obs_acc=aa, t_hi=tau, v_eff=veff, delta=d)
+            hc, mc = ego.certify_horizontal(obs_c0=c0, R=R, obs_vel=(0, 0, 0), t_hi=tau, v_eff=veff, delta=d)
         vo, mv = ego.certify_above(z_clear=zc, t_hi=tau, v_eff_z=0.0, delta=d)
         ok = (hp and hc) or vo
         ok_all &= ok
@@ -358,9 +414,18 @@ def cert_clear_warp_margin(ego, cyl, s, tau=TAU, delta=None):
     d = (tau if delta is None else delta)
     s = float(s)
     m_min = float("inf")
-    for (c0, vv, aa, R, zc, veff) in cyl:
-        hp, mp = ego.certify_horizontal(obs_c0=c0, R=R, obs_vel=tuple(np.asarray(vv, float) / s),
-                                        obs_acc=(0, 0, 0), t_hi=s * tau, v_eff=veff / s, delta=d * s)
+    for ent in cyl:
+        (c0, vv, aa, R, zc, veff) = ent[:6]
+        ell = _ell_of(ent, ego)
+        if ell is not None:
+            _k, _ux, _uy, _rw = ell
+            hp, mp = ego.certify_horizontal_aniso(obs_c0=c0, R=_rw, obs_vel=tuple(np.asarray(vv, float) / s),
+                                                  obs_acc=(0, 0, 0), t_hi=s * tau, v_eff=veff / s, delta=d * s,
+                                                  ux=_ux, uy=_uy, kappa=_k)
+            R = _rw
+        else:
+            hp, mp = ego.certify_horizontal(obs_c0=c0, R=R, obs_vel=tuple(np.asarray(vv, float) / s),
+                                            obs_acc=(0, 0, 0), t_hi=s * tau, v_eff=veff / s, delta=d * s)
         vo, mv = ego.certify_above(z_clear=zc, t_hi=s * tau, v_eff_z=0.0, delta=d * s)
         if not (hp or vo):
             return False, -1.0
@@ -508,7 +573,8 @@ def maneuver_decide_v2(ego, p_d, v_d, a_d, goal, ztop, cyl, state,
             ve = np.asarray(rr[1], float)[:2]
             if float(np.hypot(*ve)) > 0.3:
                 hd = ve / float(np.hypot(*ve))
-            for (c0, vv, aa, R, zc, veff) in cyl:
+            for ent in cyl:
+                (c0, vv, aa, R, zc, veff) = ent[:6]
                 if float(np.hypot(vv[0], vv[1])) <= 0.3 and veff <= 1e-6:
                     continue
                 ct = (np.asarray(c0, float)[:2] + np.asarray(vv, float)[:2] * tw
@@ -686,6 +752,33 @@ def load_calib_v2(eps=0.05):
                                else (float(lv["q_conformal"]), float(lv["v_eff"]))),
                         plates=plates, status=lv.get("status", "ok"))
     out["_meta"] = dict(sha=rep.get("provenance", {}).get("config_sha"), eps=eps)
+    return out
+
+
+def load_calib_v4(eps=0.05):
+    """lambda-SHAPE-HE (v4, ELLIPTICAL motion-frame conformal) consumer: same entry shape as
+    load_calib_v2 PLUS per-class 'kappa' (frozen along/cross aspect, >=1) and the shared
+    'v_min_dir' (KF speed below which the direction is untrusted -> isotropic circle).
+    FAIL-CLOSED like v2: missing class = q0 1e6, kappa 1."""
+    path = (os.environ.get("CALIB_FILE_V4") or os.path.join(_OUTDIR, "calib_v4.json"))
+    rep = json.load(open(path))                     # missing file = hard crash, intended
+    out = {}
+    vmin = float(rep.get("v_min_dir", 0.5))
+    for cls in ("pedestrian", "vehicle", "animal", "static"):
+        lv = rep.get("groups", {}).get(cls, {}).get("levels", {}).get(str(eps), {})
+        if "q_conformal" not in lv:
+            print(f"[calib_v4] class '{cls}' UNCALIBRATED at eps={eps} -> FAIL-CLOSED (uncertifiable)",
+                  flush=True)
+            out[cls] = dict(mature=(1e6, 0.0), young=(1e6, 0.0), plates=[], status="UNCALIBRATED",
+                            kappa=1.0, v_min_dir=vmin)
+            continue
+        yy = rep.get("young", {}).get(cls, {}).get(str(eps))
+        out[cls] = dict(mature=(float(lv["q_conformal"]), float(lv["v_eff"])),
+                        young=((float(yy["q0y"]), float(yy["growth"])) if yy
+                               else (float(lv["q_conformal"]), float(lv["v_eff"]))),
+                        plates=[], status=lv.get("status", "ok"),
+                        kappa=float(rep.get("kappa", {}).get(cls, 1.0)), v_min_dir=vmin)
+    out["_meta"] = dict(sha=rep.get("provenance", {}).get("shape_hash"), eps=eps, gen="v4")
     return out
 
 

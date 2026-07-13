@@ -38,6 +38,12 @@ try:    # THREE-VALUED verdicts (1 CERTIFIED / 0 UNKNOWN / -1 REFUTED); absent i
                            C.c_double, C.c_double, _d)
 except AttributeError:
     _certify_horiz3 = _certify_above3 = None
+try:    # ANISOTROPIC (elliptical keep-out, v4 motion-frame conformal); absent in a stale .so
+    _certify_horiz_aniso = _sig("ego_certify_horizontal_aniso", C.c_int, C.c_void_p, _d, _d, _d,
+                                C.c_double, C.c_double, C.c_double, C.c_double,
+                                C.c_double, C.c_double, C.c_double, _d)
+except AttributeError:
+    _certify_horiz_aniso = None
 _destroy = _sig("ego_destroy", None, C.c_void_p)
 
 
@@ -112,6 +118,21 @@ class EGOPlanner:
         margin = C.c_double(0.0)
         ok = _certify_above(self._h, float(z_clear), float(t_hi), float(v_eff_z), float(delta),
                             float(bez_pad), C.byref(margin))
+        return bool(ok), float(margin.value)
+
+    def certify_horizontal_aniso(self, obs_c0, R, obs_vel=(0, 0, 0), obs_acc=(0, 0, 0), t_hi=-1.0,
+                                 v_eff=0.0, delta=0.0, ux=1.0, uy=0.0, kappa=1.0):
+        """ELLIPTICAL around: keep-out semi-axis R+v_eff*(t+delta) ALONG the mover's unit velocity (ux,uy),
+        /kappa ACROSS it. Whitening substitution in C++ (cross axis stretched by kappa on both the committed
+        spline and the obstacle polynomial), then the isotropic disc proof. Caller folds the kappa-inflated
+        body radius into R (R = kappa*r_geom + q_along). Margin is in the warped metric. Raises if
+        ego_capi.so is stale (pre-aniso); rebuild it rather than silently degrading."""
+        if _certify_horiz_aniso is None:
+            raise RuntimeError("ego_capi.so is stale: rebuild it (missing ego_certify_horizontal_aniso)")
+        _a, c0 = _p(obs_c0); _b, vv = _p(obs_vel); _c, aa = _p(obs_acc)
+        margin = C.c_double(0.0)
+        ok = _certify_horiz_aniso(self._h, c0, vv, aa, float(R), float(t_hi), float(v_eff), float(delta),
+                                  float(ux), float(uy), float(kappa), C.byref(margin))
         return bool(ok), float(margin.value)
 
     def certify_horizontal3(self, obs_c0, R, obs_vel=(0, 0, 0), obs_acc=(0, 0, 0), t_hi=-1.0, v_eff=0.0, delta=0.0):

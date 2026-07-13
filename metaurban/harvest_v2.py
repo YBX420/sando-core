@@ -19,7 +19,8 @@ import zlib
 
 ap = argparse.ArgumentParser()
 ap.add_argument("--mode", choices=["foldB", "test", "vehA", "foldB2", "test2", "foldB3", "test3",
-                                   "foldB4", "test4", "designC", "designD", "foldB5", "test5", "foldB6", "test6", "foldB7", "test7", "foldB8", "test8"], required=True)
+                                   "foldB4", "test4", "designC", "designD", "foldB5", "test5", "foldB6", "test6", "foldB7", "test7", "foldB8", "test8",
+                                   "designE", "foldE", "testE"], required=True)
 ap.add_argument("--shard", type=int, default=0)
 ap.add_argument("--nshard", type=int, default=1)
 args = ap.parse_args()
@@ -79,6 +80,15 @@ elif args.mode == "foldB8":
     jobs = [(n, CFG["SEEDS_FOLDB8"][n]) for n in POOL]
 elif args.mode == "test8":
     jobs = [(n, s) for n in POOL for s in CFG["SEEDS_TEST8"][n]]
+elif args.mode == "designE":   # v4 ellipse: motion-frame shape+kappa data (design domain, fresh 2e8 seeds)
+    import zlib as _z
+    jobs = [(n, 200_000_000 + _z.crc32(f"{n}|E{k}".encode()) % 9_000_000) for n in POOL for k in range(4)]
+elif args.mode == "foldE":     # v4 ellipse: lambda ranking fold (fresh seeds, 2/scenario for rank slack)
+    import zlib as _z
+    jobs = [(n, 200_000_000 + _z.crc32(f"{n}|EB{k}".encode()) % 9_000_000) for n in POOL for k in range(2)]
+elif args.mode == "testE":     # v4 ellipse: held-out coverage check
+    import zlib as _z
+    jobs = [(n, 200_000_000 + _z.crc32(f"{n}|ET{k}".encode()) % 9_000_000) for n in POOL for k in range(3)]
 else:  # vehA: design-domain vehicle boost (veh_cal x22 + street x6 fresh-A seeds)
     veh = [n for n in POOL if n.startswith("veh_cal")]
     street = [n for n in POOL if n.startswith("street_")]
@@ -123,7 +133,8 @@ RC.PERCEPT_HARVEST = None; RC.PERCEPT_A2 = None
 man.close()
 
 data = np.array(rows_all, dtype=[("d", "f4"), ("e", "f4"), ("age", "i4"), ("cls", "U12"),
-                                 ("ep", "i4"), ("dd", "f4"), ("scn", "U40"), ("qual", "i4"), ("coast", "i4"), ("sigv", "f4")])
+                                 ("ep", "i4"), ("dd", "f4"), ("scn", "U40"), ("qual", "i4"), ("coast", "i4"), ("sigv", "f4"),
+                                 ("ea", "f4"), ("ec", "f4"), ("spd", "f4")])   # motion-frame cols (v4 ellipse)
 np.save(out_npy, data)
 # scenario-aliasing fingerprints (ruling #17)
 fps = {}
