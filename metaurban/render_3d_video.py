@@ -852,7 +852,8 @@ def _kf_movers_realistic(p_d, t_sim, cam_heading):
         out.append((f"trk{tr.id}", kc0, (float(kv[0]), float(kv[1]), 0.0), float(r_eff), d_safe))
         _KF_PRED.append((np.asarray(tr.xy[:2], float).copy(), np.asarray(kc0[:2], float).copy(),
                          [(float(p[0]), float(p[1])) for p in pred], float(zc))
-                        + ((_ell_ring(f"trk{tr.id}", kc0, kv, tr.r),) if MAN_ELLIPSE else ()))
+                        + ((_ell_ring(f"trk{tr.id}", kc0, kv, tr.r),) if MAN_ELLIPSE else
+                           ((_cap_ring(f"trk{tr.id}", kc0, kv, tr.r),) if MAN_CAPSULE else ())))
     _PFE_MEMO["t"], _PFE_MEMO["out"], _PFE_MEMO["pred"] = t_sim, out, _KF_PRED
     return out
 
@@ -908,7 +909,8 @@ def kf_movers(p_d, t_sim, cam_heading=None):
         _ELL_TRK[oid] = (int(trk.n), False, str(_cls))                     # v5 ellipse eligibility
         out.append((oid, kc0, (float(kv[0]), float(kv[1]), 0.0), r, d))
         _KF_PRED.append((det[:2].copy(), kc0[:2].copy(), [(float(p[0]), float(p[1])) for p in pred], float(c3[2]))
-                        + ((_ell_ring(oid, kc0, kv, r),) if MAN_ELLIPSE else ()))
+                        + ((_ell_ring(oid, kc0, kv, r),) if MAN_ELLIPSE else
+                           ((_cap_ring(oid, kc0, kv, r),) if MAN_CAPSULE else ())))
     # ---- TRACK MEMORY: movers that just LEFT the cone are COASTED (extrapolated + covariance grown) and kept in the
     # cert/occupancy set for MAN_MEM_TICKS so 'straight' cannot instantly re-certify behind a mover still on a collision
     # course (forget-after-pass). Extrapolate-only: the centre/vel come from the coasted KF, never a fresh GT read.
@@ -1119,7 +1121,19 @@ _MAN_V2 = {}
 # optional 7th cyl field into the SHARED _SL tournament (cert_clear/_warp dispatch the aniso cert).
 # Everything else (young/static/coasting/slow, vertical zc law) keeps today's production numbers.
 MAN_ELLIPSE = os.environ.get("ELLIPSE", "0") == "1"
+MAN_CAPSULE = os.environ.get("CAPSULE", "0") == "1"   # v6: keep-out = [mover's back, KF tip] ⊕ q̃,
+#   pearl-string certified through the SHARED _SL tournament (the "cap" 7th cyl field)
+assert not (MAN_ELLIPSE and MAN_CAPSULE), "ELLIPSE=1 and CAPSULE=1 are mutually exclusive"
 _ELL_V5 = {}; _ELL_VMIN = 0.5; _ELL_TRK = {}      # _ELL_TRK: oid -> (kf_age, coasting, cls)
+_CAP_V6 = {}; _CAP_K = 4
+if MAN_CAPSULE:
+    _v6 = _SL.load_calib_v6(eps=MAN_EPS)
+    for _c6 in ("pedestrian", "vehicle"):
+        _e6 = _v6.get(_c6) or {}
+        if _e6.get("capsule") and "mature" in _e6:
+            _CAP_V6[_c6] = (float(_e6["mature"][0]), float(_e6["mature"][1]), _e6.get("rear"))
+            _CAP_K = int(_e6.get("n_pearls", 4))
+    print(f"[3dv] CAPSULE=1: v6.1 segment keep-out (mature tracks) { _CAP_V6 } K={_CAP_K}", flush=True)
 if MAN_ELLIPSE:
     _v5 = _SL.load_calib_v5(eps=MAN_EPS)
     for _c5 in ("pedestrian", "vehicle"):
@@ -1152,6 +1166,54 @@ def _ell_of_mover(oid, vel, r_obs):
     # single-variable (shape-only) comparison instead of stale-gen-1 circle vs modern-width ellipse.
     rw = kap * (float(r_obs) + MAN_DSAFE + MAN_TRACK) + q5
     return (kap, float(vel[0]) / sp, float(vel[1]) / sp, rw, q5, veff5)
+
+
+def _cap_of_mover(oid, vel, r_obs):
+    """(q6, veff6_with_pearl_gap, K) for a capsule-eligible mover, else None. Mirrors
+    build_cylinders: mature KF, not coasting, class calibrated -- NO speed gate (a slow mover's
+    segment degenerates continuously to the point law; the calibration scored it the same way)."""
+    if not MAN_CAPSULE:
+        return None
+    a = _ELL_TRK.get(oid)
+    if not a or a[0] < 4 or a[1]:
+        return None
+    ent = _CAP_V6.get(a[2])
+    if ent is None:
+        return None
+    q6, veff6, rear = ent
+    sp = float(np.hypot(vel[0], vel[1]))
+    return (q6, veff6 + sp / (2.0 * max(_CAP_K - 1, 1)), _CAP_K, rear)
+
+
+def _cap_ring(oid, kc0, vel, r_obs):
+    """Ground outline of the deployed capsule at the trust-window tip: stadium from the mover's
+    BACK cap (around c0) to the KF apex cap (around c0 + v*tau). Drawn on the CAPSULE arm."""
+    c = _cap_of_mover(oid, vel, r_obs)
+    if c is None:
+        return None
+    q6, veff6, _K, rear = c
+    rad = float(r_obs) + MAN_DSAFE + q6 + veff6 * (EGO_TAU_TRUST + REPLAN_DT)
+    tip = np.asarray(kc0[:2], float) + np.asarray(vel[:2], float) * EGO_TAU_TRUST
+    c0 = np.asarray(kc0[:2], float)
+    sp = float(np.hypot(*(tip - c0)))
+    u = (tip - c0) / sp if sp > 1e-6 else np.array([1.0, 0.0])
+    a0 = float(np.arctan2(u[1], u[0]))
+    if rear is not None and sp > 1e-6:
+        # v6.1: FLAT rear -- the wake boundary sits at the (constant) rear-overrun quantile +
+        # body/standoff behind the mover, not at the full growing q̃ cap
+        back = float(rear[0]) + float(rear[1]) * (EGO_TAU_TRUST + REPLAN_DT) + float(r_obs) + MAN_DSAFE
+        bl = c0 - u * back
+        n = np.array([-u[1], u[0]])
+        pts = [(float(bl[0] + n[0] * rad), float(bl[1] + n[1] * rad)),
+               (float(bl[0] - n[0] * rad), float(bl[1] - n[1] * rad))]   # flat rear chord
+        pts = [pts[0]] + [(float(tip[0] + rad * np.cos(a0 + th)), float(tip[1] + rad * np.sin(a0 + th)))
+                          for th in np.linspace(np.pi / 2, -np.pi / 2, 13)] + [pts[1]]
+        return pts + [pts[0]]
+    pts = [(float(c0[0] + rad * np.cos(a0 + th)), float(c0[1] + rad * np.sin(a0 + th)))
+           for th in np.linspace(np.pi / 2, 3 * np.pi / 2, 13)]          # back cap around the mover
+    pts += [(float(tip[0] + rad * np.cos(a0 + th)), float(tip[1] + rad * np.sin(a0 + th)))
+            for th in np.linspace(-np.pi / 2, np.pi / 2, 13)]            # apex cap at the KF tip
+    return pts + [pts[0]]
 
 
 def _ell_ring(oid, kc0, vel, r_obs):
@@ -1499,12 +1561,24 @@ def ego_maneuver_replan(p_d, v_d, a_d, cur_wp, t_sim):
         for (_oid, c3, vel, r_obs, d_safe) in movers:
             q_c, veff_c = PERCLASS_CONF.get(d_safe, (MAN_QCONF, MAN_VEFF))
             _e7 = _ell_of_mover(_oid, vel, r_obs)
-            if _e7 is not None:                 # v5 arm: this mover's law = calib_v5 mature numbers
+            _c7 = _cap_of_mover(_oid, vel, r_obs)
+            tag7 = ()
+            if _c7 is not None:                 # v6 arm: capsule law (q̃ + pearl-gap veff) + cap tag
+                q_c, veff_c, _K6, _rr6 = _c7
+                _sp6 = float(np.hypot(vel[0], vel[1]))
+                if _rr6 is not None and _sp6 > 1e-6:   # v6.1 rear-plane disjunct parameters
+                    _th6 = float(_rr6[0]) + float(r_obs) + MAN_DSAFE + MAN_TRACK
+                    tag7 = (("cap", _K6, float(vel[0]) / _sp6, float(vel[1]) / _sp6, _th6, float(_rr6[1])),)
+                else:
+                    tag7 = (("cap", _K6),)
+            elif _e7 is not None:               # v5 arm: this mover's law = calib_v5 mature numbers
                 _k5, _ux5, _uy5, _rw5, q_c, veff_c = _e7
+                if _k5 > 1.0 + 1e-9:
+                    tag7 = ((_k5, _ux5, _uy5, _rw5),)
             _cyl.append((np.asarray(c3, float), np.array([float(vel[0]), float(vel[1]), 0.0]),
                          np.zeros(3), r_obs + MAN_DSAFE + q_c + MAN_TRACK,
                          2.0 * float(c3[2]) + MAN_REACH_PAD + MAN_DSAFE_V + q_c + MAN_TRACK, veff_c)
-                        + (((_k5, _ux5, _uy5, _rw5),) if (_e7 is not None and _k5 > 1.0 + 1e-9) else ()))
+                        + tag7)
         kind, s_v2 = _SL.maneuver_decide_v2(
             ego, p_d, v_d, a_d, np.asarray(cur_wp, float), z_top, _cyl, _MAN_V2,
             cruise_z=CRUISE_Z, horizon=L, straight_clip=EGO_HOR,

@@ -116,10 +116,19 @@ def build_cylinders(movers, calib, predict=True, track_margin=0.0, calib_v2=None
             # the along-axis endpoints are the mover's BACK and the prediction's APEX (no wall
             # behind a walker). Certified as a K-pearl cover: obs_vel = s*v per pearl, the pearl
             # gap |v|*t/(2(K-1)) folded into v_eff. q̃/veff here are dist-to-segment calibrated.
-            _K = int((calib_v2.get(cls) or {}).get("n_pearls", 4))
+            _e6 = calib_v2.get(cls) or {}
+            _K = int(_e6.get("n_pearls", 4))
             _sp = float(np.hypot(vv[0], vv[1]))
             veff = veff + _sp / (2.0 * max(_K - 1, 1))
-            ent7 = (("cap", _K),)
+            _rr = _e6.get("rear")
+            if _rr is not None and _sp > 1e-6:
+                # v6.1 REAR-PLANE disjunct: certifying 'the drone stays behind the mover's rear
+                # plane the whole window' is an alternative pass -- the wake needs only the
+                # (constant) rear-overrun quantile + body/standoff, not the growing q̃ wall.
+                _th0 = float(_rr[0]) + float(r_obs) + R_DRONE + D_SAFE_H + track_margin
+                ent7 = (("cap", _K, float(vv[0]) / _sp, float(vv[1]) / _sp, _th0, float(_rr[1])),)
+            else:
+                ent7 = (("cap", _K),)
         if (use_ellipse and predict and _mature_arm and calib_v2 is not None
                 and str(cls) in ("pedestrian", "vehicle")):
             # ELLIPTICAL keep-out (v4): trust the KF direction only when the track is mature,
@@ -159,6 +168,19 @@ def _cap_grid(K):
     return [k / (K - 1.0) for k in range(K)] if K > 1 else [1.0]
 
 
+def _cap_behind(ent, ego, tau, d, warp=1.0):
+    """v6.1 rear-plane disjunct: True if the committed spline stays BEHIND the mover's rear plane
+    over the whole (possibly retimed) window. False when the tag carries no direction (slow mover)
+    or the planner lacks the entry point (pearls-only = the sound v6.0 behaviour)."""
+    tag = ent[6]
+    if len(tag) < 6 or getattr(ego, "certify_behind", None) is None:
+        return False
+    _, _K, ux, uy, th0, rate = tag
+    ok, _ = ego.certify_behind(obs_c0=ent[0], ux=ux, uy=uy, thresh0=th0, rate=rate / warp,
+                               t_hi=warp * tau, delta=d * warp)
+    return ok
+
+
 def cert_clear(ego, cyl, tau=TAU, delta=None):
     """The cylinder disjunction on ego's CURRENTLY-committed B-spline: per mover, (horiz-predicted AND
     horiz-current) OR above. AND across movers. A mover carrying the v4 ellipse field is judged in the
@@ -177,6 +199,8 @@ def cert_clear(ego, cyl, tau=TAU, delta=None):
                 if not hs:
                     hb = False
                     break
+            if not hb:
+                hb = _cap_behind(ent, ego, tau, d)   # v6.1: flying in the WAKE is an alternative pass
             hp = hc = hb
         else:
             ell = _ell_of(ent, ego)
@@ -428,6 +452,8 @@ def cert_clear_warp(ego, cyl, s, tau=TAU, delta=None):
                 if not hs:
                     hp = False
                     break
+            if not hp:
+                hp = _cap_behind(ent, ego, tau, d, warp=s)
         else:
             ell = _ell_of(ent, ego)
             if ell is not None:                 # retime and the constant whitening map commute:
@@ -460,7 +486,9 @@ def cert_clear_margin(ego, cyl, tau=TAU, delta=None):
                                                 obs_acc=(0, 0, 0), t_hi=tau, v_eff=veff, delta=d)
                 mp = mc = min(mp, float(ms))
                 if not hs:
-                    hp = hc = False
+                    hp = hc = _cap_behind(ent, ego, tau, d)
+                    if hp:
+                        mp = mc = 0.0        # wake pass: neutral margin (no surplus claimed)
                     break
         elif ell is not None:
             _k, _ux, _uy, _rw = ell             # margins in the warped metric, normalised by 2*R_warp
@@ -498,7 +526,9 @@ def cert_clear_warp_margin(ego, cyl, s, tau=TAU, delta=None):
                                                 obs_acc=(0, 0, 0), t_hi=s * tau, v_eff=veff / s, delta=d * s)
                 mp = min(mp, float(ms))
                 if not hs:
-                    hp = False
+                    hp = _cap_behind(ent, ego, tau, d, warp=s)
+                    if hp:
+                        mp = 0.0
                     break
         elif ell is not None:
             _k, _ux, _uy, _rw = ell
@@ -855,11 +885,13 @@ def load_calib_v6(eps=0.05):
                             capsule=False, n_pearls=npearl)
             continue
         yy = rep.get("young", {}).get(cls, {}).get(str(eps))
+        rr = rep.get("rear", {}).get(cls, {}).get(str(eps))
         out[cls] = dict(mature=(float(lv["q_conformal"]), float(lv["v_eff"])),
                         young=((float(yy["q0y"]), float(yy["growth"])) if yy
                                else (float(lv["q_conformal"]), float(lv["v_eff"]))),
                         plates=[], status=lv.get("status", "ok"),
-                        capsule=(cls in ("pedestrian", "vehicle")), n_pearls=npearl)
+                        capsule=(cls in ("pedestrian", "vehicle")), n_pearls=npearl,
+                        rear=((float(rr["q0r"]), float(rr["growth"])) if rr else None))
     out["_meta"] = dict(sha=rep.get("provenance", {}).get("shape_hash"), eps=eps, gen="v6")
     return out
 

@@ -200,6 +200,28 @@ int ego_certify_horizontal_aniso(void* h, double* c0, double* vel, double* acc, 
   return v.certified ? 1 : 0;
 }
 
+// BEHIND-THE-MOVER half-plane certificate (v6.1 rear-slim capsule): certify the committed spline
+// stays on the REAR side of the mover's anchor-fixed rear plane for the whole window:
+//   (p(t) - c0) . u  <=  -(thresh0 + rate*(t+delta))   for all t in [0, t_hi]
+// (u = unit KF velocity at the anchor; thresh0 = q_rear0 + body/standoff; rate = q_rear growth).
+// Implemented by projecting the Bernstein control points onto -u and reusing the plane proof:
+// z'(t) = -(u . p_xy(t)) >= -(u . c0) + thresh0 + rate*(t+delta) is exactly certify_segments_above_plane.
+int ego_certify_behind(void* h, double* c0, double ux, double uy, double thresh0, double rate,
+                       double t_hi, double delta, double* margin_out) {
+  auto* m = (EGOPlannerManager*)h;
+  auto segs = build_segs(m);
+  if (segs.empty()) { if (margin_out) *margin_out = -1.0; return 0; }
+  for (auto& s : segs)
+    for (auto& b : s.bern)
+      b = Eigen::Vector3d(0.0, 0.0, -(ux * b.x() + uy * b.y()));
+  const double zc = -(ux * c0[0] + uy * c0[1]) + thresh0;
+  const double th = (t_hi > 0.0) ? t_hi : std::numeric_limits<double>::infinity();
+  auto v = sando::bcert::certify_segments_above_plane(segs, zc, th, /*maxdepth*/16, rate, delta,
+                                                      /*bez_pad*/1e-9);
+  if (margin_out) *margin_out = v.margin;
+  return v.certified ? 1 : 0;
+}
+
 int ego_certify_above3(void* h, double z_clear, double t_hi, double v_eff_z, double delta,
                        double bez_pad, double* margin_out) {
   auto* m = (EGOPlannerManager*)h;

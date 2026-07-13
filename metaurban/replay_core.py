@@ -520,12 +520,19 @@ def run_replay(movers, ep, mode="ours", calib=None, predict=True, max_vel=3.0, m
                             _w = pos_l(gi, t + dh) - np.asarray(_c0k[:2], float)
                             _tt = min(1.0, max(0.0, float(_w @ _sv) / _s2)) if _s2 > 1e-12 else 0.0
                             _esg = float(np.hypot(*(_w - _tt * _sv)))
+                            # SIGNED endpoint overruns (v6.1 rear-slim study): how far the true
+                            # position lands BEHIND the segment start / BEYOND the tip, along û
+                            if _udir is not None:
+                                _erb = max(0.0, -float(_w @ _udir))                  # behind the back
+                                _etp = max(0.0, float((_w - _sv) @ _udir))           # past the KF apex
+                            else:
+                                _erb, _etp = 0.0, 0.0
                             PERCEPT_HARVEST.append((float(dh), resid, int(tr.trk.n),
                                                     str(tr.cls), int(_HARV_EP[0]), d_drone)
                                                    + ((_HARV_SCN[0], int(_QUAL_MEMO.get(gi, True)),
                                                        int(tr.trk.miss > 0),          # coast flag (theta3)
                                                        float(getattr(tr.trk, "sigma_v", 0.0)),
-                                                       _ea, _ec, _spd, _esg)          # motion-frame + capsule
+                                                       _ea, _ec, _spd, _esg, _erb, _etp)   # + signed overruns (v6.1)
                                                       if _HARV_V2 else ()))
             else:
                 percepts = [(trackers[i], dets[i], movers.m[i]["r"], movers.m[i]["h"], movers.m[i]["cls"])

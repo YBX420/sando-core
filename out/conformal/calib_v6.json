@@ -1,13 +1,13 @@
 {
  "provenance": {
-  "spec": "v6 capsule (segment conformal, pearl-string cert)",
-  "shape_hash": "10593f34d04eaccd",
+  "spec": "v6.1 capsule (segment conformal, pearl-string + rear-plane disjunct)",
+  "shape_hash": "3658e2765844c8ea",
   "n_flights": 98,
   "fold": "E (shared with v5 -- both ranked, selection by behaviour AB)",
   "date": "2026-07-13"
  },
  "capsule": true,
- "n_pearls": 4,
+ "n_pearls": 6,
  "groups": {
   "pedestrian": {
    "levels": {
@@ -94,5 +94,27 @@
    }
   }
  },
- "flags": []
+ "flags": [],
+ "rear": {
+  "pedestrian": {
+   "0.05": {
+    "q0r": 0.5488,
+    "growth": 0.0
+   },
+   "0.1": {
+    "q0r": 0.4957,
+    "growth": 0.0
+   }
+  },
+  "vehicle": {
+   "0.05": {
+    "q0r": 0.5524,
+    "growth": 0.0
+   },
+   "0.1": {
+    "q0r": 0.499,
+    "growth": 0.0
+   }
+  }
+ }
 }

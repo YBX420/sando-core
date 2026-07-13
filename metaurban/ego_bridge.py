@@ -44,6 +44,11 @@ try:    # ANISOTROPIC (elliptical keep-out, v4 motion-frame conformal); absent i
                                 C.c_double, C.c_double, C.c_double, _d)
 except AttributeError:
     _certify_horiz_aniso = None
+try:    # BEHIND-THE-MOVER half-plane (v6.1 rear-slim capsule); absent in a stale .so
+    _certify_behind = _sig("ego_certify_behind", C.c_int, C.c_void_p, _d, C.c_double, C.c_double,
+                           C.c_double, C.c_double, C.c_double, C.c_double, _d)
+except AttributeError:
+    _certify_behind = None
 _destroy = _sig("ego_destroy", None, C.c_void_p)
 
 
@@ -133,6 +138,18 @@ class EGOPlanner:
         margin = C.c_double(0.0)
         ok = _certify_horiz_aniso(self._h, c0, vv, aa, float(R), float(t_hi), float(v_eff), float(delta),
                                   float(ux), float(uy), float(kappa), C.byref(margin))
+        return bool(ok), float(margin.value)
+
+    def certify_behind(self, obs_c0, ux, uy, thresh0, rate=0.0, t_hi=-1.0, delta=0.0):
+        """v6.1 rear disjunct: certify the committed spline stays BEHIND the mover's anchor-fixed
+        rear plane, (p(t)-c0).u <= -(thresh0 + rate*(t+delta)) over [0, t_hi]. (u = unit KF velocity;
+        thresh0 folds q_rear0 + body + standoff.) Raises on a stale .so."""
+        if _certify_behind is None:
+            raise RuntimeError("ego_capi.so is stale: rebuild it (missing ego_certify_behind)")
+        _a, c0 = _p(obs_c0)
+        margin = C.c_double(0.0)
+        ok = _certify_behind(self._h, c0, float(ux), float(uy), float(thresh0), float(rate),
+                             float(t_hi), float(delta), C.byref(margin))
         return bool(ok), float(margin.value)
 
     def certify_horizontal3(self, obs_c0, R, obs_vel=(0, 0, 0), obs_acc=(0, 0, 0), t_hi=-1.0, v_eff=0.0, delta=0.0):

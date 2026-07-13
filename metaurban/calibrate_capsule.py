@@ -26,7 +26,10 @@ import numpy as np
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, HERE); os.chdir(HERE)
 import calibrate_v3 as V3
 
-N_PEARLS = 4        # deployment pearl count (registered here so cert + calibration stay one object)
+N_PEARLS = 6        # deployment pearl count (registered here so cert + calibration stay one object;
+#                     the pearl-gap charge |v|/(2(K-1)) folded into v_eff shrinks with K)
+REAR_FLOOR = 0.10   # m: rear-shape floor (a 0-quantile rear arm must not turn rare reversals into
+#                     score blowups -- efficiency object, never coverage)
 
 
 def to_segment(D):
@@ -34,6 +37,38 @@ def to_segment(D):
     D6 = D.copy()
     D6["e"] = D["esg"]
     return D6
+
+
+def fit_rear(D):
+    """v6.1 REAR law per class: q95(rear-overrun) vs horizon, Theil-Sen + intercept (same recipe as
+    the M shapes). Measured 2026-07-13 (designCR): ped rear q90 = 0.147 CONSTANT across horizons
+    (KF anchor noise, not motion), vehicle = 0.000 -- the mover's back needs no growing wall."""
+    out = {}
+    for cls in ("pedestrian", "vehicle"):
+        R = D[(D["cls"] == cls) & (D["age"] >= 4)] if cls == "vehicle" else \
+            D[(D["cls"] == cls) & (D["age"] >= 4) & (D["qual"] == 1)]
+        gs = [g for g in V3.GRID if (np.abs(R["d"] - g) < 0.01).sum() >= 50]
+        q95 = [float(np.quantile(R["erb"][np.abs(R["d"] - g) < 0.01], 0.95)) for g in gs]
+        v = max(0.0, V3.theil_sen(gs, q95))
+        b = max(max((q - v * g for q, g in zip(q95, gs)), default=0.0), REAR_FLOOR)
+        out[cls] = (round(b, 3), round(v, 3))
+        print(f"[rear] {cls}: shape=({out[cls][0]}, {out[cls][1]})")
+    return out
+
+
+def rear_sups(D, rsh):
+    """Per-flight sup of the REAR score erb/(b_r+v_r*d) over mature qualified rows (the same flight
+    population flight_sups ranks; joint coverage = single rank on max(esg-sup, rear-sup))."""
+    out = {}
+    for key in {(str(s), int(e)) for s, e in zip(D["scn"], D["ep"])}:
+        m = ((D["scn"] == key[0]) & (D["ep"] == key[1]) & (D["qual"] == 1) & (D["age"] >= 4)
+             & ((D["cls"] == "pedestrian") | (D["cls"] == "vehicle")))
+        best = -np.inf
+        for e, d, cls in zip(D["erb"][m], D["d"][m], D["cls"][m]):
+            b, v = rsh[str(cls)]
+            best = max(best, float(e) / max(b + v * float(d), V3.B_MIN))
+        out[key] = best
+    return out
 
 
 if __name__ == "__main__":
@@ -44,13 +79,20 @@ if __name__ == "__main__":
     V3.stability_gate(D, sh_iso)
     D6 = to_segment(D)
     sh = V3.fit_shapes(D6)
+    rsh = fit_rear(D)                             # v6.1 rear law (joint coverage, same lambda)
     print("[shapes:v6]", {f"{k[0][:4]}-{k[1]}": v for k, v in sh.items()})
-    blob = json.dumps({f"{k[0]}|{k[1]}": v for k, v in sh.items()}, sort_keys=True).encode()
+    _reg = {f"{k[0]}|{k[1]}": v for k, v in sh.items()}
+    _reg.update({f"rear|{c}": v for c, v in rsh.items()})
+    blob = json.dumps(_reg, sort_keys=True).encode()
     sh_hash = hashlib.sha256(blob).hexdigest()[:16]
-    B, T = to_segment(V3.load("foldE")), to_segment(V3.load("testE"))
+    Braw, Traw = V3.load("foldE"), V3.load("testE")
+    B, T = to_segment(Braw), to_segment(Traw)
     SB, ST = V3.flight_sups(B, sh), V3.flight_sups(T, sh)
+    RB, RT = rear_sups(Braw, rsh), rear_sups(Traw, rsh)
+    SB = {k: max(v, RB.get(k, -np.inf)) for k, v in SB.items()}       # joint sup: capsule ∧ rear
+    ST = {k: max(v, RT.get(k, -np.inf)) for k, v in ST.items()}
     n = len(SB)
-    out = dict(provenance=dict(spec="v6 capsule (segment conformal, pearl-string cert)", shape_hash=sh_hash,
+    out = dict(provenance=dict(spec="v6.1 capsule (segment conformal, pearl-string + rear-plane disjunct)", shape_hash=sh_hash,
                                n_flights=n, fold="E (shared with v5 -- both ranked, selection by behaviour AB)",
                                date="2026-07-13"),
                capsule=True, n_pearls=N_PEARLS, groups={}, young={}, flags=[])
@@ -74,6 +116,10 @@ if __name__ == "__main__":
             if cls != "static":
                 by, vc = sh[(cls, "Y")]
                 out["young"].setdefault(cls, {})[eps_s] = dict(q0y=round(lam * by, 3), growth=vc)
+            if cls in rsh:
+                br, vr = rsh[cls]
+                out.setdefault("rear", {}).setdefault(cls, {})[eps_s] = dict(
+                    q0r=round(lam * br, 4), growth=round(lam * vr, 4))
         out["young"].setdefault("static", {})[eps_s] = dict(
             q0y=round(lam * sh[("static", "ALL")][0], 3), growth=0.0)
         if eps == 0.10:

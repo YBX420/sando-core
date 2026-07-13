@@ -145,7 +145,8 @@ man.close()
 data = np.array(rows_all, dtype=[("d", "f4"), ("e", "f4"), ("age", "i4"), ("cls", "U12"),
                                  ("ep", "i4"), ("dd", "f4"), ("scn", "U40"), ("qual", "i4"), ("coast", "i4"), ("sigv", "f4"),
                                  ("ea", "f4"), ("ec", "f4"), ("spd", "f4"),    # motion-frame cols (v5 ellipse)
-                                 ("esg", "f4")])                               # dist-to-segment (v6 capsule)
+                                 ("esg", "f4"),                                # dist-to-segment (v6 capsule)
+                                 ("erb", "f4"), ("etp", "f4")])                # signed rear/tip overruns (v6.1)
 np.save(out_npy, data)
 # scenario-aliasing fingerprints (ruling #17)
 fps = {}
