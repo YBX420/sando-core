@@ -567,9 +567,15 @@ def run_replay(movers, ep, mode="ours", calib=None, predict=True, max_vel=3.0, m
                 _plan, _prim, _tag, _diag = _LL.plan_local(
                     p_d, v_d, a_d, goal, ztop, cyl, v_max=_vmax, a_max=max_acc, dt=DT, delta=DELTA,
                     incumbent=_v3st.get("prim"), guide=_guide)
+                _esc_on = os.environ.get("V3_ESC", "0") == "1"
                 if _plan is not None:
                     p_ref, v_ref, a_ref = _LL.plan_eval(_plan, DT)
                     _v3st["prim"] = _prim                   # warm-start next tick
+                    if _esc_on:
+                        # pre-certified contingency: the committed composite's branch (brake or
+                        # dodge) was certified THIS tick with an absolute window reaching past the
+                        # next recert -- store it as the escape usable if next tick refuses all
+                        _v3st["fb"] = {"plan": _plan, "t": DT}
                     kind = "cpl"
                     _tf = str(_tag).split("_")[0]           # winning intent family (diagnostic)
                     counts["v3_" + _tf] = counts.get("v3_" + _tf, 0) + 1
@@ -583,11 +589,35 @@ def run_replay(movers, ep, mode="ours", calib=None, predict=True, max_vel=3.0, m
                     _bsegs, _bdurs, _btc = _LL.make_composite(
                         _LL.quintic3(p_d, v_d, a_d, p_d, v_d * 0.0, np.zeros(3), _LL.T_P), max_acc, DT)
                     _bok, _ = _LL.certify_composite(_bsegs, _bdurs, cyl, _btc, DELTA)
+                    if not _bok and _esc_on:
+                        # L1.5 (escape tree): straight brake refuted -> try the veer/sidestep escape
+                        # set from the current state before conceding to the uncertified evade
+                        _ep = _LL.escape_fallback(p_d, v_d, a_d, cyl, max_acc, DT, DELTA,
+                                                  v_max=max_vel)
+                        if _ep is not None:
+                            _bsegs, _bdurs, _btc = _ep
+                            _bok = True
+                            counts["brake_esc"] = counts.get("brake_esc", 0) + 1
                     if _bok:
                         p_ref, v_ref, a_ref = _LL.plan_eval((_bsegs, _bdurs, _btc), DT)
+                        if _esc_on:
+                            _v3st["fb"] = {"plan": (_bsegs, _bdurs, _btc), "t": DT}
                         kind = "brake"
                     else:
-                        kind = "evade"                      # even braking uncertifiable -> flee (L3)
+                        # L2 (escape tree): fly the incumbent's PRE-CERTIFIED branch. It was
+                        # certified last tick over an absolute window that covers now (the keep-out
+                        # inflation R+v_eff*(t+delta) and the residual calibration horizon both
+                        # extend past one recert), so this is a certified maneuver, not an evade.
+                        # Caveat (blueprint L2): a track BORN after that certificate is a coverage
+                        # gap this branch cannot answer for -- new-track discrimination is a TODO.
+                        _fb = _v3st.get("fb") if _esc_on else None
+                        if _fb is not None and _fb["t"] + DT <= _fb["plan"][2]:
+                            _fb["t"] += DT
+                            p_ref, v_ref, a_ref = _LL.plan_eval(_fb["plan"], _fb["t"])
+                            kind = "brake"
+                            counts["brake_stale"] = counts.get("brake_stale", 0) + 1
+                        else:
+                            kind = "evade"                  # even braking uncertifiable -> flee (L3)
                 counts["cpl_cert"] = counts.get("cpl_cert", 0) + _diag["n_cert"]
             elif DECIDE == "v2" and cont_cert:
                 kind, _v2s = SL.maneuver_decide_v2(ego, p_d, v_d, a_d, goal, ztop, cyl, _stick,

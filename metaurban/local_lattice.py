@@ -111,6 +111,117 @@ def make_composite(prim, a_max, dt=DT):
     return segs, durs, t_cert
 
 
+# ---- escape branches (V3_ESC pre-certified contingency tree) ----------------------------------
+# The single straight brake makes recursive feasibility demand "can stop IN PLACE clear of the
+# keep-out" -- in head-on geometry the stop line sits inside the mover tube and every candidate
+# dies with it (diag_v3: ped inside ~1.75m refutes even hover). The escape tree weakens that to
+# "SOME certified transition-to-rest exists": straight brake first, then veer-brakes whose stopping
+# displacement is rotated off the velocity direction (moving case) or sidestep hops away from the
+# refuting mover (rest case). Any one certifying admits the candidate; the certified escape IS the
+# fallback branch, so the flown prefix + escape stays a fully certified composite (same guarantee
+# story as the straight brake, K directions instead of 1).
+
+def _rot_xy(d, ang):
+    """Rotate the xy part of displacement d by ang (rad), keep z."""
+    c, s = np.cos(ang), np.sin(ang)
+    return np.array([c * d[0] - s * d[1], s * d[0] + c * d[1], d[2]])
+
+
+def _widen_stop(p, v, a, a_max, target_fn, dur0):
+    """Quintic to rest at target_fn(dur), duration widened until peak |a|<=a_max and jerk<=J_BRK
+    (same soundness discipline as make_composite: we certify the actual widened segment)."""
+    dur = dur0
+    bc = quintic3(p, v, a, target_fn(dur), np.zeros(3), np.zeros(3), dur)
+    for _ in range(10):
+        _, pa, pj = _sampled_deriv_bounds(bc, dur)
+        if pa <= a_max + 1e-6 and pj <= J_BRK + 1e-6:
+            break
+        dur *= 1.3
+        bc = quintic3(p, v, a, target_fn(dur), np.zeros(3), np.zeros(3), dur)
+    return bc, dur
+
+
+def make_composite_esc(prim, a_max, dt=DT, esc_dir=None, hop=1.5):
+    """Escape variant of make_composite: prefix [0,dt] + a certified dodge-to-rest branch + hold.
+    The escape targets rest at p_dt + esc_dir*hop (esc_dir unit 3-vector, z kept level), duration
+    starting from the kinematic minimum and widened until |a|<=a_max, jerk<=J_BRK. The quintic
+    boundary solve absorbs the initial (v,a), so the same construction covers veer-brake (moving)
+    and sidestep-hop (rest)."""
+    p_dt = _poly_eval(prim, dt, 0)[0]
+    v_dt = _poly_eval(prim, dt, 1)[0]
+    a_dt = _poly_eval(prim, dt, 2)[0]
+    vmag = float(np.linalg.norm(v_dt[:2]))
+    tgt = p_dt + np.asarray(esc_dir, float) * hop
+    dur0 = max(2.0 * np.sqrt(hop / a_max), t_brake(vmag, a_max)) * 1.05
+    bc, bdur = _widen_stop(p_dt, v_dt, a_dt, a_max, lambda d: tgt, dur0)
+    p_stop = _poly_eval(bc, bdur, 0)[0]
+    hold = np.zeros((6, 3)); hold[0] = p_stop
+    return [prim, bc, hold], [dt, bdur, SLACK], dt + bdur + SLACK
+
+
+def _esc_dirs(angles, prim, dt, cyl, who):
+    """Escape directions: flee direction (away from the refuter) rotated by 0, +/-angles; the sign
+    nearer the current velocity's off-side is tried first. Unit 3-vectors, level z."""
+    p_dt = _poly_eval(prim, dt, 0)[0]
+    v_dt = _poly_eval(prim, dt, 1)[0]
+    if 0 <= who < len(cyl):
+        away = p_dt[:2] - np.asarray(cyl[who][0], float)[:2]
+    else:
+        away = -v_dt[:2] if np.linalg.norm(v_dt[:2]) > 1e-6 else np.array([1.0, 0.0])
+    away = away / max(np.linalg.norm(away), 1e-9)
+    side = 1.0
+    if np.linalg.norm(v_dt[:2]) > 1e-6:
+        vd = v_dt[:2] / np.linalg.norm(v_dt[:2])
+        side = -1.0 if (vd[0] * away[1] - vd[1] * away[0]) > 0 else 1.0
+    h = np.array([away[0], away[1], 0.0])
+    dirs = [h]
+    for a in angles:
+        if a > 0:
+            dirs.extend([_rot_xy(h, np.radians(side * a)), _rot_xy(h, np.radians(-side * a))])
+    return dirs
+
+
+def try_escapes(prim, a_max, dt, cyl, delta, who, angles, hops, v_max):
+    """Escape tree for one refuted candidate. The prefix must certify on its own (a candidate whose
+    flown segment is already inside a keep-out is dead -- no branch can save it); then dodge-to-rest
+    branches over a direction x distance grid, first certified composite wins. Returns
+    (segs, durs, t_cert, margin, esc_tag) or None."""
+    pok, _ = certify_composite([prim], [dt], cyl, dt, delta)
+    if not pok:
+        return None
+    dirs = _esc_dirs(angles, prim, dt, cyl, who)
+    for hop in hops:
+        for i, d3 in enumerate(dirs):
+            segs, durs, t_cert = make_composite_esc(prim, a_max, dt, esc_dir=d3, hop=hop)
+            if not feasible(segs, durs, v_max, a_max):
+                continue
+            ok, m = certify_composite(segs, durs, cyl, t_cert, delta)
+            if ok:
+                return segs, durs, t_cert, m, f"e{i}@{hop:.1f}"
+    return None
+
+
+def escape_fallback(p, v, a, cyl, a_max, dt=DT, delta=DT, angles=(45.0, 90.0), hops=(1.5, 3.0),
+                    v_max=3.0):
+    """L1 fallback escape tree: the caller already tried (and failed) the straight brake from the
+    current state; try the dodge-to-rest escape grid. Returns a certified plan or None."""
+    prim = quintic3(p, v, a, p, v * 0.0, np.zeros(3), T_P)
+    r = try_escapes(prim, a_max, dt, cyl, delta, _nearest_cyl(p, cyl), angles, hops, v_max)
+    if r is None:
+        return None
+    segs, durs, t_cert, _, _ = r
+    return (segs, durs, t_cert)
+
+
+def _nearest_cyl(p, cyl):
+    """Index of the planar-nearest cylinder (refuter proxy for the fallback escape order)."""
+    if not cyl:
+        return -1
+    p = np.asarray(p, float)
+    d = [float(np.linalg.norm(np.asarray(c[0], float)[:2] - p[:2])) for c in cyl]
+    return int(np.argmin(d))
+
+
 def _bernstein_deriv_bounds(coeffs, dur):
     """Max |v|, |a|, |j| over a segment via Bernstein control-point bounds on the derivatives
     (control points bound the polynomial on [0,dur]). Returns (vmax, amax, jmax) planar."""
@@ -155,23 +266,25 @@ def feasible(segs, durs, v_max, a_max, j_c=J_C, j_brk=J_BRK):
 
 # ---- certification (full disjunction, matches cert_clear semantics) ---------------------------
 
-def certify_composite(segs, durs, cyl, t_cert, delta, tau=None):
+def certify_composite(segs, durs, cyl, t_cert, delta, tau=None, want_who=False):
     """(ok, margin): the cylinder disjunction (hp AND hc) OR vo on the composite BSeg, AND over
-    movers. cyl entries: (c0, vel, acc, R, zc, v_eff). tau defaults to t_cert (whole window)."""
+    movers. cyl entries: (c0, vel, acc, R, zc, v_eff). tau defaults to t_cert (whole window).
+    want_who=True additionally returns the index of the first refuting cylinder (-1 if none)."""
     coeffs = np.stack(segs, axis=0)                     # (n_seg, 6, 3)
     ctrl, t0s, du = monomial_to_bseg(coeffs, np.asarray(durs, float))
     th = t_cert if tau is None else tau
     m_min = np.inf
-    for (c0, vel, acc, R, zc, veff) in cyl:
+    for i, (c0, vel, acc, R, zc, veff) in enumerate(cyl):
         hp, mp = Certifier.certify_horizontal(ctrl, t0s, du, c0, R, vel=vel, acc=acc,
                                               t_hi=th, v_eff=veff, delta=delta, n_axes=2)
         hc, mc = Certifier.certify_horizontal(ctrl, t0s, du, c0, R, vel=(0, 0, 0),
                                               t_hi=th, v_eff=veff, delta=delta, n_axes=2)
         vo, mv = Certifier.certify_above(ctrl, t0s, du, z_clear=zc, t_hi=th, v_eff_z=0.0, delta=delta)
         if not ((hp and hc) or vo):
-            return False, -1.0
+            return (False, -1.0, i) if want_who else (False, -1.0)
         m_min = min(m_min, max(min(mp, mc), mv) / max(2.0 * R, 1e-6))
-    return True, (m_min if np.isfinite(m_min) else np.inf)
+    m_out = m_min if np.isfinite(m_min) else np.inf
+    return (True, m_out, -1) if want_who else (True, m_out)
 
 
 # ---- structured candidate lattice + local planner (blueprint 2-3) -----------------------------
@@ -242,20 +355,15 @@ def plan_local(p, v, a, goal, ztop, cyl, v_max=3.0, a_max=6.0, dt=DT, delta=DT,
     #   creeping straight into it and then failing to certify a stop (evade). Tuning lever, reach gap.
     g = np.asarray(goal, float)[:2] - np.asarray(p, float)[:2]
     gdir = g / max(np.linalg.norm(g), 1e-6)
+    esc_on = _os.environ.get("V3_ESC", "0") == "1"      # pre-certified contingency tree (escape set)
+    esc_angs = tuple(float(x) for x in _os.environ.get("V3_ESC_ANG", "45,90").split(","))
+    esc_hops = tuple(float(x) for x in _os.environ.get("V3_ESC_HOP", "1.5,3.0").split(","))
     cands = candidate_primitives(p, v, a, goal, ztop, v_max, incumbent, guide)
     scored = []
-    n_feas = n_cert = 0
-    for prim, tag in cands:
-        segs, durs, t_cert = make_composite(prim, a_max, dt)
-        if not feasible(segs, durs, v_max, a_max):
-            continue
-        n_feas += 1
-        th = min(t_cert, 0.30 + 0.5 * float(np.linalg.norm(_poly_eval(prim, dt, 1)[0][:2])) + 0.05) \
-            if tau_speed else t_cert
-        ok, m = certify_composite(segs, durs, cyl, t_cert, delta, tau=None)
-        if not ok:
-            continue
-        n_cert += 1
+    n_feas = n_cert = n_esc = 0
+    refuted = []
+
+    def _admit(prim, tag, segs, durs, t_cert, m):
         # progress = the INTENT primitive's goal-ward reach (where this plan WANTS to go), NOT the
         # braked composite endpoint (all composites stop, so that can't tell forward from hover).
         # We only fly the certified commit; the intent expresses sustained navigation preference.
@@ -269,7 +377,44 @@ def plan_local(p, v, a, goal, ztop, cyl, v_max=3.0, a_max=6.0, dt=DT, delta=DT,
         smooth = -(w_smooth[0] * dpsi / (np.pi / 2) + w_smooth[1] * abs(vT - float(np.linalg.norm(v[:2]))) / v_max)
         key = (round(prog / bucket), excess, smooth)
         scored.append((key, (segs, durs, t_cert), prim, tag))
+
+    for prim, tag in cands:
+        segs, durs, t_cert = make_composite(prim, a_max, dt)
+        if not feasible(segs, durs, v_max, a_max):
+            continue
+        n_feas += 1
+        th = min(t_cert, 0.30 + 0.5 * float(np.linalg.norm(_poly_eval(prim, dt, 1)[0][:2])) + 0.05) \
+            if tau_speed else t_cert
+        if esc_on:
+            ok, m, who = certify_composite(segs, durs, cyl, t_cert, delta, tau=None, want_who=True)
+            if not ok:
+                refuted.append((prim, tag, who))
+                continue
+        else:
+            ok, m = certify_composite(segs, durs, cyl, t_cert, delta, tau=None)
+            if not ok:
+                continue
+        n_cert += 1
+        _admit(prim, tag, segs, durs, t_cert, m)
+    if esc_on and refuted:
+        # escape tree pass: straight-brake-refuted candidates get dodge-to-rest branches, best
+        # intent progress first (that is exactly where the recursive-feasibility tax bites), budget
+        # capped; hover is always retried (it is the last stand before the fallback chain)
+        p2 = np.asarray(p, float)[:2]
+        refuted.sort(key=lambda r: float((_poly_eval(r[0], T_P, 0)[0][:2] - p2) @ gdir), reverse=True)
+        topk = int(_os.environ.get("V3_ESC_TOPK", "12"))
+        pool = refuted[:topk] + [r for r in refuted[topk:] if r[1] == "hover"]
+        for prim, tag, who in pool:
+            r = try_escapes(prim, a_max, dt, cyl, delta, who, esc_angs, esc_hops, v_max)
+            if r is None:
+                continue
+            segs, durs, t_cert, m, _etag = r
+            n_cert += 1
+            n_esc += 1
+            _admit(prim, tag, segs, durs, t_cert, m)
     diag = dict(n_cand=len(cands), n_feas=n_feas, n_cert=n_cert)
+    if esc_on:
+        diag["n_esc"] = n_esc                            # candidates admitted via an escape branch
     if not scored:
         return None, None, None, diag
     scored.sort(key=lambda x: x[0], reverse=True)

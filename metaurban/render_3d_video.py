@@ -1414,6 +1414,16 @@ def ego_maneuver_replan(p_d, v_d, a_d, cur_wp, t_sim):
                 _LL.quintic3(p_d, v_d, a_d, p_d, v_d * 0.0, np.zeros(3), _LL.T_P), _amx, _v3dt)
             if _LL.certify_composite(_bs, _bd, _cyl3, _bt, REPLAN_DT)[0]:
                 _V3_PLAN[0] = (_bs, _bd, _bt); _V3_ST["t"] = 0.0; return "brake", None, 1.0
+            if os.environ.get("V3_ESC", "0") == "1":
+                # escape tree: L1.5 fresh dodge-to-rest grid; L2 keep flying the incumbent's
+                # PRE-CERTIFIED branch (certified last commit, absolute window covers now) --
+                # a certified maneuver replaces the frozen uncertified hold
+                _ep = _LL.escape_fallback(p_d, v_d, a_d, _cyl3, _amx, _v3dt, REPLAN_DT, v_max=_vmx)
+                if _ep is not None:
+                    _V3_PLAN[0] = _ep; _V3_ST["t"] = 0.0; return "brake", None, 1.0
+                _old = _V3_PLAN[0]
+                if _old is not None and _V3_ST.get("t", 1e9) + REPLAN_DT <= _old[2]:
+                    return "brake", None, 1.0
             _V3_PLAN[0] = None; _V3_ST["t"] = 0.0; return "hold", None, 1.0
         _V3_ST["prim"] = _prim; _V3_PLAN[0] = _plan; _V3_ST["t"] = 0.0
         _pts3 = [_LL.plan_eval(_plan, u)[0] for u in np.linspace(0, _plan[2], 24)]
