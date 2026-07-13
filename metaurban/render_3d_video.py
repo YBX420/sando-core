@@ -1419,9 +1419,11 @@ def _man_cloud(p_d, heading, t_sim, movers):
     v_nom = np.array([np.cos(heading), np.sin(heading)]) * MAN_VCRUISE   # drone's nominal motion
     _vf_a = float(os.environ.get("VF_EMA", "0"))
     for (_oid, c3, vel, r_obs, d_safe) in movers:
-        if EGO_TDYN:
-            continue    # time-aware solver term owns the movers -- no occupancy rings (they would re-freeze
-            #             the swept corridor spatially and defeat the time dimension); statics stay in the map
+        # EGO_TDYN: the time-aware solver term owns the mover's CURRENT/near-term occupancy (no lead-0
+        # ring -- it would re-freeze the swept corridor spatially), but the CPA LEAD footprint is KEPT:
+        # "compute when we meet at current speed, and put THAT into the avoidance lead" -- the meeting
+        # point sits beyond the trajectory's time reach, so the solver hinge alone starts the dodge too
+        # late (the t=2.9-3.6 brake-and-wait window).
         if _vf_a > 0:
             # PLANNER-FEED velocity EMA (cert cylinders keep the raw KF; calibration matches raw).
             # Measurement noise -> per-tick velocity wiggle -> t_cpa ring wiggle -> reference
@@ -1445,7 +1447,7 @@ def _man_cloud(p_d, heading, t_sim, movers):
         # top over-inflates the current position, and in a dense crowd the doubled blobs seal the corridor -> EGO
         # optimise fails -> stall. With d435i, feed ONLY the PREDICTED (t_cpa) ring (where the mover WILL be, which
         # depth can't see yet); the current-position d_safe is still enforced by cert_clear()'s static-mover check.
-        leads = (tcpa,) if args.d435i else (0.0, tcpa)
+        leads = (tcpa,) if (args.d435i or EGO_TDYN) else (0.0, tcpa)   # TDYN: lead-only (meet-point ring)
         _eta = os.environ.get("ETA_FEED", "0") == "1"
         _qv = PERCLASS_CONF.get(d_safe, (MAN_QCONF, MAN_VEFF))
         for lead in leads:                                        # current + closest-approach predicted footprint
