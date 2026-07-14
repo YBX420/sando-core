@@ -838,6 +838,7 @@ EGO_PREDICT = os.environ.get("EGO_PREDICT", "1") == "1"
 
 _PFE_MEMO = {"t": None, "out": None, "pred": None}
 _GT_VELFD = {}   # GT oid -> (last_pos2, last_t): finite-diff true velocity (engine o.velocity is 0 for humanoids)
+_GTXY_TRK = {}   # GT oid -> MoverTracker (GT_XY arm: exact positions in, KF-estimated velocity out)
 _ORA_MAP = {}    # track id -> GT oid matched while detected (oracle's omniscient coast during miss ticks)
 _LASTDET = {}    # track id -> last DETECTED xy (young-gate freeze anchor; tr.xy gets overwritten by coast)
 _YGATE = {}      # track id -> frozen? (young-gate HYSTERESIS state; no per-tick threshold flicker)
@@ -895,6 +896,57 @@ def _kf_movers_realistic(p_d, t_sim, cam_heading):
             if KFDBG and cls == "pedestrian":
                 print(f"[KFDBG] t={t_sim:6.2f} {oid} ORACLE gt=({p2[0]:7.2f},{p2[1]:7.2f}) "
                       f"gtv=({v2[0]:6.2f},{v2[1]:6.2f})", flush=True)
+        _PFE_MEMO["t"], _PFE_MEMO["out"], _PFE_MEMO["pred"] = t_sim, out, _KF_PRED
+        return out
+    if GT_XY:
+        # PERFECT-XY arm (塔菲大人 2026-07-14, the MetaUrban twin of the nuScenes gt3d arm): omniscient
+        # exact CENTRE POSITIONS + GT identity, but NO GT velocity -- the PRODUCTION MoverTracker (same
+        # dt/meas_noise config as the realistic path) estimates velocity from the position stream, with
+        # the production young gate. Isolates the day's ruling: "given a stable centre xy, this KF is
+        # sufficient" -- this arm should approach the full oracle. Default OFF = byte-identical.
+        out = []
+        seen_xy = set()
+        for (xy, r, h, cls), (oid, p2, v2) in zip(cyls, gtl):
+            if float(np.hypot(*(p2 - p_d[:2]))) > SENSE_R:
+                continue
+            zc = 0.5 * float(h)
+            trk = _GTXY_TRK.get(oid)
+            if trk is None:
+                trk = _GTXY_TRK[oid] = MoverTracker(dt=REPLAN_DT, meas_noise=KF_MEAS_NOISE)
+            trk.update((float(p2[0]), float(p2[1]), zc))
+            seen_xy.add(oid)
+            if trk.ready:
+                kc0, kv, _ka = trk.state()
+                kc0 = np.array([kc0[0], kc0[1], zc])
+                pred = trk.predict(np.linspace(0.0, _pred_tend(kc0, kv, p_d), 6))
+            else:
+                kc0, kv = np.array([p2[0], p2[1], zc]), np.zeros(3)
+                pred = np.asarray([kc0, kc0])
+            if not EGO_PREDICT:
+                kv = np.zeros(3); pred = np.asarray([kc0, kc0])
+            if KF_SIGV_YOUNG > 0 and trk.ready:              # production young honesty gate + hysteresis
+                _k = f"xy{oid}"
+                _fz = _YGATE.get(_k, True)
+                _sv = trk.sigma_v
+                if _fz and _sv < KF_SIGV_YOUNG * 0.9:
+                    _fz = False
+                elif not _fz and _sv > KF_SIGV_YOUNG * 1.6:
+                    _fz = True
+                _YGATE[_k] = _fz
+                if _fz:
+                    kc0 = np.array([p2[0], p2[1], zc])
+                    kv = np.zeros(3)
+                    pred = np.asarray([kc0, kc0])
+            _ELL_TRK[oid] = (int(trk.n), False, str(cls))
+            out.append((oid, kc0, (float(kv[0]), float(kv[1]), 0.0), float(r),
+                        EGO_PERCLASS_DSAFE.get(cls, 0.8)))
+            _KF_PRED.append((p2.copy(), np.asarray(kc0[:2], float).copy(),
+                             [(float(p[0]), float(p[1])) for p in pred], zc)
+                            + ((_ell_ring(oid, kc0, kv, r),) if MAN_ELLIPSE else
+                               ((_cap_ring(oid, kc0, kv, r),) if MAN_CAPSULE else ())))
+        for _oid, _t in _GTXY_TRK.items():                   # out-of-range: coast to keep the KF clock honest
+            if _oid not in seen_xy:
+                _t.coast()
         _PFE_MEMO["t"], _PFE_MEMO["out"], _PFE_MEMO["pred"] = t_sim, out, _KF_PRED
         return out
     tracks = _PFE.step(p_d[:2], (np.cos(cam_heading), np.sin(cam_heading)), cyls)
@@ -1241,6 +1293,7 @@ MAN_ELLIPSE = os.environ.get("ELLIPSE", "0") == "1"
 MAN_CAPSULE = os.environ.get("CAPSULE", "0") == "1"   # v6: keep-out = [mover's back, KF tip] ⊕ q̃,
 #   pearl-string certified through the SHARED _SL tournament (the "cap" 7th cyl field)
 GT_ORACLE = os.environ.get("GT_ORACLE", "0") == "1"   # diagnostic: skip noisy-detection+KF, feed exact
+GT_XY = os.environ.get("GT_XY", "0") == "1"           # perfect-XY arm: exact positions, KF velocity (gt3d twin)
 #   sim pos/vel as kc0/kv (upper bound on prediction quality -- separates KF lag/noise from shape/cert issues)
 KFDBG = os.environ.get("KFDBG", "0") == "1"           # diagnostic: per-tick GT-vs-KF dump for pedestrian tracks
 EGO_TDYN = os.environ.get("EGO_TDYN", "0") == "1"     # TIME-AWARE movers: solver-level time-aligned penalty
