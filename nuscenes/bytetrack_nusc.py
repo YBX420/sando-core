@@ -147,21 +147,47 @@ def main(scene_names, render):
             if render:
                 img = cv2.imread(img_path)
                 for tid, w in world.items():
-                    if tid in seen and w["bbox"] is not None:
+                    if tid not in seen:
+                        continue
+                    trk = w["trk"]
+                    frz = (not trk.ready) or trk.sigma_v > SIGV_YOUNG[w["grp"]]
+                    c = (160, 160, 160) if frz else col[w["grp"]]        # grey = young gate CLOSED
+                    if w["bbox"] is not None:
                         x0, y0, x1, y1 = [int(v) for v in w["bbox"]]
                         cv2.rectangle(img, (x0, y0), (x1, y1), col[w["grp"]], 2)
-                        cv2.putText(img, f"#{tid}", (x0, y0 - 6), cv2.FONT_HERSHEY_SIMPLEX,
-                                    0.6, col[w["grp"]], 2, cv2.LINE_AA)
-                    if (tid in seen and w["trk"].ready and w["trk"].n >= 3
-                            and w["trk"].sigma_v <= SIGV_YOUNG[w["grp"]]):
-                        fut = w["trk"].predict(np.arange(0.0, 3.01, 0.25), model="cv")
+                        tag = f"#{tid} sv{trk.sigma_v:.1f}" + (" FRZ" if frz else "")
+                        cv2.putText(img, tag, (x0, y0 - 6), cv2.FONT_HERSHEY_SIMPLEX,
+                                    0.55, c, 2, cv2.LINE_AA)
+                    if not trk.ready:
+                        continue
+                    # --- the KF's own state, made visible ---
+                    c0, v, _ = trk.state()
+                    ctr_px, okc = world_to_px(np.array([[c0[0], c0[1], 0.0]]), sd_rec, nusc)
+                    if okc[0]:
+                        cx, cy = ctr_px[0].astype(int)
+                        cv2.drawMarker(img, (cx, cy), c, cv2.MARKER_TILTED_CROSS, 14, 2)  # KF centre
+                    sig_p = min(trk.pos_sigma, 6.0)
+                    ang = np.linspace(0, 2 * np.pi, 17)
+                    ring = np.stack([c0[0] + sig_p * np.cos(ang), c0[1] + sig_p * np.sin(ang),
+                                     np.zeros_like(ang)], axis=1)
+                    px_r, okr = world_to_px(ring, sd_rec, nusc)
+                    pr = px_r[okr].astype(int)
+                    for p0, p1 in zip(pr, pr[1:]):                       # 1-sigma position ring
+                        cv2.line(img, tuple(p0), tuple(p1), c, 1, cv2.LINE_AA)
+                    tip = np.array([[c0[0] + v[0], c0[1] + v[1], 0.0]])  # velocity arrow (1 s)
+                    px_t, okt = world_to_px(tip, sd_rec, nusc)
+                    if okc[0] and okt[0]:
+                        cv2.arrowedLine(img, tuple(ctr_px[0].astype(int)), tuple(px_t[0].astype(int)),
+                                        c, 2, cv2.LINE_AA, tipLength=0.25)
+                    if not frz and trk.n >= 3:                           # certified-to-speak prediction
+                        fut = trk.predict(np.arange(0.0, 3.01, 0.25), model="cv")
                         px_f, ok = world_to_px(fut, sd_rec, nusc)
                         pts = px_f[ok].astype(int)
                         for p0, p1 in zip(pts, pts[1:]):
                             cv2.line(img, tuple(p0), tuple(p1), col[w["grp"]], 2, cv2.LINE_AA)
                         if len(pts):
                             cv2.circle(img, tuple(pts[-1]), 5, col[w["grp"]], -1, cv2.LINE_AA)
-                cv2.putText(img, f"{scene['name']} YOLO26s + ByteTrack @12Hz -> prod KF", (16, 40),
+                cv2.putText(img, f"{scene['name']} YOLO26s+ByteTrack@12Hz -> KF | x=centre ring=1sig arrow=v*1s grey=FRZ", (16, 40),
                             cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 255, 255), 2, cv2.LINE_AA)
                 if vw is None:
                     vw = cv2.VideoWriter(os.path.join(out_dir, f"byte_{scene['name']}.mp4"),
