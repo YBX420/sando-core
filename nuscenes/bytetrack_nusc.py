@@ -26,6 +26,27 @@ from yolo_nusc import (WEIGHTS, COCO2GRP, RANGE_MAX, SIG_RANGE, SIGV_YOUNG,  # n
                        px_to_ground)
 
 MISS_SEC = 2.0                                          # kill a world-track after 2 s unseen
+# bbox-HEIGHT depth prior: depth = f * H_class / h_px. Bearing from the bbox centre is EXACT; depth
+# error ~ prior spread (~10%) and -- unlike bottom-centre ground projection -- IMMUNE to ground
+# relief (the flat-earth bias that parked the reborn #174 capsule metres in front of the car).
+H_PRIOR = {"pedestrian": 1.70, "cycle": 1.60, "vehicle": 1.60}
+
+
+def locate_hprior(bbox, sd_rec, nusc, grp, H=None):
+    """World point from bbox centre bearing + height depth prior. H: the track's OWN lidar-calibrated
+    height (H = z_lidar * h_px / f, EMA'd while lidar lives) beats the class prior -- #174 is a ~1.8 m
+    MPV, the 1.6 m class prior under-ranged it 12% (4 m at 30 m) as soon as the laser dried up."""
+    from kf_nusc import quat_rot as _qr
+    x0, y0, x1, y1 = bbox
+    cs = nusc.cs[sd_rec["calibrated_sensor_token"]]
+    ego = nusc.ego[sd_rec["ego_pose_token"]]
+    K = np.asarray(cs["camera_intrinsic"])
+    z = K[1, 1] * (H if H else H_PRIOR[grp]) / max(1.0, (y1 - y0))
+    u, v = (x0 + x1) / 2.0, (y0 + y1) / 2.0
+    p_cam = np.array([(u - K[0, 2]) / K[0, 0] * z, (v - K[1, 2]) / K[1, 1] * z, z])
+    p = _qr(cs["rotation"]) @ p_cam + np.asarray(cs["translation"])
+    p = _qr(ego["rotation"]) @ p + np.asarray(ego["translation"])
+    return p
 
 
 def world_to_cam(pts_w, sd_rec, nusc):
@@ -293,31 +314,43 @@ def main(scene_names, render, use_lidar=False):
                 x0, y0, x1, y1 = [float(v) for v in b.xyxy[0]]
                 if x0 < 4 or x1 > W - 4 or y1 > H - 4 or (y1 - y0) < 18:
                     continue
+                _w_pre = world.get(int(b.id))
                 g = lidar.locate((x0, y0, x1, y1), sd_rec, sd_rec["timestamp"]) if lidar else None
                 by_lidar = g is not None
                 if g is None:
-                    # NEVER feed a lidar-raised track flat-earth points: their metre-level bias DRAGS
-                    # the KF off the object every no-point frame (the capsule-drift bug). Coast instead
-                    # -- and actually COAST (CA extrapolation + growing P + _gap bookkeeping), not
-                    # freeze: a skipped frame with no time-update left the capsule nailed in place
-                    # while the bbox drove on (the capsule-detaches-from-bbox bug).
-                    _w0 = world.get(int(b.id))
-                    if _w0 is not None and _w0.get("n_lidar", 0) >= 3:
-                        # lidar dry for > MISS_SEC -> euthanise: an unobservable track coasting on a
-                        # stale velocity is the last drift tail (diag: coast bucket max 62 m). It is
-                        # reborn CLEAN at the next lidar fix (source-step re-init does the rest).
-                        if t_now - _w0.get("t_lid", t_now) > MISS_SEC:
-                            del world[int(b.id)]
-                            continue
-                        if _w0["t_last"] is not None:
-                            _w0["trk"].coast(dt=max(1e-3, t_now - _w0["t_last"]))
-                            _w0["t_last"] = t_now
-                        _w0["bbox"] = (x0, y0, x1, y1); _w0["src"] = "coast"; seen.add(int(b.id))
-                        continue
-                    g = px_to_ground(((x0 + x1) / 2.0, y1), sd_rec, nusc)   # flat-earth fallback
+                    # lidar dry (small far box / sparse returns) -> HEIGHT-PRIOR observation instead
+                    # of flat-earth (whose slope bias parked #174's reborn capsule metres off) or
+                    # blind coasting (whose stale velocity was the 88 m drift). Bearing exact, depth
+                    # ~10%, R inflated to match -> the track stays anchored, no starvation, no
+                    # euthanasia/rebirth churn.
+                    g = locate_hprior((x0, y0, x1, y1), sd_rec, nusc, grp,
+                                      H=_w_pre.get("H_cal") if _w_pre else None)
                 if g is None:
                     continue
                 ego_xy = np.asarray(nusc.ego[sd_rec["ego_pose_token"]]["translation"][:2])
+                # NEAR-SURFACE -> CENTRE de-bias: any single-viewpoint sensor (lidar cluster, height
+                # prior) ranges the VISIBLE FACE; the GT/visual centre sits half a body deeper (diag:
+                # e_det flat at 2.2 m = half a car length -- the capsule looked pushed toward ego).
+                # Shift along the viewing ray by half the class extent, view-angle aware.
+                _u = g[:2] - ego_xy
+                _u = _u / max(1e-6, float(np.linalg.norm(_u)))
+                if grp == "vehicle":
+                    _v = _w_pre["trk"].state()[1][:2] if (_w_pre and _w_pre["trk"].ready) else None
+                    if _v is not None and float(np.hypot(*_v)) > 1.0:
+                        _c = abs(float(np.dot(_v / np.linalg.norm(_v), _u)))
+                        _off = 2.2 * _c + 0.9 * (max(0.0, 1 - _c * _c)) ** 0.5
+                    else:                                     # parked: wide box = side view
+                        _off = 0.9 if (x1 - x0) > 1.8 * (y1 - y0) else 2.2
+                elif grp == "cycle":
+                    _off = 0.5
+                else:
+                    _off = 0.15
+                g = g + np.array([_u[0], _u[1], 0.0]) * _off
+                # the object's LOCAL ground height (cluster mid-body z minus half height). The data
+                # chain dropped flat-earth long ago but the DRAWING still painted rings at z=0 --
+                # on this road (true ground up to +1 m) that pushed every ring toward the ego.
+                _H0 = (_w_pre.get("H_cal") if _w_pre else None) or H_PRIOR[grp]
+                z_grd = float(g[2]) - 0.5 * _H0
                 d_ego = float(np.linalg.norm(g[:2] - ego_xy))
                 if d_ego > RANGE_MAX:
                     continue
@@ -348,9 +381,9 @@ def main(scene_names, render, use_lidar=False):
                         _ax.F, _ax.Q = _ax._mats(_ax.dt)
                     w["latch"] = MotionLatch(grp)
                     w["t_last"] = None; w["hist"] = []; w["v_feed"] = np.zeros(2)
-                sig = (0.15 + 0.01 * d_ego) if by_lidar else SIG_RANGE(d_ego)   # laser is honestly tight
+                sig = (0.15 + 0.01 * d_ego) if by_lidar else (0.4 + 0.12 * d_ego)  # laser tight, h-prior ~10%/m
                 trk.fx.R = trk.fy.R = sig * sig
-                det = np.array([g[0], g[1], 0.0])
+                det = np.array([g[0], g[1], z_grd])
                 # INNOVATION GATE vs the KF's CURRENT prediction (incl. coast), threshold carrying
                 # pos_sigma -- a coasting track's gate SELF-REOPENS as P grows. The old form (det vs
                 # stale hist[-1], no P term) was a rejection DEADLOCK: diag showed e_kf climbing
@@ -373,13 +406,18 @@ def main(scene_names, render, use_lidar=False):
                     trk.update(det)
                 else:
                     trk.update(det, dt=max(1e-3, t_now - w["t_last"]))
-                w["src"] = "lidar" if by_lidar else "ground"
+                w["src"] = "lidar" if by_lidar else "hprior"
                 w["t_last"] = t_now; w["hist"].append(det); w["bbox"] = (x0, y0, x1, y1)
                 w["r_obs"] = (1 - R_EMA) * w["r_obs"] + R_EMA * r_det
                 w["latch"].add(t_now, det[:2], sig)
                 if by_lidar:
                     w["n_lidar"] = w.get("n_lidar", 0) + 1
                     w["t_lid"] = t_now
+                    # self-calibrated object height: laser depth x pixel height / f. This track now
+                    # carries its own scale for the lidar-dry days (class prior = newborns only).
+                    _Hn = d_ego * (y1 - y0) / K_f
+                    if 0.8 < _Hn < 4.5:
+                        w["H_cal"] = _Hn if "H_cal" not in w else 0.8 * w["H_cal"] + 0.2 * _Hn
                 # planner-feed velocity: once sigma_v passes the production gate the KF's OWN velocity
                 # is the freshest trustworthy source (the latch window velocity is ~1 s stale by
                 # construction -- monocular-era medicine, the capsule-lag bug). Gate closed -> latch.
@@ -489,21 +527,22 @@ def main(scene_names, render, use_lidar=False):
                         continue
                     # --- the KF's own state, made visible ---
                     c0, v, _ = trk.state()
-                    ctr_px, okc = world_to_px(np.array([[c0[0], c0[1], 0.0]]), sd_rec, nusc)
+                    zg = float(c0[2])                       # tracker z = the object's local ground
+                    ctr_px, okc = world_to_px(np.array([[c0[0], c0[1], zg]]), sd_rec, nusc)
                     if okc[0]:
                         cx, cy = ctr_px[0].astype(int)
                         cv2.drawMarker(img, (cx, cy), c, cv2.MARKER_TILTED_CROSS, 14, 2)  # KF centre
                     sig_p = min(trk.pos_sigma, 6.0)
                     ang = np.linspace(0, 2 * np.pi, 17)
                     ring = np.stack([c0[0] + sig_p * np.cos(ang), c0[1] + sig_p * np.sin(ang),
-                                     np.zeros_like(ang)], axis=1)
+                                     np.full_like(ang, zg)], axis=1)
                     px_r, okr = world_to_px(ring, sd_rec, nusc)
                     pr = px_r[okr].astype(int)
                     for p0, p1 in zip(pr, pr[1:]):                       # 1-sigma position ring
                         cv2.line(img, tuple(p0), tuple(p1), c, 1, cv2.LINE_AA)
                     # --- the algorithm's avoidance body: deployed THIN capsule (cyan) ---
                     ring_c, rad_c = capsule_ring(c0, w["v_feed"], w["r_obs"], vmax=VMAX[w["grp"]])
-                    ring3 = np.array([[px_, py_, 0.0] for px_, py_ in ring_c])
+                    ring3 = np.array([[px_, py_, zg] for px_, py_ in ring_c])
                     px_cap, okcap = world_to_px(ring3, sd_rec, nusc)
                     pc = px_cap[okcap].astype(int)
                     for p0, p1 in zip(pc, pc[1:]):
@@ -513,7 +552,7 @@ def main(scene_names, render, use_lidar=False):
                                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 1, cv2.LINE_AA)
                     if not frz:
                         v = np.array([w["v_feed"][0], w["v_feed"][1], 0.0])   # arrow shows the planner feed
-                    tip = np.array([[c0[0] + v[0], c0[1] + v[1], 0.0]])  # velocity arrow (1 s)
+                    tip = np.array([[c0[0] + v[0], c0[1] + v[1], zg]])  # velocity arrow (1 s)
                     px_t, okt = world_to_px(tip, sd_rec, nusc)
                     if okc[0] and okt[0]:
                         cv2.arrowedLine(img, tuple(ctr_px[0].astype(int)), tuple(px_t[0].astype(int)),
