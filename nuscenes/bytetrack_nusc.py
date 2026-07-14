@@ -33,7 +33,14 @@ MISS_SEC = 2.0                                          # kill a world-track aft
 CAP_TAU, CAP_RDT = 0.75, 0.1            # trust window + replan_dt (metaurban_sando.yaml)
 CAP_Q, CAP_VEFF, CAP_DSAFE, CAP_K = 0.05, 0.1, 0.15, 6      # calib_v6_thin.json + MANDSAFE=0.15
 CAP_REAR = (0.05, 0.0)                  # v6.1 flat rear: rear-overrun quantile q0r + growth
-R_OBS = {"pedestrian": 0.30, "cycle": 0.40, "vehicle": 1.00}
+# r_obs from the DETECTION, not a class constant (user 2026-07-14: fixed 1.0 m looked too wide).
+# Pedestrian/cycle: half bbox-WIDTH (no side-length problem). Vehicle: bbox-width is the car's
+# LENGTH in side view (first cut ballooned a sedan to r2.5) -> infer width from bbox HEIGHT, which
+# is view-invariant (car ~1.45 m tall, ~1.8 m wide => half-width ~ 0.62 * height).
+# Monocular honesty: a frozen side-view car's nose/tail poke
+# out of the point-law circle -- on the deployment face r_obs comes from the sensor body, not this.
+R_CLAMP = {"pedestrian": (0.20, 0.45), "cycle": (0.30, 0.80), "vehicle": (0.70, 1.40)}
+R_EMA = 0.3
 
 
 def capsule_ring(c0, vel, r_obs):
@@ -215,12 +222,16 @@ def main(scene_names, render):
                 d_ego = float(np.linalg.norm(g[:2] - ego_xy))
                 if d_ego > RANGE_MAX:
                     continue
+                K_f = float(np.asarray(nusc.cs[sd_rec["calibrated_sensor_token"]]["camera_intrinsic"])[0][0])
+                lo_r, hi_r = R_CLAMP[grp]
+                ext_px = 0.62 * (y1 - y0) if grp == "vehicle" else 0.5 * (x1 - x0)
+                r_det = float(np.clip(ext_px * d_ego / K_f, lo_r, hi_r))
                 tid = int(b.id)
                 w = world.get(tid)
                 if w is None:
                     w = world[tid] = {"trk": MoverTracker(dt=0.083, meas_noise=0.5),
                                       "t_last": None, "grp": grp, "hist": [], "bbox": None,
-                                      "latch": MotionLatch(grp)}
+                                      "latch": MotionLatch(grp), "r_obs": r_det}
                 trk = w["trk"]
                 sig = SIG_RANGE(d_ego)
                 trk.fx.R = trk.fy.R = sig * sig
@@ -230,6 +241,7 @@ def main(scene_names, render):
                 else:
                     trk.update(det, dt=max(1e-3, t_now - w["t_last"]))
                 w["t_last"] = t_now; w["hist"].append(det); w["bbox"] = (x0, y0, x1, y1)
+                w["r_obs"] = (1 - R_EMA) * w["r_obs"] + R_EMA * r_det
                 w["latch"].add(t_now, det[:2], sig)
                 seen.add(tid)
             for tid, w in list(world.items()):
@@ -308,7 +320,7 @@ def main(scene_names, render):
                         cv2.line(img, tuple(p0), tuple(p1), c, 1, cv2.LINE_AA)
                     # --- the algorithm's avoidance body: deployed THIN capsule (cyan) ---
                     v_cap = w["latch"].vel_win if w["latch"].state == "MOVING" else np.zeros(2)
-                    ring_c, rad_c = capsule_ring(c0, v_cap, R_OBS[w["grp"]])
+                    ring_c, rad_c = capsule_ring(c0, v_cap, w["r_obs"])
                     ring3 = np.array([[px_, py_, 0.0] for px_, py_ in ring_c])
                     px_cap, okcap = world_to_px(ring3, sd_rec, nusc)
                     pc = px_cap[okcap].astype(int)
