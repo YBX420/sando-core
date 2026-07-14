@@ -26,3 +26,6 @@
 
 ### YOLO 无标注臂(同日,`nuscenes/yolo_nusc.py`)
 塔菲大人的 YOLO(`cvmusecore/yolo26s.pt`,COCO 预训练)全管线不碰标注:检测→框底反投影地面(z=0)→自家 NN 关联→生产 KF→CAM_FRONT 叠加 mp4(out/yolo_scene-{0103,1094}.mp4)。**三轮判决**:①裸跑=比 still 还差(单目深度噪声 0.5s 节奏下变幻影速度,行人 1s 2.8 vs still 2.1);②R 按距离(σ≈0.3+d²/950)+ young 门 0.5 → 全冻结=止损地板(误差=still,不再瞎说);③**per-class 放宽门(车 3.0)负面判决**:车 3s 15.4 vs 冻结 6.0——**车速误差=系统偏差(框底=车头近边随视角滑动)非方差,σ_v 门拦不住,修法在观测端不在门上**。同 KF GT 喂 1s 行人 0.19m vs YOLO 喂 2.14m = 检测器+单目测距税;young 门(cut 1)在真实数据上判对。观测升级候选:12Hz sweeps 提节奏 / 框中心+类尺寸先验测深 / 更大权重 yolo26m。
+
+### ByteTrack 臂(同日,`nuscenes/bytetrack_nusc.py`,c9deb62 后)
+塔菲大人点名 YOLO+ByteTrack+KF:ultralytics 内置 BYTETracker(FoundationVision 官方移植)做像素空间关联(IoU+低分二次关联),自家贪心 NN 层删除,改吃 **12Hz sweeps**(ByteTrack 需要帧间 IoU;顺带把 KF 观测节奏 0.5→0.083s),打分仍只在关键帧=三臂同考卷。**判决(影子评测,冻结/裸预测/σ_v 三线并记)**:考卷分数与 NN@2Hz 臂持平(全体仍被 young 门冻结);**任何 σ_v 分桶裸预测都不赢 still**(唯一均值打平:车 σ_v[0.5,1.0) 6.2 vs 7.0,中位还输),σ_v 从未收敛到 0.5 以下。**结论:墙=单目框底测距的系统偏差,关联(ByteTrack)和节奏(12Hz)都治不了;KF 自报"测不准"与影子数据一致=young 门第三次判对**。下一刀若继续 nuScenes 线:测距换"框高+类身高先验"(行人 1.7m,深度≈f·H/h_px,对脚部遮挡/地面坡度鲁棒)。成片 out/byte_scene-{0103,1094}.mp4。
