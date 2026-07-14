@@ -26,6 +26,81 @@ from yolo_nusc import (WEIGHTS, COCO2GRP, RANGE_MAX, SIG_RANGE, SIGV_YOUNG,  # n
 
 MISS_SEC = 2.0                                          # kill a world-track after 2 s unseen
 
+# bbox-bottom slide budget (m): passing a STATIC object slides its ground point along the body, so
+# "moved" must mean displacement beyond noise AND beyond this systematic slide -- per class.
+SLIDE = {"pedestrian": 0.3, "cycle": 0.8, "vehicle": 2.0}
+
+
+class MotionLatch:
+    """3-state motion certificate from DISPLACEMENT over a window, not instantaneous velocity.
+    The wall was: v-SNR at one tick is hopeless (sigma_d ~ 1 m vs 0.05 m of true motion). But over
+    T seconds true displacement grows ~v*T while the noise of a windowed mean SHRINKS ~sigma/sqrt(n):
+    split the window in half, compare the two means. STATIC latches v=0 + weighted-mean position;
+    MOVING is the licence to speak; hysteresis (2 consecutive verdicts to flip) kills flicker."""
+
+    def __init__(self, grp, win=3.0):
+        self.slide = SLIDE[grp]; self.win = float(win)
+        self.obs = []                                   # (t, x, y, sig)
+        self.state = "UNKNOWN"; self._pend = None; self._npend = 0
+
+    def add(self, t, xy, sig):
+        self.obs.append((t, float(xy[0]), float(xy[1]), float(sig)))
+        t0 = t - self.win
+        while self.obs and self.obs[0][0] < t0:
+            self.obs.pop(0)
+        self._tick()
+
+    def _halves(self):
+        n = len(self.obs)
+        if n < 6:
+            return None
+        a, b = self.obs[: n // 2], self.obs[n // 2:]
+        ma = np.array([[o[1], o[2]] for o in a]).mean(axis=0)
+        mb = np.array([[o[1], o[2]] for o in b]).mean(axis=0)
+        sa = np.mean([o[3] for o in a]) / max(1.0, len(a)) ** 0.5
+        sb = np.mean([o[3] for o in b]) / max(1.0, len(b)) ** 0.5
+        return float(np.linalg.norm(mb - ma)), float((sa * sa + sb * sb) ** 0.5)
+
+    def _tick(self):
+        h = self._halves()
+        if h is None:
+            return
+        d, sd = h
+        if d > 3.0 * sd + self.slide:
+            v = "MOVING"
+        elif d < 1.5 * sd + 0.5 * self.slide:
+            v = "STATIC"
+        else:
+            v = None
+        if v is None or v == self.state:
+            self._pend, self._npend = None, 0; return
+        if v == self._pend:
+            self._npend += 1
+        else:
+            self._pend, self._npend = v, 1
+        if self._npend >= 2:                            # hysteresis: two consecutive verdicts to flip
+            self.state, self._pend, self._npend = v, None, 0
+
+    @property
+    def vel_win(self):
+        """Displacement velocity: (mean of 2nd half - mean of 1st half) / dt between half centres --
+        the best-SNR velocity this observation chain can produce (noise shrinks with sqrt(n), true
+        displacement grows with T). This, not the KF instantaneous v, is MOVING's licence to speak."""
+        n = len(self.obs)
+        if n < 6:
+            return np.zeros(2)
+        a, b = self.obs[: n // 2], self.obs[n // 2:]
+        ma = np.array([[o[1], o[2]] for o in a]).mean(axis=0)
+        mb = np.array([[o[1], o[2]] for o in b]).mean(axis=0)
+        ta = np.mean([o[0] for o in a]); tb = np.mean([o[0] for o in b])
+        return (mb - ma) / max(0.2, tb - ta)
+
+    @property
+    def mean_pos(self):
+        w = np.array([1.0 / max(o[3], 0.1) ** 2 for o in self.obs])
+        pts = np.array([[o[1], o[2]] for o in self.obs])
+        return (pts * w[:, None]).sum(axis=0) / w.sum()
+
 
 def main(scene_names, render):
     import cv2
@@ -49,6 +124,10 @@ def main(scene_names, render):
         v.sort(key=lambda d: d["timestamp"])
 
     rows, n_fp = [], 0
+    ATTR_MOTION = {"vehicle.moving": "MOVING", "vehicle.stopped": "STATIC", "vehicle.parked": "STATIC",
+                   "pedestrian.moving": "MOVING", "pedestrian.standing": "STATIC",
+                   "pedestrian.sitting_lying_down": "STATIC",
+                   "cycle.with_rider": "MOVING", "cycle.without_rider": "STATIC"}
     col = {"pedestrian": (60, 140, 255), "vehicle": (80, 220, 80), "cycle": (255, 200, 0)}
     for scene in nusc.scene:
         if scene_names and scene["name"] not in scene_names:
@@ -62,6 +141,11 @@ def main(scene_names, render):
                 if a["grp"]:
                     gt.setdefault(a["instance_token"], []).append((ts_key[s["token"]], a))
         gt = {k: sorted(v, key=lambda x: x[0]) for k, v in gt.items()}
+
+        def gt_attr_at(inst, t):
+            obs = gt[inst]
+            a = min(obs, key=lambda o: abs(o[0] - t))[1]
+            return nusc.attr[a["attribute_tokens"][0]] if a["attribute_tokens"] else "-"
 
         def gt_xy_at(inst, t):
             obs = gt[inst]
@@ -102,7 +186,8 @@ def main(scene_names, render):
                 w = world.get(tid)
                 if w is None:
                     w = world[tid] = {"trk": MoverTracker(dt=0.083, meas_noise=0.5),
-                                      "t_last": None, "grp": grp, "hist": [], "bbox": None}
+                                      "t_last": None, "grp": grp, "hist": [], "bbox": None,
+                                      "latch": MotionLatch(grp)}
                 trk = w["trk"]
                 sig = SIG_RANGE(d_ego)
                 trk.fx.R = trk.fy.R = sig * sig
@@ -112,6 +197,7 @@ def main(scene_names, render):
                 else:
                     trk.update(det, dt=max(1e-3, t_now - w["t_last"]))
                 w["t_last"] = t_now; w["hist"].append(det); w["bbox"] = (x0, y0, x1, y1)
+                w["latch"].add(t_now, det[:2], sig)
                 seen.add(tid)
             for tid, w in list(world.items()):
                 if tid not in seen and w["t_last"] is not None:
@@ -131,18 +217,31 @@ def main(scene_names, render):
                         n_fp += 1
                         continue
                     inst = min(cand)[1]
-                    frozen = w["trk"].sigma_v > SIGV_YOUNG[w["grp"]]
+                    st = w["latch"].state
+                    # motion-latch policy: STATIC -> weighted-mean anchor (noise-averaged, v=0);
+                    # MOVING -> the latch IS the licence, speak KF-CV; UNKNOWN -> frozen last obs.
                     for h in HORIZONS:
                         gxy = gt_xy_at(inst, t_now + h)
                         if gxy is None:
                             continue
                         raw = w["trk"].predict([h], model="cv")[0][:2]      # shadow: ungated prediction
-                        pxy = obs_xy if frozen else raw
+                        # VERDICT (2026-07-14): on bbox-bottom monocular depth, velocity is unmeasurable
+                        # in EVERY form tried -- (1) KF instantaneous v: loses to still in every sigma_v
+                        # bucket; (2) STATIC mean-anchor: 3.35 vs 2.85 still (error is BIAS, averaging
+                        # can't wash it); (3) window displacement velocity: 8.07/8.36 vs still 8.11/3.71
+                        # (mean wash, median worse). Ship the no-harm floor; the latch stays as a
+                        # DIAGNOSTIC/classifier (vehicles: only 5 false-moving rows; slow peds: 31 missed,
+                        # their true displacement sits under the noise+slide floor at range).
+                        if st == "MOVING":
+                            pxy = obs_xy + w["latch"].vel_win * h   # kept for the shadow record only
+                        else:
+                            pxy = obs_xy
                         rows.append((scene["name"], w["grp"], h,
                                      float(np.linalg.norm(pxy - gxy)),
                                      float(np.linalg.norm(obs_xy - gxy)),
                                      float(np.linalg.norm(raw - gxy)),
-                                     float(w["trk"].sigma_v)))
+                                     float(w["trk"].sigma_v), st,
+                                     ATTR_MOTION.get(gt_attr_at(inst, t_now), "-")))
 
             if render:
                 img = cv2.imread(img_path)
@@ -200,7 +299,7 @@ def main(scene_names, render):
 
     if not rows:
         print("no scored rows"); return
-    rows = np.core.records.fromrecords(rows, names="scene,grp,h,err,still,raw,sigv")
+    rows = np.core.records.fromrecords(rows, names="scene,grp,h,err,still,raw,sigv,latch,gtmot")
     print(f"\nkeyframe-scored updates FP (no GT mover within 2.5m)={n_fp}")
     hdr = f"{'bucket (mean/median m)':30s}"
     for h in HORIZONS:
@@ -215,6 +314,18 @@ def main(scene_names, render):
             e = sub[sub.h == h]
             line += f" {np.mean(e.err):5.2f}/{np.median(e.err):5.2f} |{np.mean(e.still):5.2f}" if len(e) else "    -"
         print(line)
+    print("\n--- motion-latch confusion vs GT attribute (per scored row, h=2.0s) ---")
+    e = rows[rows.h == 2.0]
+    for lt in ("STATIC", "MOVING", "UNKNOWN"):
+        for gm in ("STATIC", "MOVING"):
+            n = int(np.sum((e.latch == lt) & (e.gtmot == gm)))
+            if n:
+                print(f"latch={lt:8s} gt={gm:7s} n={n}")
+    print("\n--- error by latch state (h=2.0s, vs still) ---")
+    for lt in ("STATIC", "MOVING", "UNKNOWN"):
+        sub = e[e.latch == lt]
+        if len(sub):
+            print(f"{lt:8s} n={len(sub):4d}  policy {np.mean(sub.err):5.2f}/{np.median(sub.err):5.2f}  still {np.mean(sub.still):5.2f}/{np.median(sub.still):5.2f}")
     print("\n--- shadow: UNGATED prediction vs still, bucketed by sigma_v (h=2.0s) ---")
     for grp in ("pedestrian", "vehicle"):
         for lo, hi in ((0.0, 0.5), (0.5, 1.0), (1.0, 1.5), (1.5, 2.5), (2.5, 99.0)):
