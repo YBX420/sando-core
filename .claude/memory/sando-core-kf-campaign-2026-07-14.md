@@ -3,6 +3,9 @@
 ## ★ 钦定总结论(塔菲大人,当日收官拍板)
 **KF 无罪。所谓"KF 不准",病根全部 = 感知给不出"物体中心点的稳定 xy"。观测稳的场合这套生产 KF 完全够用**(GT 直喂:行人 1s 预测 0.26m、车中位 0.04m;激光+mask 链上全类全 horizon 赢 still)。推论:资源永远优先押"**每个 2D 框配一个可靠深度**",不押 3D 检测全家桶、不换滤波器;尺寸/朝向可用先验+自校准+运动方向零成本替代。
 
+## GT_XY 臂(当日最终章,99c7f10):钦定结论在 MetaUrban 面定量确认
+`GT_XY=1`(render_3d_video,默认关=字节回归):精确中心 xy+GT 身份进,**速度由生产 MoverTracker 估**(同 dt/meas_noise/young 门)=nuScenes gt3d 臂的 MetaUrban 版。**seed7 阶梯(全 0 撞):生产 KF 9.9s / GT_XY 8.3s / 全知 7.4s——稳定 xy 一项还掉感知税 64%(1.6/2.5s),切换 9→2、hold 10→0;剩 0.9s=从完美位置估速度的固有成本=直接测速传感器(雷达)的理论价值**,与 nuScenes radar 判决跨面互证。成片 out/drone_3d_gtxy_s7.mp4(渲染=headless 逐字)。阶梯三档常备:THIN=1 / THIN=1 GT_XY=1 / ORACLE_THIN=1。
+
 ## MetaUrban 主线(上午)
 - **KF cut 1 已下**(53f8fe3+c3c18eb):young 诚实门 KF_SIGV_YOUNG+迟滞,seed7 KF 臂 10.6→9.4s。病②(coast 漂移加速)③(丢检串杀 track 重生)未修。
 - **场景池肃清完毕 21/21 绿**:手术表焊在 `plan_route`——`_GOAL_FIX={23:+5m}`(终点口袋)、`_ROUTE_SALT={1:1,11:2}`(路线穿楼)。**选刀法:hold 刷屏先看卡点离终点多远**,近=挪终点,远=重摇路线(+5m 对后者无效实测)。
