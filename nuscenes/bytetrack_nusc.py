@@ -41,12 +41,15 @@ CAP_REAR = (0.05, 0.0)                  # v6.1 flat rear: rear-overrun quantile 
 # out of the point-law circle -- on the deployment face r_obs comes from the sensor body, not this.
 R_CLAMP = {"pedestrian": (0.20, 0.45), "cycle": (0.30, 0.80), "vehicle": (0.70, 1.40)}
 R_EMA = 0.3
+VMAX = {"pedestrian": 2.5, "cycle": 8.0, "vehicle": 15.0}   # class top speed: innovation gate + sp cap
 
 
-def capsule_ring(c0, vel, r_obs):
+def capsule_ring(c0, vel, r_obs, vmax=None):
     """Ground outline of the deployed thin capsule: stadium from the mover's flat BACK to the
     KF-apex cap at c0 + v*tau. Verbatim geometry of render_3d_video._cap_ring (v6.1)."""
     sp = float(np.hypot(vel[0], vel[1]))
+    if vmax is not None:
+        sp = min(sp, float(vmax))          # a phantom 10 m/s must not fatten the pearl-gap term
     veff = CAP_VEFF + sp / (2.0 * (CAP_K - 1))
     rad = r_obs + CAP_DSAFE + CAP_Q + veff * (CAP_TAU + CAP_RDT)
     c0 = np.asarray(c0[:2], float)
@@ -236,6 +239,16 @@ def main(scene_names, render):
                 sig = SIG_RANGE(d_ego)
                 trk.fx.R = trk.fy.R = sig * sig
                 det = np.array([g[0], g[1], 0.0])
+                # INNOVATION GATE: a single-frame world jump beyond class-vmax*dt + 3*sigma is a
+                # bbox-bottom/depth HOP (occlusion snap), not motion -- one hop otherwise poisons
+                # BOTH the latch verdict and its window velocity (10 m/s phantom -> r2.5 balloon).
+                if w["t_last"] is not None and w["hist"]:
+                    dtj = max(1e-3, t_now - w["t_last"])
+                    jump = float(np.linalg.norm(det[:2] - w["hist"][-1][:2]))
+                    if jump > VMAX[grp] * dtj + 3.0 * sig:
+                        w["bbox"] = (x0, y0, x1, y1)      # keep the box on screen, drop the sample
+                        seen.add(tid)
+                        continue
                 if w["t_last"] is None:
                     trk.update(det)
                 else:
@@ -320,7 +333,7 @@ def main(scene_names, render):
                         cv2.line(img, tuple(p0), tuple(p1), c, 1, cv2.LINE_AA)
                     # --- the algorithm's avoidance body: deployed THIN capsule (cyan) ---
                     v_cap = w["latch"].vel_win if w["latch"].state == "MOVING" else np.zeros(2)
-                    ring_c, rad_c = capsule_ring(c0, v_cap, w["r_obs"])
+                    ring_c, rad_c = capsule_ring(c0, v_cap, w["r_obs"], vmax=VMAX[w["grp"]])
                     ring3 = np.array([[px_, py_, 0.0] for px_, py_ in ring_c])
                     px_cap, okcap = world_to_px(ring3, sd_rec, nusc)
                     pc = px_cap[okcap].astype(int)
