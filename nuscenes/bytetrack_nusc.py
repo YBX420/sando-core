@@ -89,6 +89,20 @@ class LidarDepth:
         self._cache = (rec["token"], pw)
         return pw
 
+    def locate_box3d(self, t_us, c_xyz, size, rot_q):
+        """GT-3D-box point selection: the SELECTION CEILING -- membership is exact (point inside the
+        annotated box, 0.2 m margin), no projection, no silhouette, no contamination. What remains
+        in the error is pure surface-sampling physics (self-occlusion, sparsity, timing)."""
+        from kf_nusc import quat_rot as _qr
+        pw = self.world_cloud(t_us)
+        q = (pw - np.asarray(c_xyz)) @ _qr(rot_q)         # world -> box frame
+        wd, ln, ht = size
+        m = ((np.abs(q[:, 0]) < ln / 2 + 0.2) & (np.abs(q[:, 1]) < wd / 2 + 0.2)
+             & (np.abs(q[:, 2]) < ht / 2 + 0.3))
+        if m.sum() < 3:
+            return None
+        return np.median(pw[m], axis=0)
+
     def locate(self, bbox, sd_rec, t_us, mask=None):
         """Median world-xy of the nearest lidar cluster inside the (shrunk) bbox, or None.
         mask: optional (bitmap, x0, y0) instance mask -- points must fall ON the object's silhouette
@@ -246,13 +260,14 @@ class MotionLatch:
 SEG_W = "/media/boxuan/Data2/projects/cvmusecore/yolo11s-seg.pt"
 
 
-def main(scene_names, render, use_lidar=False, det_mode="yolo", use_seg=False):
+def main(scene_names, render, use_lidar=False, det_mode="yolo", use_seg=False, gt_mask=False):
     """det_mode: yolo (real detector) | gtbox (GT boxes projected to 2D, SAME sensing chain) |
     gt3d (oracle GT centres straight into the same KF/latch/capsule downstream)."""
     import cv2
     if det_mode == "yolo":
         from ultralytics import YOLO
-    pfx = {"yolo": ("seg" if use_seg else "byte"), "gtbox": "gtbbx", "gt3d": "gt"}[det_mode]
+    pfx = {"yolo": ("seg" if use_seg else "byte"),
+           "gtbox": ("gtmask" if gt_mask else "gtbbx"), "gt3d": "gt"}[det_mode]
     nusc = Nusc()
     lidar = LidarDepth(nusc) if use_lidar else None
     # gate must match estimation quality (the tdyn law): with lidar R but production q_jerk=2.0 the
@@ -383,7 +398,8 @@ def main(scene_names, render, use_lidar=False, det_mode="yolo", use_seg=False):
                         x1 = min(bb[2], W - 1.0); y1 = min(bb[3], H - 1.0)
                         if x0 < 4 or x1 > W - 4 or y1 > H - 4 or (y1 - y0) < 18:
                             continue
-                        cands.append((tid, grp, (x0, y0, x1, y1), None, None, None))
+                        m3 = ("box3d", pp, size, rot) if gt_mask else None
+                        cands.append((tid, grp, (x0, y0, x1, y1), None, None, m3))
                     else:                                # gt3d: the omniscient oracle
                         cands.append((tid, grp, bb, pp, size, None))
             _t1 = time.perf_counter()
@@ -397,6 +413,9 @@ def main(scene_names, render, use_lidar=False, det_mode="yolo", use_seg=False):
                 if _gtp is not None:                  # gt3d: the oracle position, no sensing at all
                     g = np.asarray(_gtp, float)
                     by_lidar = False
+                elif _msk is not None and isinstance(_msk, tuple) and len(_msk) == 4 and _msk[0] == "box3d":
+                    g = lidar.locate_box3d(sd_rec["timestamp"], _msk[1], _msk[2], _msk[3]) if lidar else None
+                    by_lidar = g is not None
                 elif True:
                     g = lidar.locate((x0, y0, x1, y1), sd_rec, sd_rec["timestamp"], mask=_msk) if lidar else None
                     by_lidar = g is not None
@@ -596,7 +615,7 @@ def main(scene_names, render, use_lidar=False, det_mode="yolo", use_seg=False):
                 for tid, w in world.items():
                     if tid not in seen:
                         continue
-                    if w.get("msk") is not None:          # the instance silhouette that SELECTS the points
+                    if w.get("msk") is not None and len(w["msk"]) == 3:   # bitmap silhouette only
                         bm, mx0, my0 = w["msk"]
                         x0i, y0i = max(0, int(mx0)), max(0, int(my0))
                         y1i = min(img.shape[0], y0i + bm.shape[0])
@@ -734,5 +753,6 @@ if __name__ == "__main__":
     ap.add_argument("--det", type=str, default="yolo", choices=["yolo", "gtbox", "gt3d"],
                     help="detection source: yolo | gtbox (GT boxes, same sensing chain) | gt3d (oracle)")
     ap.add_argument("--seg", action="store_true", help="yolo11s-seg instance masks select the lidar points (silhouette instead of rectangle)")
+    ap.add_argument("--gtmask", action="store_true", help="with --det gtbox: select lidar points by GT 3-D box membership (the selection CEILING)")
     args = ap.parse_args()
-    main(None if args.all else set(args.scenes.split(",")), not args.no_render, args.lidar, args.det, args.seg)
+    main(None if args.all else set(args.scenes.split(",")), not args.no_render, args.lidar, args.det, args.seg, args.gtmask)
