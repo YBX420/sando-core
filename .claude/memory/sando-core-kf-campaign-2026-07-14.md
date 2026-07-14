@@ -23,3 +23,6 @@
 
 ## nuScenes 真实数据面开张(07-14 下午,8faafdb)
 塔菲大人转向目标检测/真实数据:`data/v1.0-mini` = **nuScenes mini(10 scene × ~40 关键帧 @2Hz 抖动 0.4-0.6s,场内连续场间不拼)**。`nuscenes/kf_nusc.py`:生产 `MoverTracker` 原样 import(变 dt 路径吃真实时间戳),GT 关联(instance_token,=真实数据版 GT_ORACLE 臂,隔离估计器),世界系 3D 框中心喂 KF,预测投回 CAM_FRONT 出 jpg(`nuscenes/out/`,昼/夜目检过)。**46k 评分点判决**:①**CV 全面赢 CA**(行人 MOVING 3s 0.71 vs 1.57 均值)= MetaUrban 病④(CA 过冲)真实数据实锤;②KF 大胜 still 基线(车 MOVING 3s 3.4 vs 21.3m);③**病①(young 两点差分)在 GT 喂入下基本消失**(n=2 与 n≥4 同量级)→ 病①=噪声×节奏的乘积而非结构病,young 诚实门(治标)是对的药。下一步:接 visibility 低档当真实丢检串(病②测试床)/换掉 GT 关联上检测器。
+
+### YOLO 无标注臂(同日,`nuscenes/yolo_nusc.py`)
+塔菲大人的 YOLO(`cvmusecore/yolo26s.pt`,COCO 预训练)全管线不碰标注:检测→框底反投影地面(z=0)→自家 NN 关联→生产 KF→CAM_FRONT 叠加 mp4(out/yolo_scene-{0103,1094}.mp4)。**三轮判决**:①裸跑=比 still 还差(单目深度噪声 0.5s 节奏下变幻影速度,行人 1s 2.8 vs still 2.1);②R 按距离(σ≈0.3+d²/950)+ young 门 0.5 → 全冻结=止损地板(误差=still,不再瞎说);③**per-class 放宽门(车 3.0)负面判决**:车 3s 15.4 vs 冻结 6.0——**车速误差=系统偏差(框底=车头近边随视角滑动)非方差,σ_v 门拦不住,修法在观测端不在门上**。同 KF GT 喂 1s 行人 0.19m vs YOLO 喂 2.14m = 检测器+单目测距税;young 门(cut 1)在真实数据上判对。观测升级候选:12Hz sweeps 提节奏 / 框中心+类尺寸先验测深 / 更大权重 yolo26m。
