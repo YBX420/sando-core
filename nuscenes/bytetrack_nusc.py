@@ -233,9 +233,13 @@ class MotionLatch:
         return (pts * w[:, None]).sum(axis=0) / w.sum()
 
 
-def main(scene_names, render, use_lidar=False):
+def main(scene_names, render, use_lidar=False, det_mode="yolo"):
+    """det_mode: yolo (real detector) | gtbox (GT boxes projected to 2D, SAME sensing chain) |
+    gt3d (oracle GT centres straight into the same KF/latch/capsule downstream)."""
     import cv2
-    from ultralytics import YOLO
+    if det_mode == "yolo":
+        from ultralytics import YOLO
+    pfx = {"yolo": "byte", "gtbox": "gtbbx", "gt3d": "gt"}[det_mode]
     nusc = Nusc()
     lidar = LidarDepth(nusc) if use_lidar else None
     # gate must match estimation quality (the tdyn law): with lidar R but production q_jerk=2.0 the
@@ -268,7 +272,7 @@ def main(scene_names, render, use_lidar=False):
     for scene in nusc.scene:
         if scene_names and scene["name"] not in scene_names:
             continue
-        model = YOLO(WEIGHTS)                            # fresh model per scene = fresh ByteTrack state
+        model = YOLO(WEIGHTS) if det_mode == "yolo" else None   # fresh model = fresh ByteTrack state
         chain = nusc.sample_chain(scene)
         ts_key = {s["token"]: s["timestamp"] / 1e6 for s in chain}
         gt = {}
@@ -277,6 +281,34 @@ def main(scene_names, render, use_lidar=False):
                 if a["grp"]:
                     gt.setdefault(a["instance_token"], []).append((ts_key[s["token"]], a))
         gt = {k: sorted(v, key=lambda x: x[0]) for k, v in gt.items()}
+
+        _iid = {}                                        # instance_token -> stable small int id
+
+        def gt_full_at(inst, t):
+            obs = gt[inst]
+            if t < obs[0][0] - 1e-9 or t > obs[-1][0] + 1e-9:
+                return None
+            near = min(obs, key=lambda o: abs(o[0] - t))[1]
+            for (t0, a0), (t1, a1) in zip(obs, obs[1:]):
+                if t0 - 1e-9 <= t <= t1 + 1e-9:
+                    wgt = 0.0 if t1 == t0 else (t - t0) / (t1 - t0)
+                    pp = (1 - wgt) * np.asarray(a0["translation"]) + wgt * np.asarray(a1["translation"])
+                    return pp, near["size"], near["rotation"], near["grp"], int(near.get("visibility_token", 4))
+            a = obs[-1][1]
+            return (np.asarray(a["translation"]), a["size"], a["rotation"], a["grp"],
+                    int(a.get("visibility_token", 4)))
+
+        def gt_box2d(sdr, pp, size, rot):
+            from kf_nusc import quat_rot as _qr
+            wd, ln, ht = size
+            R = _qr(rot)
+            cor = np.array([[sx * ln / 2, sy * wd / 2, sz * ht / 2]
+                            for sx in (-1, 1) for sy in (-1, 1) for sz in (-1, 1)])
+            px, ok = world_to_px(np.asarray(pp)[None, :] + cor @ R.T, sdr, nusc)
+            if ok.sum() < 4:
+                return None
+            px = px[ok]
+            return float(px[:, 0].min()), float(px[:, 1].min()), float(px[:, 0].max()), float(px[:, 1].max())
 
         def gt_attr_at(inst, t):
             obs = gt[inst]
@@ -300,24 +332,54 @@ def main(scene_names, render, use_lidar=False):
             t_now = sd_rec["timestamp"] / 1e6
             img_path = os.path.join(DATA, sd_rec["filename"])
             _t0 = time.perf_counter()
-            res = model.track(img_path, persist=True, tracker="bytetrack.yaml",
-                              conf=0.1, verbose=False)[0]
-            _t1 = time.perf_counter()
             W, H = sd_rec.get("width", 1600), sd_rec.get("height", 900)
+            cands = []                                   # (tid, grp, bbox, gt_p, gt_size)
+            if det_mode == "yolo":
+                res = model.track(img_path, persist=True, tracker="bytetrack.yaml",
+                                  conf=0.1, verbose=False)[0]
+                for b in res.boxes:
+                    if b.id is None:
+                        continue
+                    grp = COCO2GRP.get(model.names[int(b.cls)])
+                    if grp is None:
+                        continue
+                    x0, y0, x1, y1 = [float(v) for v in b.xyxy[0]]
+                    if x0 < 4 or x1 > W - 4 or y1 > H - 4 or (y1 - y0) < 18:
+                        continue
+                    cands.append((int(b.id), grp, (x0, y0, x1, y1), None, None))
+            else:                                        # GT twins: same downstream, perfect association
+                for inst in gt:
+                    st = gt_full_at(inst, t_now)
+                    if st is None:
+                        continue
+                    pp, size, rot, grp, vis = st
+                    bb = gt_box2d(sd_rec, pp, size, rot)
+                    tid = _iid.setdefault(inst, len(_iid) + 1)
+                    if det_mode == "gtbox":              # a PERFECT DETECTOR: what one could see
+                        if vis < 2 or bb is None:
+                            continue
+                        x0 = max(bb[0], 0.0); y0 = max(bb[1], 0.0)
+                        x1 = min(bb[2], W - 1.0); y1 = min(bb[3], H - 1.0)
+                        if x0 < 4 or x1 > W - 4 or y1 > H - 4 or (y1 - y0) < 18:
+                            continue
+                        cands.append((tid, grp, (x0, y0, x1, y1), None, None))
+                    else:                                # gt3d: the omniscient oracle
+                        cands.append((tid, grp, bb, pp, size))
+            _t1 = time.perf_counter()
             seen = set()
-            for b in res.boxes:
-                if b.id is None:
-                    continue
-                grp = COCO2GRP.get(model.names[int(b.cls)])
-                if grp is None:
-                    continue
-                x0, y0, x1, y1 = [float(v) for v in b.xyxy[0]]
-                if x0 < 4 or x1 > W - 4 or y1 > H - 4 or (y1 - y0) < 18:
-                    continue
-                _w_pre = world.get(int(b.id))
-                g = lidar.locate((x0, y0, x1, y1), sd_rec, sd_rec["timestamp"]) if lidar else None
-                by_lidar = g is not None
-                if g is None:
+            for tid, grp, _bb, _gtp, _gtsz in cands:
+                if _bb is not None:
+                    x0, y0, x1, y1 = _bb
+                else:
+                    x0 = y0 = x1 = y1 = 0.0
+                _w_pre = world.get(tid)
+                if _gtp is not None:                  # gt3d: the oracle position, no sensing at all
+                    g = np.asarray(_gtp, float)
+                    by_lidar = False
+                elif True:
+                    g = lidar.locate((x0, y0, x1, y1), sd_rec, sd_rec["timestamp"]) if lidar else None
+                    by_lidar = g is not None
+                if _gtp is None and g is None:
                     # lidar dry (small far box / sparse returns) -> HEIGHT-PRIOR observation instead
                     # of flat-earth (whose slope bias parked #174's reborn capsule metres off) or
                     # blind coasting (whose stale velocity was the 88 m drift). Bearing exact, depth
@@ -332,6 +394,8 @@ def main(scene_names, render, use_lidar=False):
                 # prior) ranges the VISIBLE FACE; the GT/visual centre sits half a body deeper (diag:
                 # e_det flat at 2.2 m = half a car length -- the capsule looked pushed toward ego).
                 # Shift along the viewing ray by half the class extent, view-angle aware.
+                if _gtp is not None:
+                    z_grd = float(g[2]) - 0.5 * float(_gtsz[2])
                 _u = g[:2] - ego_xy
                 _u = _u / max(1e-6, float(np.linalg.norm(_u)))
                 if grp == "vehicle":
@@ -345,20 +409,24 @@ def main(scene_names, render, use_lidar=False):
                     _off = 0.5
                 else:
                     _off = 0.15
-                g = g + np.array([_u[0], _u[1], 0.0]) * _off
+                if _gtp is None:
+                    g = g + np.array([_u[0], _u[1], 0.0]) * _off
                 # the object's LOCAL ground height (cluster mid-body z minus half height). The data
                 # chain dropped flat-earth long ago but the DRAWING still painted rings at z=0 --
                 # on this road (true ground up to +1 m) that pushed every ring toward the ego.
-                _H0 = (_w_pre.get("H_cal") if _w_pre else None) or H_PRIOR[grp]
-                z_grd = float(g[2]) - 0.5 * _H0
+                if _gtp is None:
+                    _H0 = (_w_pre.get("H_cal") if _w_pre else None) or H_PRIOR[grp]
+                    z_grd = float(g[2]) - 0.5 * _H0
                 d_ego = float(np.linalg.norm(g[:2] - ego_xy))
                 if d_ego > RANGE_MAX:
                     continue
                 K_f = float(np.asarray(nusc.cs[sd_rec["calibrated_sensor_token"]]["camera_intrinsic"])[0][0])
                 lo_r, hi_r = R_CLAMP[grp]
-                ext_px = 0.62 * (y1 - y0) if grp == "vehicle" else 0.5 * (x1 - x0)
-                r_det = float(np.clip(ext_px * d_ego / K_f, lo_r, hi_r))
-                tid = int(b.id)
+                if _gtsz is not None:
+                    r_det = float(np.clip(0.5 * float(_gtsz[0]), lo_r, hi_r))   # GT half-width
+                else:
+                    ext_px = 0.62 * (y1 - y0) if grp == "vehicle" else 0.5 * (x1 - x0)
+                    r_det = float(np.clip(ext_px * d_ego / K_f, lo_r, hi_r))
                 w = world.get(tid)
                 if w is None:
                     w = world[tid] = {"trk": MoverTracker(dt=0.083, meas_noise=0.5),
@@ -368,7 +436,7 @@ def main(scene_names, render, use_lidar=False):
                     # q_jerk 0.5 was the MONOCULAR smoother (fat R, slow targets). On the lidar face
                     # it just adds manoeuvre lag -- keep the production 2.0 there.
                     for _ax in (w["trk"].fx, w["trk"].fy):
-                        _ax.q_jerk = 2.0 if lidar else Q_JERK_FACE
+                        _ax.q_jerk = 2.0 if (lidar or det_mode == "gt3d") else Q_JERK_FACE
                         _ax.F, _ax.Q = _ax._mats(_ax.dt)
                 trk = w["trk"]
                 # SOURCE-STEP RE-INIT: a track born on flat-earth obs carries metre-level bias AND a
@@ -381,7 +449,8 @@ def main(scene_names, render, use_lidar=False):
                         _ax.F, _ax.Q = _ax._mats(_ax.dt)
                     w["latch"] = MotionLatch(grp)
                     w["t_last"] = None; w["hist"] = []; w["v_feed"] = np.zeros(2)
-                sig = (0.15 + 0.01 * d_ego) if by_lidar else (0.4 + 0.12 * d_ego)  # laser tight, h-prior ~10%/m
+                sig = (0.05 if _gtp is not None else
+                       (0.15 + 0.01 * d_ego) if by_lidar else (0.4 + 0.12 * d_ego))
                 trk.fx.R = trk.fy.R = sig * sig
                 det = np.array([g[0], g[1], z_grd])
                 # INNOVATION GATE vs the KF's CURRENT prediction (incl. coast), threshold carrying
@@ -406,8 +475,9 @@ def main(scene_names, render, use_lidar=False):
                     trk.update(det)
                 else:
                     trk.update(det, dt=max(1e-3, t_now - w["t_last"]))
-                w["src"] = "lidar" if by_lidar else "hprior"
-                w["t_last"] = t_now; w["hist"].append(det); w["bbox"] = (x0, y0, x1, y1)
+                w["src"] = "gt3d" if _gtp is not None else ("lidar" if by_lidar else "hprior")
+                w["t_last"] = t_now; w["hist"].append(det)
+                w["bbox"] = (x0, y0, x1, y1) if _bb is not None else None
                 w["r_obs"] = (1 - R_EMA) * w["r_obs"] + R_EMA * r_det
                 w["latch"].add(t_now, det[:2], sig)
                 if by_lidar:
@@ -565,17 +635,19 @@ def main(scene_names, render, use_lidar=False):
                             cv2.line(img, tuple(p0), tuple(p1), col[w["grp"]], 2, cv2.LINE_AA)
                         if len(pts):
                             cv2.circle(img, tuple(pts[-1]), 5, col[w["grp"]], -1, cv2.LINE_AA)
-                cv2.putText(img, f"{scene['name']} YOLO26s+ByteTrack@12Hz -> KF | x=centre ring=1sig arrow=v*1s grey=FRZ cyan=THIN capsule (deployed size, illustrative)", (16, 40),
+                _src_tag = {"yolo": "YOLO26s+ByteTrack@12Hz", "gtbox": "GT-BBOX (perfect detector, same chain)",
+                            "gt3d": "GT-3D ORACLE"}[det_mode]
+                cv2.putText(img, f"{scene['name']} {_src_tag} -> KF | x=centre ring=1sig arrow=v*1s grey=FRZ cyan=THIN capsule", (16, 40),
                             cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 255, 255), 2, cv2.LINE_AA)
                 if vw is None:
-                    vw = cv2.VideoWriter(os.path.join(out_dir, f"byte_{scene['name']}.mp4"),
+                    vw = cv2.VideoWriter(os.path.join(out_dir, f"{pfx}_{scene['name']}.mp4"),
                                          cv2.VideoWriter_fourcc(*"mp4v"), 12,
                                          (img.shape[1], img.shape[0]))
                 vw.write(img)
                 _bt["draw"] += time.perf_counter() - _t2
         if vw is not None:
             vw.release()
-            print("wrote", os.path.join(out_dir, f"byte_{scene['name']}.mp4"))
+            print("wrote", os.path.join(out_dir, f"{pfx}_{scene['name']}.mp4"))
         if os.environ.get("BENCH") == "1" and _bt["n"]:
             n = _bt["n"]
             tot = _bt["yolo"] + _bt["ours"] + (_bt["draw"] if render else 0.0)
@@ -626,5 +698,7 @@ if __name__ == "__main__":
     ap.add_argument("--all", action="store_true")
     ap.add_argument("--no_render", action="store_true")
     ap.add_argument("--lidar", action="store_true", help="bbox depth from LIDAR_TOP (nearest cluster) instead of flat-ground back-projection")
+    ap.add_argument("--det", type=str, default="yolo", choices=["yolo", "gtbox", "gt3d"],
+                    help="detection source: yolo | gtbox (GT boxes, same sensing chain) | gt3d (oracle)")
     args = ap.parse_args()
-    main(None if args.all else set(args.scenes.split(",")), not args.no_render, args.lidar)
+    main(None if args.all else set(args.scenes.split(",")), not args.no_render, args.lidar, args.det)
