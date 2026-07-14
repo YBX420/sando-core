@@ -217,6 +217,10 @@ def main(scene_names, render, use_lidar=False):
     from ultralytics import YOLO
     nusc = Nusc()
     lidar = LidarDepth(nusc) if use_lidar else None
+    # gate must match estimation quality (the tdyn law): with lidar R but production q_jerk=2.0 the
+    # sigma_v floor sits just above 0.5, and the [0.5,1.0) shadow bucket BEATS still (ped 2.02/0.83
+    # vs 2.49/2.47, veh mean 4.07 vs 7.61 @2s) -> the lidar face earns a 1.0 gate. Monocular keeps 0.5.
+    sigv_gate = {k: (1.0 if use_lidar else v) for k, v in SIGV_YOUNG.items()}
     out_dir = os.path.join(_HERE, "out")
     os.makedirs(out_dir, exist_ok=True)
     # ALL CAM_FRONT records (sweeps + keyframes) grouped per scene, time-ordered
@@ -292,6 +296,12 @@ def main(scene_names, render, use_lidar=False):
                 g = lidar.locate((x0, y0, x1, y1), sd_rec, sd_rec["timestamp"]) if lidar else None
                 by_lidar = g is not None
                 if g is None:
+                    # NEVER feed a lidar-raised track flat-earth points: their metre-level bias DRAGS
+                    # the KF off the object every no-point frame (the capsule-drift bug). Coast instead.
+                    _w0 = world.get(int(b.id))
+                    if _w0 is not None and _w0.get("n_lidar", 0) >= 3:
+                        _w0["bbox"] = (x0, y0, x1, y1); seen.add(int(b.id))
+                        continue
                     g = px_to_ground(((x0 + x1) / 2.0, y1), sd_rec, nusc)   # flat-earth fallback
                 if g is None:
                     continue
@@ -309,9 +319,11 @@ def main(scene_names, render, use_lidar=False):
                     w = world[tid] = {"trk": MoverTracker(dt=0.083, meas_noise=0.5),
                                       "t_last": None, "grp": grp, "hist": [], "bbox": None,
                                       "latch": MotionLatch(grp), "r_obs": r_det,
-                                      "v_feed": np.zeros(2)}
-                    for _ax in (w["trk"].fx, w["trk"].fy):        # real-data face process noise
-                        _ax.q_jerk = Q_JERK_FACE
+                                      "v_feed": np.zeros(2), "n_lidar": 0}
+                    # q_jerk 0.5 was the MONOCULAR smoother (fat R, slow targets). On the lidar face
+                    # it just adds manoeuvre lag -- keep the production 2.0 there.
+                    for _ax in (w["trk"].fx, w["trk"].fy):
+                        _ax.q_jerk = 2.0 if lidar else Q_JERK_FACE
                         _ax.F, _ax.Q = _ax._mats(_ax.dt)
                 trk = w["trk"]
                 sig = (0.15 + 0.01 * d_ego) if by_lidar else SIG_RANGE(d_ego)   # laser is honestly tight
@@ -334,7 +346,16 @@ def main(scene_names, render, use_lidar=False):
                 w["t_last"] = t_now; w["hist"].append(det); w["bbox"] = (x0, y0, x1, y1)
                 w["r_obs"] = (1 - R_EMA) * w["r_obs"] + R_EMA * r_det
                 w["latch"].add(t_now, det[:2], sig)
-                v_raw = w["latch"].vel_win if w["latch"].state == "MOVING" else np.zeros(2)
+                if by_lidar:
+                    w["n_lidar"] = w.get("n_lidar", 0) + 1
+                # planner-feed velocity: once sigma_v passes the production gate the KF's OWN velocity
+                # is the freshest trustworthy source (the latch window velocity is ~1 s stale by
+                # construction -- monocular-era medicine, the capsule-lag bug). Gate closed -> latch.
+                if trk.ready and trk.sigma_v <= sigv_gate[grp]:
+                    _c0, _v, _ = trk.state()
+                    v_raw = _v[:2]
+                else:
+                    v_raw = w["latch"].vel_win if w["latch"].state == "MOVING" else np.zeros(2)
                 w["v_feed"] = (1 - VFEED_EMA) * w["v_feed"] + VFEED_EMA * np.asarray(v_raw[:2], float)
                 seen.add(tid)
             for tid, w in list(world.items()):
@@ -389,7 +410,7 @@ def main(scene_names, render, use_lidar=False):
                     if tid not in seen:
                         continue
                     trk = w["trk"]
-                    frz = (not trk.ready) or trk.sigma_v > SIGV_YOUNG[w["grp"]]
+                    frz = (not trk.ready) or trk.sigma_v > sigv_gate[w["grp"]]
                     # colour hysteresis only -- everything drawn below IS the data (smoothing now
                     # lives in the data itself: Q_JERK_FACE in the KF + v_feed for the planner side).
                     D = w.setdefault("draw", {"frz": frz, "nflip": 0})
