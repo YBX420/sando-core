@@ -499,6 +499,7 @@ def main(scene_names, render, use_lidar=False, det_mode="yolo", use_seg=False):
                 w["src"] = "gt3d" if _gtp is not None else ("lidar" if by_lidar else "hprior")
                 w["t_last"] = t_now; w["hist"].append(det)
                 w["bbox"] = (x0, y0, x1, y1) if _bb is not None else None
+                w["msk"] = _msk
                 w["r_obs"] = (1 - R_EMA) * w["r_obs"] + R_EMA * r_det
                 w["latch"].add(t_now, det[:2], sig)
                 if by_lidar:
@@ -595,6 +596,16 @@ def main(scene_names, render, use_lidar=False, det_mode="yolo", use_seg=False):
                 for tid, w in world.items():
                     if tid not in seen:
                         continue
+                    if w.get("msk") is not None:          # the instance silhouette that SELECTS the points
+                        bm, mx0, my0 = w["msk"]
+                        x0i, y0i = max(0, int(mx0)), max(0, int(my0))
+                        y1i = min(img.shape[0], y0i + bm.shape[0])
+                        x1i = min(img.shape[1], x0i + bm.shape[1])
+                        if y1i > y0i and x1i > x0i:
+                            sub = bm[:y1i - y0i, :x1i - x0i] > 0
+                            roi = img[y0i:y1i, x0i:x1i]
+                            cc = np.array(col[w["grp"]], np.float32)
+                            roi[sub] = (0.55 * roi[sub] + 0.45 * cc).astype(np.uint8)
                     trk = w["trk"]
                     frz = (not trk.ready) or trk.sigma_v > sigv_gate[w["grp"]]
                     # colour hysteresis only -- everything drawn below IS the data (smoothing now
@@ -656,7 +667,8 @@ def main(scene_names, render, use_lidar=False, det_mode="yolo", use_seg=False):
                             cv2.line(img, tuple(p0), tuple(p1), col[w["grp"]], 2, cv2.LINE_AA)
                         if len(pts):
                             cv2.circle(img, tuple(pts[-1]), 5, col[w["grp"]], -1, cv2.LINE_AA)
-                _src_tag = {"yolo": "YOLO26s+ByteTrack@12Hz", "gtbox": "GT-BBOX (perfect detector, same chain)",
+                _src_tag = {"yolo": ("YOLO11s-SEG+ByteTrack@12Hz mask-select" if use_seg else "YOLO26s+ByteTrack@12Hz"),
+                            "gtbox": "GT-BBOX (perfect detector, same chain)",
                             "gt3d": "GT-3D ORACLE"}[det_mode]
                 cv2.putText(img, f"{scene['name']} {_src_tag} -> KF | x=centre ring=1sig arrow=v*1s grey=FRZ cyan=THIN capsule", (16, 40),
                             cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 255, 255), 2, cv2.LINE_AA)
