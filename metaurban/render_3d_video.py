@@ -855,6 +855,7 @@ def _kf_movers_realistic(p_d, t_sim, cam_heading):
     tick (MAN_COLLDBG, slip) must not advance the stateful front-end twice.
     v1 honesty note: occluders are the MOVER cylinders only; static buildings do not occlude yet."""
     global _KF_PRED
+    _PD_NOW[0] = np.asarray(p_d, float)
     if _PFE_MEMO["t"] == t_sim:
         _KF_PRED = _PFE_MEMO["pred"]
         return _PFE_MEMO["out"]
@@ -911,6 +912,11 @@ def _kf_movers_realistic(p_d, t_sim, cam_heading):
                 continue
             zc = 0.5 * float(h)
             trk = _GTXY_TRK.get(oid)
+            # TELEPORT GATE: MetaUrban despawns/respawns crowd and REUSES oids -- a 185 m single-tick
+            # jump fed the KF a 1856 m/s velocity (XYDBG probe). A respawn is a NEW person: re-init.
+            if trk is not None and trk.fx.x is not None:
+                if float(np.hypot(trk.fx.x[0] - p2[0], trk.fy.x[0] - p2[1])) > 3.0:
+                    trk = None
             if trk is None:
                 trk = _GTXY_TRK[oid] = MoverTracker(dt=REPLAN_DT, meas_noise=KF_MEAS_NOISE)
             trk.update((float(p2[0]), float(p2[1]), zc))
@@ -938,6 +944,10 @@ def _kf_movers_realistic(p_d, t_sim, cam_heading):
                     kv = np.zeros(3)
                     pred = np.asarray([kc0, kc0])
             _ELL_TRK[oid] = (int(trk.n), False, str(cls))
+            if KFDBG and cls == "pedestrian":
+                print(f"[XYDBG] t={t_sim:6.2f} {oid} gtv=({v2[0]:6.2f},{v2[1]:6.2f}) "
+                      f"kfv=({kv[0]:6.2f},{kv[1]:6.2f}) verr={float(np.hypot(kv[0]-v2[0], kv[1]-v2[1])):5.2f} "
+                      f"sv={trk.sigma_v:4.2f} n={trk.n}", flush=True)
             out.append((oid, kc0, (float(kv[0]), float(kv[1]), 0.0), float(r),
                         EGO_PERCLASS_DSAFE.get(cls, 0.8)))
             _KF_PRED.append((p2.copy(), np.asarray(kc0[:2], float).copy(),
@@ -1318,6 +1328,7 @@ def _tau_now():
 
 
 _VD_NOW = [np.zeros(3)]   # drone velocity this tick (set in ego_maneuver_replan; drawing-side TTC reads)
+_PD_NOW = [np.zeros(3)]   # drone position this tick (CAP_MEET's encounter-scale needs it at draw time)
 
 
 def _pred_tend(kc0, kv, p_d):
@@ -1391,9 +1402,28 @@ def _cap_of_mover(oid, vel, r_obs):
     return (q6, veff6 + sp / (2.0 * max(_CAP_K - 1, 1)), _CAP_K, rear)
 
 
+CAP_MEET = os.environ.get("EGO_CAP_MEET", "0") == "1"   # capsule tip reaches the ENCOUNTER point (塔菲大人
+#   2026-07-15). UNLIKE the negative-booked EGO_TAU_DYN (which lengthened the CERT WINDOW, so the s=0
+#   "he might stop" pearl froze the mover's spot for the whole window and killed candidates), this only
+#   stretches the SWEPT TIP: window stays 0.75s, the fed velocity is scaled by t_enc/tau so the keep-out
+#   spans [mover's back, meet point]. The pearl chain covers all speeds 0..v' -- a SUPERSET of the true
+#   motion = conservative, soundness intact. Effect to test: routes divert around the meet corridor
+#   EARLY (spatially) instead of driving at it and yielding late.
+
+
+def _cap_meet_scale(kc0, kv, p_d):
+    """t_enc/tau velocity scale for CAP_MEET: encounter-time horizon via the same CPA law as the
+    forecast drawing (_pred_tend), >=1, capped by the 3s prediction trust."""
+    tau = _tau_now()
+    t_enc = float(_pred_tend(np.asarray(kc0, float), np.asarray(kv, float), np.asarray(p_d, float)))
+    return max(1.0, min(t_enc, 3.0) / max(tau, 1e-3))
+
+
 def _cap_ring(oid, kc0, vel, r_obs):
     """Ground outline of the deployed capsule at the trust-window tip: stadium from the mover's
     BACK cap (around c0) to the KF apex cap (around c0 + v*tau). Drawn on the CAPSULE arm."""
+    if CAP_MEET:
+        vel = np.asarray(vel, float) * _cap_meet_scale(kc0, vel, _PD_NOW[0])   # tip -> meet point
     c = _cap_of_mover(oid, vel, r_obs)
     if c is None:
         return None
@@ -1925,7 +1955,10 @@ def ego_maneuver_replan(p_d, v_d, a_d, cur_wp, t_sim):
                 _k5, _ux5, _uy5, _rw5, q_c, veff_c = _e7
                 if _k5 > 1.0 + 1e-9:
                     tag7 = ((_k5, _ux5, _uy5, _rw5),)
-            _cyl.append((np.asarray(c3, float), np.array([float(vel[0]), float(vel[1]), 0.0]),
+            _v_fed = np.array([float(vel[0]), float(vel[1]), 0.0])
+            if CAP_MEET and _c7 is not None:
+                _v_fed = _v_fed * _cap_meet_scale(c3, _v_fed, p_d)   # tip -> meet point (conservative superset)
+            _cyl.append((np.asarray(c3, float), _v_fed,
                          np.zeros(3), r_obs + MAN_DSAFE + q_c + MAN_TRACK,
                          2.0 * float(c3[2]) + MAN_REACH_PAD + MAN_DSAFE_V + q_c + MAN_TRACK, veff_c)
                         + tag7)
