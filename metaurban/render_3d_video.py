@@ -209,7 +209,12 @@ def plan_route(lap_idx):
     waypoints (movers first => crossing at crosswalks), order them along their principal axis, then
     extend a start/goal before & after for length. Guarantees the drone flies through the crowd, with
     a different (random) start & route each lap. Returns (route3 [start, wp..., goal], dir, left)."""
-    rng = random.Random(args.seed * 1000 + lap_idx)
+    # per-seed route RE-ROLL salt (scene-pool purge 2026-07-14): seeds whose auto-route is terminally
+    # broken get a fresh anchor/direction draw. s1 freezes 17m short of goal at z=3.7 against a big
+    # static; s11's route start lands ~150m from the actual drone spawn. Goal nudges (+5m) tested on
+    # both: still reached=False -> the ROUTE is the disease, not the goal placement.
+    _ROUTE_SALT = {1: 1, 11: 2}
+    rng = random.Random(args.seed * 1000 + lap_idx + _ROUTE_SALT.get(args.seed, 0))
     objs = native_objects()
     peds = [p for (_, c, p, _, _) in objs if c == "pedestrian"]
     movers = [p for (_, c, p, v, _) in objs if c == "pedestrian" and np.linalg.norm(v) > 0.2]  # crossing => crosswalk
