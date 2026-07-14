@@ -89,14 +89,24 @@ class LidarDepth:
         self._cache = (rec["token"], pw)
         return pw
 
-    def locate(self, bbox, sd_rec, t_us):
-        """Median world-xy of the nearest lidar cluster inside the (shrunk) bbox, or None."""
+    def locate(self, bbox, sd_rec, t_us, mask=None):
+        """Median world-xy of the nearest lidar cluster inside the (shrunk) bbox, or None.
+        mask: optional (bitmap, x0, y0) instance mask -- points must fall ON the object's silhouette
+        instead of merely inside the rectangle (kills occluder/background/neighbour contamination)."""
         pw = self.world_cloud(t_us)
         px, z = world_to_cam(pw, sd_rec, self.nusc)
         x0, y0, x1, y1 = bbox
         cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
         hw, hh = 0.375 * (x1 - x0), 0.4 * (y1 - y0)      # shrink 25/20% against edge bleed
         m = ((z > 1.0) & (z < 60.0) & (np.abs(px[:, 0] - cx) < hw) & (np.abs(px[:, 1] - cy) < hh))
+        if mask is not None and m.any():
+            bm, mx0, my0 = mask
+            iy = np.clip((px[m, 1] - my0).astype(int), 0, bm.shape[0] - 1)
+            ix = np.clip((px[m, 0] - mx0).astype(int), 0, bm.shape[1] - 1)
+            keep = bm[iy, ix] > 0
+            mm = m.copy(); mm[m] = keep
+            if mm.sum() >= 3:
+                m = mm                                     # fall back to the window if mask too sparse
         if m.sum() < 3:
             return None
         zz = z[m]
@@ -233,13 +243,16 @@ class MotionLatch:
         return (pts * w[:, None]).sum(axis=0) / w.sum()
 
 
-def main(scene_names, render, use_lidar=False, det_mode="yolo"):
+SEG_W = "/media/boxuan/Data2/projects/cvmusecore/yolo11s-seg.pt"
+
+
+def main(scene_names, render, use_lidar=False, det_mode="yolo", use_seg=False):
     """det_mode: yolo (real detector) | gtbox (GT boxes projected to 2D, SAME sensing chain) |
     gt3d (oracle GT centres straight into the same KF/latch/capsule downstream)."""
     import cv2
     if det_mode == "yolo":
         from ultralytics import YOLO
-    pfx = {"yolo": "byte", "gtbox": "gtbbx", "gt3d": "gt"}[det_mode]
+    pfx = {"yolo": ("seg" if use_seg else "byte"), "gtbox": "gtbbx", "gt3d": "gt"}[det_mode]
     nusc = Nusc()
     lidar = LidarDepth(nusc) if use_lidar else None
     # gate must match estimation quality (the tdyn law): with lidar R but production q_jerk=2.0 the
@@ -272,7 +285,7 @@ def main(scene_names, render, use_lidar=False, det_mode="yolo"):
     for scene in nusc.scene:
         if scene_names and scene["name"] not in scene_names:
             continue
-        model = YOLO(WEIGHTS) if det_mode == "yolo" else None   # fresh model = fresh ByteTrack state
+        model = YOLO(SEG_W if use_seg else WEIGHTS) if det_mode == "yolo" else None
         chain = nusc.sample_chain(scene)
         ts_key = {s["token"]: s["timestamp"] / 1e6 for s in chain}
         gt = {}
@@ -337,7 +350,7 @@ def main(scene_names, render, use_lidar=False, det_mode="yolo"):
             if det_mode == "yolo":
                 res = model.track(img_path, persist=True, tracker="bytetrack.yaml",
                                   conf=0.1, verbose=False)[0]
-                for b in res.boxes:
+                for bi, b in enumerate(res.boxes):
                     if b.id is None:
                         continue
                     grp = COCO2GRP.get(model.names[int(b.cls)])
@@ -346,7 +359,15 @@ def main(scene_names, render, use_lidar=False, det_mode="yolo"):
                     x0, y0, x1, y1 = [float(v) for v in b.xyxy[0]]
                     if x0 < 4 or x1 > W - 4 or y1 > H - 4 or (y1 - y0) < 18:
                         continue
-                    cands.append((int(b.id), grp, (x0, y0, x1, y1), None, None))
+                    msk = None
+                    if use_seg and res.masks is not None and bi < len(res.masks.xy):
+                        poly = res.masks.xy[bi]
+                        if poly is not None and len(poly):
+                            bw, bh = int(x1 - x0) + 2, int(y1 - y0) + 2
+                            bm = np.zeros((bh, bw), np.uint8)
+                            cv2.fillPoly(bm, [np.round(poly - [x0, y0]).astype(np.int32)], 1)
+                            msk = (bm, x0, y0)
+                    cands.append((int(b.id), grp, (x0, y0, x1, y1), None, None, msk))
             else:                                        # GT twins: same downstream, perfect association
                 for inst in gt:
                     st = gt_full_at(inst, t_now)
@@ -362,12 +383,12 @@ def main(scene_names, render, use_lidar=False, det_mode="yolo"):
                         x1 = min(bb[2], W - 1.0); y1 = min(bb[3], H - 1.0)
                         if x0 < 4 or x1 > W - 4 or y1 > H - 4 or (y1 - y0) < 18:
                             continue
-                        cands.append((tid, grp, (x0, y0, x1, y1), None, None))
+                        cands.append((tid, grp, (x0, y0, x1, y1), None, None, None))
                     else:                                # gt3d: the omniscient oracle
-                        cands.append((tid, grp, bb, pp, size))
+                        cands.append((tid, grp, bb, pp, size, None))
             _t1 = time.perf_counter()
             seen = set()
-            for tid, grp, _bb, _gtp, _gtsz in cands:
+            for tid, grp, _bb, _gtp, _gtsz, _msk in cands:
                 if _bb is not None:
                     x0, y0, x1, y1 = _bb
                 else:
@@ -377,7 +398,7 @@ def main(scene_names, render, use_lidar=False, det_mode="yolo"):
                     g = np.asarray(_gtp, float)
                     by_lidar = False
                 elif True:
-                    g = lidar.locate((x0, y0, x1, y1), sd_rec, sd_rec["timestamp"]) if lidar else None
+                    g = lidar.locate((x0, y0, x1, y1), sd_rec, sd_rec["timestamp"], mask=_msk) if lidar else None
                     by_lidar = g is not None
                 if _gtp is None and g is None:
                     # lidar dry (small far box / sparse returns) -> HEIGHT-PRIOR observation instead
@@ -700,5 +721,6 @@ if __name__ == "__main__":
     ap.add_argument("--lidar", action="store_true", help="bbox depth from LIDAR_TOP (nearest cluster) instead of flat-ground back-projection")
     ap.add_argument("--det", type=str, default="yolo", choices=["yolo", "gtbox", "gt3d"],
                     help="detection source: yolo | gtbox (GT boxes, same sensing chain) | gt3d (oracle)")
+    ap.add_argument("--seg", action="store_true", help="yolo11s-seg instance masks select the lidar points (silhouette instead of rectangle)")
     args = ap.parse_args()
-    main(None if args.all else set(args.scenes.split(",")), not args.no_render, args.lidar, args.det)
+    main(None if args.all else set(args.scenes.split(",")), not args.no_render, args.lidar, args.det, args.seg)
