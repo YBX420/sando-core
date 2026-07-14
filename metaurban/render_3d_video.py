@@ -243,6 +243,11 @@ def plan_route(lap_idx):
         for _ in range(40):
             if float(np.linalg.norm(_pt - _anchor)) <= _map_r: break
             _pt += d * _sgn * 2.0
+    # per-seed route surgery (塔菲大人 2026-07-14): seed23's auto-goal lands in a static pocket
+    # (oracle arm 18.5s / clr 0.53 / 68 holds) -> bake its goal 5m further along the route axis, for
+    # every arm/run of that seed. Applied BEFORE the static-clear nudge so the bbox fallback still holds.
+    _GOAL_FIX = {23: 5.0}
+    goal_xy = goal_xy + d * _GOAL_FIX.get(args.seed, 0.0)
     for _ in range(30):                                      # nudge inward (toward the crowd) until clear
         if _clear(start_xy): break
         start_xy = start_xy + d * 2.0
