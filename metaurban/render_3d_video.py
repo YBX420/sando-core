@@ -85,21 +85,27 @@ ap.add_argument("--no_crowd", action="store_true",
                 help="minimal native crowd (deterministic benchmark: scripted movers only; ORCA needs >=1 human)")
 args = ap.parse_args()
 if os.environ.get("ORACLE_THIN", "0") == "1":
-    # one-switch oracle-thin arm (gt_thin twin on the render face): omniscient perception + near-zero
-    # tube + small standoff + time-aware EGO. The thin tube is ONLY sound with zero estimation error,
-    # so this flag FORCES GT_ORACLE=1 -- never combine the thin calib with the KF arm by hand.
+    # one-switch oracle-thin arm (gt_thin twin on the render face): omniscient perception + the THIN
+    # sizing pack + the long meet-point lead (exact velocity earns the 1.5s reach; seed7 8.5 -> 7.4s).
     os.environ["GT_ORACLE"] = "1"
-    os.environ.setdefault("EGO_TDYN", "1")
-    os.environ.setdefault("EGO_TDYN_PAD", "0.2")
-    os.environ.setdefault("EGO_MANDSAFE", "0.15")
-    os.environ.setdefault("EGO_PLANHI", "1.5")  # exact velocity -> the meet-point lead can reach 1.5s out
-    #   (seed7: 8.5 -> 7.4s, min_clr 1.72 -> 1.97, switches 4 -> 2). KF arm stays at 0.7: leading a NOISY
-    #   velocity 1.5s out plants the footprint wrong (11.0s vs 10.6, churn up) -- lead length must match
-    #   estimation quality.
+    os.environ.setdefault("THIN", "1")
+    os.environ.setdefault("EGO_PLANHI", "1.5")
     # EGO_TAU_DYN deliberately NOT defaulted on: encounter-time cert windows tested WORSE on seed7
     # (0.75s fixed 8.4s / 1.25s cap 8.8s / 2.5s cap 10.6s + 3s wake-crawl) -- the s=0 "he might stop"
     # pearl freezes the mover's current spot for the WHOLE window, so a longer window kills the
     # around candidates it was meant to enable. See FLAGS.md.
+if os.environ.get("THIN", "0") == "1":
+    # SIZING pack only (works on the KF arm too, 塔菲大人 2026-07-14: same capsule as the omniscient
+    # arm, only the estimator differs): near-zero tube + small standoff + time-aware EGO. HONESTY NOTE:
+    # the thin tube carries no estimation-error budget -- on the KF arm the young-track gate (default
+    # 0.5 here) is what keeps garbage tracks from flying the drone into the unbudgeted margin; report
+    # measured clearances, never claim conformal coverage on this arm.
+    os.environ.setdefault("EGO_TDYN", "1")
+    os.environ.setdefault("EGO_TDYN_PAD", "0.2")
+    os.environ.setdefault("EGO_MANDSAFE", "0.15")
+    os.environ.setdefault("CALIB_FILE_V6", os.path.join(os.path.dirname(_HERE), "out", "conformal", "calib_v6_thin.json"))
+    if os.environ.get("GT_ORACLE", "0") != "1":
+        os.environ.setdefault("KF_SIGV_YOUNG", "0.5")
     os.environ.setdefault("CALIB_FILE_V6", os.path.join(os.path.dirname(_HERE), "out", "conformal", "calib_v6_thin.json"))
 if args.maneuver:
     args.ego = True; args.ego_safe = False   # the no-HOLD tournament REPLACES the ego_safe HOLD wrapper
@@ -824,6 +830,7 @@ _PFE_MEMO = {"t": None, "out": None, "pred": None}
 _GT_VELFD = {}   # GT oid -> (last_pos2, last_t): finite-diff true velocity (engine o.velocity is 0 for humanoids)
 _ORA_MAP = {}    # track id -> GT oid matched while detected (oracle's omniscient coast during miss ticks)
 _LASTDET = {}    # track id -> last DETECTED xy (young-gate freeze anchor; tr.xy gets overwritten by coast)
+_YGATE = {}      # track id -> frozen? (young-gate HYSTERESIS state; no per-tick threshold flicker)
 
 
 def _kf_movers_realistic(p_d, t_sim, cam_heading):
@@ -899,15 +906,26 @@ def _kf_movers_realistic(p_d, t_sim, cam_heading):
             kv = np.zeros(3); pred = np.asarray([kc0, kc0])
         if tr.miss == 0:
             _LASTDET[tr.id] = np.asarray(tr.xy[:2], float).copy()
-        if KF_SIGV_YOUNG > 0 and tr.trk.ready and tr.trk.sigma_v > KF_SIGV_YOUNG:
+        if KF_SIGV_YOUNG > 0 and tr.trk.ready:
             # YOUNG-TRACK honesty gate: two position obs 0.1s apart physically cannot know velocity
             # better than ~1 m/s (two-point == Bayes under a diffuse prior; verified Monte-Carlo).
             # Until sigma_v converges, the honest law is FROZEN AT THE LAST DETECTION -- kills both
             # the wrong-way ghost (garbage init velocity) and the coast drift (CA integrating it;
             # tr.xy follows the coasted drift, so anchor on the stashed detection, not tr.xy).
-            kc0 = p3(_LASTDET.get(tr.id, tr.xy[:2]), zc)
-            kv = np.zeros(3)
-            pred = np.asarray([kc0, kc0])
+            # HYSTERESIS (jitter fix): sigma_v converges to ~0.41 at 4 obs but 2 missed ticks push it
+            # back over 0.5 -> a bare threshold flips the keep-out frozen<->moving every few ticks and
+            # the replans chatter. Release below 0.9x gate, re-freeze only above 1.6x (~5 misses).
+            _fz = _YGATE.get(tr.id, True)
+            _sv = tr.trk.sigma_v
+            if _fz and _sv < KF_SIGV_YOUNG * 0.9:
+                _fz = False
+            elif not _fz and _sv > KF_SIGV_YOUNG * 1.6:
+                _fz = True
+            _YGATE[tr.id] = _fz
+            if _fz:
+                kc0 = p3(_LASTDET.get(tr.id, tr.xy[:2]), zc)
+                kv = np.zeros(3)
+                pred = np.asarray([kc0, kc0])
         if GT_ORACLE or KFDBG:                              # nearest-GT association (track ids are NOT GT ids)
             gt = min(gtl, key=lambda g: float(np.hypot(*(g[1] - kc0[:2])))) if gtl else None
             gt_d = float(np.hypot(*(gt[1] - kc0[:2]))) if gt is not None else 1e9
