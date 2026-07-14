@@ -1580,6 +1580,92 @@ def _man_cloud(p_d, heading, t_sim, movers):
     return np.concatenate([p for p in pts if len(p)], axis=0)
 
 
+MAN_GAPSPEED = os.environ.get("EGO_GAPSPEED", "0") == "1"   # gap-acceptance speed law (塔菲大人 2026-07-14):
+#   *** BOOKED NEGATIVE x2 on seed7, keep OFF *** v1 (3s horizon, free override): 17.3s vs 9.9 -- yielding
+#   to conflicts beyond the commit scale = the hesitation loop at larger scale. v2 (anti-hesitation only,
+#   faster-than-v2 proposals, 1.5s horizon): KF 9.7s but clr 1.44->0.60 + jerk 35->45 (the sprint is
+#   certified with the thinner SLIP standoffs, not this arm's capsule margins -- time bought with
+#   clearance); GT_XY 8.6 vs 8.3 = loss even with perfect obs. A real revival must certify the sprint
+#   against the SAME conformal capsule the tournament uses, and probably live INSIDE maneuver_decide_v2.
+#   SOLVE the speed from the KF predictions instead of trying gears. Per mover, the predicted occupancy of
+#   each point on the committed path is a time window [t0,t1]; flying the path at warp s reaches that point
+#   at u/s, so collision <=> s in [u/t1, u/t0] = a FORBIDDEN interval on the speed axis. Union them, take
+#   the FASTEST feasible s under the kinodynamic cap: if the pass-AHEAD band is reachable it wins (no
+#   hesitation); if it needs more speed than the cap allows, the max feasible drops into the yield-BEHIND
+#   band automatically -- one max() implements both branches. The pearl-chain cert then JUDGES the chosen
+#   warp (ego_slip_feasible, sound re-timing); the solver only decides. Fixes the hesitation loop: discrete
+#   down-only gears made slowing postpone the encounter and lengthen the path overlap.
+MAN_GAP_SMAX = float(os.environ.get("EGO_GAP_SMAX", "1.6"))    # sprint ceiling (still kinodynamically capped)
+MAN_GAP_TPRED = float(os.environ.get("EGO_GAP_TPRED", "1.5"))  # decision horizon. v1=3.0 booked NEGATIVE
+#   (seed7 17.3s vs 9.9): the plan re-commits every 0.1s with a 0.75s trust window, so yielding to
+#   conflicts 3s out means slowing for futures that replanning would dissolve -- the hesitation loop
+#   reborn at a larger scale. Keep the decision horizon at the commitment scale (tau+lead).
+MAN_GAP_SMIN = float(os.environ.get("EGO_GAP_SMIN", "0.05"))   # never commit below this (near-hover = wait)
+
+
+def _gap_speed_candidates(p_d, t_sim):
+    """Feasible speed-warp candidates for the COMMITTED trajectory, fastest first, from the forbidden-
+    interval construction above. Returns [] when no mover conflicts (keep the incumbent gear)."""
+    dur = ego.duration()
+    if dur <= 1e-3:
+        return []
+    body = float(par.drone_radius)
+    rows = [(u, ego.eval(u)) for u in np.linspace(0.0, dur, 25)[1:]]
+    pts = [(float(u), r[0]) for u, r in rows if r is not None]
+    if len(pts) < 4:
+        return []
+    vp = ap = 1e-6
+    for _u, r in rows:
+        if r is None:
+            continue
+        vp = max(vp, float(np.linalg.norm(r[1]))); ap = max(ap, float(np.linalg.norm(r[2])))
+    s_max = min(MAN_GAP_SMAX, float(PLN.get("v_max", 6.0)) / vp,
+                float(np.sqrt(float(PLN.get("a_max", 10.0)) / ap)))
+    forb = []
+    for (_oid, c0, vel, r_obs, d_safe) in kf_movers(p_d, t_sim):
+        c2 = np.asarray(c0[:2], float); v2 = np.asarray(vel[:2], float)
+        rho = float(r_obs) + body + float(d_safe)
+        a = float(v2 @ v2)
+        if a < 1e-9:                                         # (near-)static mover: no time window to thread
+            continue
+        rel = c2 - np.asarray(p_d[:2], float)
+        dist = float(np.linalg.norm(rel))
+        if dist > 1e-6 and float(np.dot(-v2, rel / dist)) <= EGO_APPROACH_EPS and dist > rho:
+            continue                                         # separating mover: same skip as the slip cert
+        for u, X in pts:
+            d0 = c2 - np.asarray(X[:2], float)
+            b = 2.0 * float(d0 @ v2); c = float(d0 @ d0) - rho * rho
+            disc = b * b - 4.0 * a * c
+            if disc <= 0.0:
+                continue
+            rt = float(np.sqrt(disc))
+            t0 = (-b - rt) / (2.0 * a); t1 = (-b + rt) / (2.0 * a)
+            t1 = min(t1, MAN_GAP_TPRED)
+            if t1 <= 1e-3 or t0 > MAN_GAP_TPRED:
+                continue
+            t0 = max(t0, 1e-3)
+            forb.append((u / t1, u / t0))                    # warp s hits this window <=> s in [u/t1, u/t0]
+    if not forb:
+        return []
+    forb.sort()
+    merged = [list(forb[0])]
+    for lo, hi in forb[1:]:
+        if lo <= merged[-1][1] + 1e-6:
+            merged[-1][1] = max(merged[-1][1], hi)
+        else:
+            merged.append([lo, hi])
+    cands = [s_max]                                          # fastest feasible first (pass-ahead if reachable)
+    for lo, _hi in merged:
+        if MAN_GAP_SMIN <= lo - 0.02 <= s_max:
+            cands.append(lo - 0.02)                          # just under each forbidden band's floor
+    feas = []
+    for sc in sorted(set(round(cv, 3) for cv in cands), reverse=True):
+        if sc < MAN_GAP_SMIN or any(lo - 1e-9 <= sc <= hi + 1e-9 for lo, hi in merged):
+            continue
+        feas.append(float(sc))
+    return feas[:4]
+
+
 def ego_maneuver_replan(p_d, v_d, a_d, cur_wp, t_sim):
     """WIN-EGO maneuvering: fly the GROUND route to goal when the continuous-time cylinder certificate clears it
     (= native EGO, fast), trying straight then biased around-L/R sub-goals; only when NO ground route certifies
@@ -1826,6 +1912,18 @@ def ego_maneuver_replan(p_d, v_d, a_d, cur_wp, t_sim):
         if KFDBG and (kind == "hold" or s_v2 < 0.999):
             print(f"[MANDBG] t={t_sim:6.2f} kind={kind} gear={s_v2:.2f} ncyl={len(_cyl)} "
                   f"p=({p_d[0]:6.2f},{p_d[1]:6.2f}) v={float(np.hypot(v_d[0], v_d[1])):.2f}", flush=True)
+        if MAN_GAPSPEED and kind != "hold" and dur > 1e-3 and s_v2 < 0.999:
+            # ANTI-HESITATION only (v2 booked negative when allowed to slow flight): the law speaks
+            # ONLY when v2 already wants to yield, and may only propose FASTER certified speeds --
+            # "if the pass-ahead band is reachable, take it; otherwise keep v2's own yield gear."
+            for _sg in _gap_speed_candidates(p_d, t_sim):    # fastest feasible first; cert is the judge
+                if _sg <= float(s_v2) + 0.05:
+                    break                                    # nothing faster is feasible -> keep v2
+                if ego_slip_feasible(p_d, v_d, t_sim, _sg, u0=0.0):
+                    if KFDBG:
+                        print(f"[GAPDBG] t={t_sim:6.2f} kind={kind} v2_gear={s_v2:.2f} -> gap s={_sg:.2f}",
+                              flush=True)
+                    return kind, pts, float(_sg)
         return kind, pts, (float(s_v2) if kind != "hold" else 1.0)
 
     chosen = None; man_g = 1.0
