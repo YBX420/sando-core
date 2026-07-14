@@ -1215,7 +1215,7 @@ def ego_speed_search(p_d, v_d, t_sim, u0=0.0):
     return 0.0, "blocked"                                    # no certified warp -> hover on the same path
 
 
-def ego_slip_feasible(p_d, v_d, t_sim, s, u0=0.0):
+def ego_slip_feasible(p_d, v_d, t_sim, s, u0=0.0, dsafe=None):
     """Re-certify ONE specific speed-warp s against the current KF movers (used to certify the post-LPF FLOWN
     scale: the LPF may release to a slower s that is NOT certified — for a slip-ahead mover, slowing is unsafe)."""
     if s <= 1e-3:
@@ -1225,9 +1225,10 @@ def ego_slip_feasible(p_d, v_d, t_sim, s, u0=0.0):
         c0 = np.asarray(c0, float); vel = np.asarray(vel, float)
         rel = c0[:2] - p_d[:2]; dist = float(np.linalg.norm(rel))
         closing = float(np.dot(np.asarray(v_d, float)[:2] - vel[:2], rel / dist)) if dist > 1e-6 else 1.0
-        if closing <= EGO_APPROACH_EPS and dist > r_obs + body + EGO_SLIP_DSAFE:
+        _ds = EGO_SLIP_DSAFE if dsafe is None else float(dsafe)
+        if closing <= EGO_APPROACH_EPS and dist > r_obs + body + _ds:
             continue
-        R = r_obs + body + EGO_SLIP_DSAFE
+        R = r_obs + body + _ds
         c0b = c0 - vel * (u0 / s)                    # stale-spline window fix (see ego_speed_search)
         hp, _ = ego.certify_horizontal(obs_c0=c0b, R=R, obs_vel=tuple(vel / s), obs_acc=(0, 0, 0),
                                        t_hi=u0 + s * EGO_TAU_TRUST, v_eff=EGO_VEFF_SLIP / s, delta=REPLAN_DT * s)
@@ -1581,12 +1582,14 @@ def _man_cloud(p_d, heading, t_sim, movers):
 
 
 MAN_GAPSPEED = os.environ.get("EGO_GAPSPEED", "0") == "1"   # gap-acceptance speed law (塔菲大人 2026-07-14):
-#   *** BOOKED NEGATIVE x2 on seed7, keep OFF *** v1 (3s horizon, free override): 17.3s vs 9.9 -- yielding
+#   *** BOOKED NEGATIVE x3 on seed7, keep OFF *** v1 (3s horizon, free override): 17.3s vs 9.9 -- yielding
 #   to conflicts beyond the commit scale = the hesitation loop at larger scale. v2 (anti-hesitation only,
-#   faster-than-v2 proposals, 1.5s horizon): KF 9.7s but clr 1.44->0.60 + jerk 35->45 (the sprint is
-#   certified with the thinner SLIP standoffs, not this arm's capsule margins -- time bought with
-#   clearance); GT_XY 8.6 vs 8.3 = loss even with perfect obs. A real revival must certify the sprint
-#   against the SAME conformal capsule the tournament uses, and probably live INSIDE maneuver_decide_v2.
+#   faster-than-v2 proposals, 1.5s horizon): KF 9.7s but clr 1.44->0.60 (SLIP-thin judge). v3 (REACHABILITY
+#   arrival model from current speed at physical accel + capsule-grade judge + certified-sprint fast
+#   release): KF arm a wash (9.8s, same clr, jerk up); GT_XY 10.4 vs 8.3 = still a loss with perfect obs.
+#   The diagnosis (discrete down-only gears, hesitation loop) stands; a BOLT-ON speed law cannot beat the
+#   incumbent because speed and DIRECTION are coupled decisions -- revival must live INSIDE
+#   maneuver_decide_v2 (per-direction gap windows) and certify sprints with the tournament's own capsule.
 #   SOLVE the speed from the KF predictions instead of trying gears. Per mover, the predicted occupancy of
 #   each point on the committed path is a time window [t0,t1]; flying the path at warp s reaches that point
 #   at u/s, so collision <=> s in [u/t1, u/t0] = a FORBIDDEN interval on the speed axis. Union them, take
@@ -1603,9 +1606,32 @@ MAN_GAP_TPRED = float(os.environ.get("EGO_GAP_TPRED", "1.5"))  # decision horizo
 MAN_GAP_SMIN = float(os.environ.get("EGO_GAP_SMIN", "0.05"))   # never commit below this (near-hover = wait)
 
 
-def _gap_speed_candidates(p_d, t_sim):
-    """Feasible speed-warp candidates for the COMMITTED trajectory, fastest first, from the forbidden-
-    interval construction above. Returns [] when no mover conflicts (keep the incumbent gear)."""
+def _gap_arrival_times(pts_d, v_nom, v0, s, a_eff):
+    """REACHABILITY model (塔菲大人: "速度没有真的抵达" -- the v2-negative post-mortem): arrival time
+    at each arc-distance sample when ramping from the CURRENT speed v0 toward the warp target s*v_nom
+    at physical accel a_eff, instead of assuming the warp holds from t=0. A sprint that cannot be
+    reached before the gap closes is now INFEASIBLE by construction (yield stays the honest fallback)."""
+    t = 0.0
+    v = max(0.3, float(v0))
+    out = []
+    prev_d = 0.0
+    for d, vn in zip(pts_d, v_nom):
+        dd = max(1e-6, d - prev_d)
+        vt = max(0.3, s * vn)
+        if v < vt:
+            v_new = min(vt, float(np.sqrt(v * v + 2.0 * a_eff * dd)))
+        else:
+            v_new = vt                                       # braking is near-instant vs the ramp
+        t += dd / max(0.3, 0.5 * (v + v_new))
+        v = v_new
+        prev_d = d
+        out.append(t)
+    return out
+
+
+def _gap_speed_candidates(p_d, v_d, t_sim):
+    """Feasible speed-warp candidates for the COMMITTED trajectory, fastest first: forbidden-interval
+    seeds validated by the REACHABILITY arrival model. Returns [] when no mover conflicts."""
     dur = ego.duration()
     if dur <= 1e-3:
         return []
@@ -1621,7 +1647,15 @@ def _gap_speed_candidates(p_d, t_sim):
         vp = max(vp, float(np.linalg.norm(r[1]))); ap = max(ap, float(np.linalg.norm(r[2])))
     s_max = min(MAN_GAP_SMAX, float(PLN.get("v_max", 6.0)) / vp,
                 float(np.sqrt(float(PLN.get("a_max", 10.0)) / ap)))
-    forb = []
+    xy = np.array([r[0][:2] for _u, r in rows if r is not None])
+    pts_d = np.concatenate([[float(np.linalg.norm(xy[0] - np.asarray(p_d[:2], float)))],
+                            np.cumsum(np.linalg.norm(np.diff(xy, axis=0), axis=1))
+                            + float(np.linalg.norm(xy[0] - np.asarray(p_d[:2], float)))])
+    v_nom = [max(0.5, float(np.linalg.norm(r[1]))) for _u, r in rows if r is not None]
+    v0 = float(np.hypot(v_d[0], v_d[1]))
+    a_eff = 0.5 * float(PLN.get("a_max", 10.0))
+    win = [[] for _ in pts]                              # per path point: mover occupancy windows [t0,t1]
+    n_conf = 0
     for (_oid, c0, vel, r_obs, d_safe) in kf_movers(p_d, t_sim):
         c2 = np.asarray(c0[:2], float); v2 = np.asarray(vel[:2], float)
         rho = float(r_obs) + body + float(d_safe)
@@ -1632,7 +1666,7 @@ def _gap_speed_candidates(p_d, t_sim):
         dist = float(np.linalg.norm(rel))
         if dist > 1e-6 and float(np.dot(-v2, rel / dist)) <= EGO_APPROACH_EPS and dist > rho:
             continue                                         # separating mover: same skip as the slip cert
-        for u, X in pts:
+        for i, (u, X) in enumerate(pts):
             d0 = c2 - np.asarray(X[:2], float)
             b = 2.0 * float(d0 @ v2); c = float(d0 @ d0) - rho * rho
             disc = b * b - 4.0 * a * c
@@ -1643,26 +1677,24 @@ def _gap_speed_candidates(p_d, t_sim):
             t1 = min(t1, MAN_GAP_TPRED)
             if t1 <= 1e-3 or t0 > MAN_GAP_TPRED:
                 continue
-            t0 = max(t0, 1e-3)
-            forb.append((u / t1, u / t0))                    # warp s hits this window <=> s in [u/t1, u/t0]
-    if not forb:
+            win[i].append((max(t0, 1e-3), t1)); n_conf += 1
+    if n_conf == 0:
         return []
-    forb.sort()
-    merged = [list(forb[0])]
-    for lo, hi in forb[1:]:
-        if lo <= merged[-1][1] + 1e-6:
-            merged[-1][1] = max(merged[-1][1], hi)
-        else:
-            merged.append([lo, hi])
-    cands = [s_max]                                          # fastest feasible first (pass-ahead if reachable)
-    for lo, _hi in merged:
-        if MAN_GAP_SMIN <= lo - 0.02 <= s_max:
-            cands.append(lo - 0.02)                          # just under each forbidden band's floor
-    feas = []
-    for sc in sorted(set(round(cv, 3) for cv in cands), reverse=True):
-        if sc < MAN_GAP_SMIN or any(lo - 1e-9 <= sc <= hi + 1e-9 for lo, hi in merged):
-            continue
-        feas.append(float(sc))
+
+    def _reachable_ok(sc):
+        ts = _gap_arrival_times(pts_d, v_nom, v0, sc, a_eff)
+        for i, t_arr in enumerate(ts):
+            for t0, t1 in win[i]:
+                if t0 <= t_arr <= t1:
+                    return False
+        return True
+    # candidate seeds: the instant-warp band boundaries still make good starting guesses
+    seeds = {round(s_max, 3)}
+    for i, (u, _X) in enumerate(pts):
+        for t0, t1 in win[i]:
+            seeds.add(round(min(s_max, max(MAN_GAP_SMIN, u / t1 - 0.02)), 3))
+    feas = [float(sc) for sc in sorted(seeds, reverse=True)
+            if sc >= MAN_GAP_SMIN and _reachable_ok(float(sc))]
     return feas[:4]
 
 
@@ -1916,10 +1948,11 @@ def ego_maneuver_replan(p_d, v_d, a_d, cur_wp, t_sim):
             # ANTI-HESITATION only (v2 booked negative when allowed to slow flight): the law speaks
             # ONLY when v2 already wants to yield, and may only propose FASTER certified speeds --
             # "if the pass-ahead band is reachable, take it; otherwise keep v2's own yield gear."
-            for _sg in _gap_speed_candidates(p_d, t_sim):    # fastest feasible first; cert is the judge
+            for _sg in _gap_speed_candidates(p_d, v_d, t_sim):   # fastest REACHABLE first; cert judges
                 if _sg <= float(s_v2) + 0.05:
                     break                                    # nothing faster is feasible -> keep v2
-                if ego_slip_feasible(p_d, v_d, t_sim, _sg, u0=0.0):
+                if ego_slip_feasible(p_d, v_d, t_sim, _sg, u0=0.0,
+                                     dsafe=MAN_DSAFE + MAN_TRACK + 0.05):   # capsule-grade margin, not slip-thin
                     if KFDBG:
                         print(f"[GAPDBG] t={t_sim:6.2f} kind={kind} v2_gear={s_v2:.2f} -> gap s={_sg:.2f}",
                               flush=True)
@@ -2452,7 +2485,10 @@ while not quit_now:
                 # CCF yield-behind warp: ego_maneuver_replan returns the fastest certified speed on the COMMITTED side
                 # (1.0 unless it is slowing behind a crosser to HOLD the side instead of switching). Brake fast, release slow.
                 g_raw = float(man_g)
-                ego_speed_g = g_raw if g_raw < ego_g_prev else min(g_raw, ego_g_prev + EGO_G_RELEASE)
+                if MAN_GAPSPEED and g_raw > 1.001 and g_raw > ego_g_prev:
+                    ego_speed_g = g_raw          # certified reachable sprint: no artificial slow-release
+                else:
+                    ego_speed_g = g_raw if g_raw < ego_g_prev else min(g_raw, ego_g_prev + EGO_G_RELEASE)
                 ego_g_prev = ego_speed_g
                 if ego_speed_g >= 0.999:
                     ego_n_cert += 1
