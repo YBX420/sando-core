@@ -11,7 +11,16 @@ This is the deployable cousin of conformal/kf_predictor_experiment.py (which onl
 xy run a full CA filter (humans maneuver in the ground plane); z is held at the latest detection (people
 don't fly), so vz = az = 0 and the certificate's z-extent stays the body/standoff term.
 """
+import os
 import numpy as np
+
+# KF_INIT=bayes: SKIP the two-point differencing re-init -- the second detection goes through the
+# standard Kalman update against the wide-prior first-detection state (P_v=100), so the velocity
+# converges over ~3 ticks with noise-consistent weighting instead of jumping to (z2-z1)/dt. At the
+# render face's 0.1 s cadence the two-point jump has sigma_v = sqrt(2)*0.07/0.1 ~ 1 m/s -- garbage
+# for a 1 m/s pedestrian (the diagnosed young-track wrong-way ghosts). Fast targets still converge
+# quickly and NIS stays sane because S carries the wide prior. Default = twopoint (byte-identical).
+_KF_INIT_BAYES = os.environ.get("KF_INIT", "twopoint") == "bayes"
 
 
 class _AxisCAKalman:
@@ -50,7 +59,7 @@ class _AxisCAKalman:
             # update arrived with NIS ~ v^2*dt^2/ (R+1e-ish) (~56 for a vehicle): an absurd prior, not information.
             self.x = np.array([z, 0.0, 0.0]); self.P = np.diag([self.R, 100.0, self._a_var])
             self._z0 = float(z); self._gap = 0.0; return
-        if self._z0 is not None:                             # second detection: TWO-POINT DIFFERENCING re-init
+        if self._z0 is not None and not _KF_INIT_BAYES:      # second detection: TWO-POINT DIFFERENCING re-init
             dte = self._gap + step                           # coasted time + this update's interval = dt_eff
             v0 = (z - self._z0) / dte
             self.x = np.array([z, v0, 0.0])
@@ -58,6 +67,7 @@ class _AxisCAKalman:
                                [self.R / dte, 2.0 * self.R / dte**2, 0.0],
                                [0.0,          0.0,                   self._a_var]])
             self._z0 = None; self.last_nis = None; return    # exact re-init: no meaningful innovation this tick
+        self._z0 = None                                      # bayes path: plain Kalman update from the wide prior
         F, Q = (self.F, self.Q) if step == self.dt else self._mats(step)
         x = F @ self.x; P = F @ self.P @ F.T + Q                          # predict
         y = z - self.H @ x; S = self.H @ P @ self.H.T + self.R           # innovation

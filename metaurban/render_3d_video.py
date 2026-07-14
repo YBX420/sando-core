@@ -823,6 +823,7 @@ EGO_PREDICT = os.environ.get("EGO_PREDICT", "1") == "1"
 _PFE_MEMO = {"t": None, "out": None, "pred": None}
 _GT_VELFD = {}   # GT oid -> (last_pos2, last_t): finite-diff true velocity (engine o.velocity is 0 for humanoids)
 _ORA_MAP = {}    # track id -> GT oid matched while detected (oracle's omniscient coast during miss ticks)
+_LASTDET = {}    # track id -> last DETECTED xy (young-gate freeze anchor; tr.xy gets overwritten by coast)
 
 
 def _kf_movers_realistic(p_d, t_sim, cam_heading):
@@ -896,6 +897,17 @@ def _kf_movers_realistic(p_d, t_sim, cam_heading):
             pred = np.asarray([kc0, kc0])
         if not EGO_PREDICT:                                 # A/B ablation: reactive, no forecast
             kv = np.zeros(3); pred = np.asarray([kc0, kc0])
+        if tr.miss == 0:
+            _LASTDET[tr.id] = np.asarray(tr.xy[:2], float).copy()
+        if KF_SIGV_YOUNG > 0 and tr.trk.ready and tr.trk.sigma_v > KF_SIGV_YOUNG:
+            # YOUNG-TRACK honesty gate: two position obs 0.1s apart physically cannot know velocity
+            # better than ~1 m/s (two-point == Bayes under a diffuse prior; verified Monte-Carlo).
+            # Until sigma_v converges, the honest law is FROZEN AT THE LAST DETECTION -- kills both
+            # the wrong-way ghost (garbage init velocity) and the coast drift (CA integrating it;
+            # tr.xy follows the coasted drift, so anchor on the stashed detection, not tr.xy).
+            kc0 = p3(_LASTDET.get(tr.id, tr.xy[:2]), zc)
+            kv = np.zeros(3)
+            pred = np.asarray([kc0, kc0])
         if GT_ORACLE or KFDBG:                              # nearest-GT association (track ids are NOT GT ids)
             gt = min(gtl, key=lambda g: float(np.hypot(*(g[1] - kc0[:2])))) if gtl else None
             gt_d = float(np.hypot(*(gt[1] - kc0[:2]))) if gt is not None else 1e9
@@ -1214,6 +1226,8 @@ EGO_TAU_DYN = os.environ.get("EGO_TAU_DYN", "0") == "1"       # SPEED-MATCHED ho
 #   certifiable candidate is "brake and wait". q-tilde/v_eff are calibrated at tau=0.75: beyond that the
 #   KF arm is UNCHARTED coverage -- sound today only on the oracle arms (zero estimation error).
 EGO_TAU_MAX = float(os.environ.get("EGO_TAU_MAX", "2.5"))
+KF_SIGV_YOUNG = float(os.environ.get("KF_SIGV_YOUNG", "0"))   # >0: freeze tracks with sigma_v above this
+#   at their last detection (young-track honesty gate; ~0.5 = frozen until ~4 obs at 0.1s cadence)
 _TAU_NOW = [EGO_TAU_TRUST]                                    # per-tick dynamic horizon (drawing + pred reads)
 
 
