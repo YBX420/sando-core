@@ -20,3 +20,6 @@
 - 两张手术表都在 `plan_route`(render_3d_video.py),无 env、全臂生效;死场景宁可除名不硬塞假路线(这次没用上)。
 
 下一刀:KF 病②(丢检串→track 缝合)/③(噪声地板),刀序待塔菲大人拍板。
+
+## nuScenes 真实数据面开张(07-14 下午,8faafdb)
+塔菲大人转向目标检测/真实数据:`data/v1.0-mini` = **nuScenes mini(10 scene × ~40 关键帧 @2Hz 抖动 0.4-0.6s,场内连续场间不拼)**。`nuscenes/kf_nusc.py`:生产 `MoverTracker` 原样 import(变 dt 路径吃真实时间戳),GT 关联(instance_token,=真实数据版 GT_ORACLE 臂,隔离估计器),世界系 3D 框中心喂 KF,预测投回 CAM_FRONT 出 jpg(`nuscenes/out/`,昼/夜目检过)。**46k 评分点判决**:①**CV 全面赢 CA**(行人 MOVING 3s 0.71 vs 1.57 均值)= MetaUrban 病④(CA 过冲)真实数据实锤;②KF 大胜 still 基线(车 MOVING 3s 3.4 vs 21.3m);③**病①(young 两点差分)在 GT 喂入下基本消失**(n=2 与 n≥4 同量级)→ 病①=噪声×节奏的乘积而非结构病,young 诚实门(治标)是对的药。下一步:接 visibility 低档当真实丢检串(病②测试床)/换掉 GT 关联上检测器。
