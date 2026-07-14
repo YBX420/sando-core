@@ -1,5 +1,13 @@
 # CLAUDE.md — sando-core(给 Claude Code 自动读的项目入口)
 
+> **⚠️ 2026-07-14 现状速览(覆盖下面 6-23/6-22 的 framing;详情看 `.claude/memory/MEMORY.md` 索引):**
+> - **产品方向不变**(认证的最快+最安全绕行,只做 EGO),但已远超 M1:现役 = **M3 无 HOLD 机动锦标赛 + v6 胶囊 conformal keep-out(345 集四臂最优)+ EGO_TDYN 时间维 + CPA 相遇点提前量环**。conformal 半边**早已补齐**(06-24 起真轨迹 split-conformal 标定,P(碰)≤ε 有实测依据)——下面 6-22 正文里"conformal 没建"的诚实点**已过时作废**。
+> - **头号指标 = 干净抵达**(到达 ∧ 零碰撞 ∧ 零紧急干预)。**证明纪律:每个算法改进主张必须配 3D 成片对比**(唯一产线 `render_3d_video.py`,日常走 `metaurban/ops/render.sh`;并行渲染用 `OUT_MP4` env,全 3D 上限 2 路,headless 3 路)。
+> - **默认生成配置(07-14 钦定)**:全知臂 `ORACLE_THIN=1`、KF 臂 `THIN=1`(薄管尺寸包+TDYN+提前量),两臂唯一差别=估计器。seed7 阶梯:KF 裸基线 14.1s → 全知 7.4s / KF 生产 9.4s。薄管无估计误差预算——只报实测净空,**永不声称 conformal 覆盖**。
+> - **当前主刀 = KF 三层病**(`.claude/memory/sando-core-kf-campaign-2026-07-14.md`):①新生两点差分速度垃圾(young 诚实门已下刀 53f8fe3)②锥缘丢检串杀 track 重生循环(未修)③成熟速度 0.4m/s 噪声地板卡提前量(未调)。掉头/急停=模型外诚实边界;横穿者 0.7s 让行=物理地板。
+> - **场景池 = 20 个场景(seed 0-19,seed≥20 复用 seed%20 换路线)**,07-14 肃清完毕 21/21 全绿;病 seed 手术表焊在 `plan_route`(`_GOAL_FIX` 治终点口袋 / `_ROUTE_SALT` 治路线穿楼,先看卡点离终点多远再选刀)。
+> - **ROS 部署臂已开张**:我们的 EGO 接管 MIGHTY Gazebo 全 31 环境(`ops/ego_mighty.sh`)。
+
 > **⚠️ 2026-06-23 方向再聚焦(用户拍板,覆盖下面 6-22 的 framing):** ① 产品 = 认证的「最快+最安全绕行」(certified go-around),**不是判官只 HOLD**;HOLD 降为兜底。② **只做 EGO**(实测效果好),MINCO 暂搁置(代码留作对照/支撑,不投入)。③ 用 **KF(CA 模型)预测障碍未来轨迹** → 把预测占据喂 EGO(solver 不动=良性,仍 agnostic)→ EGO 绕开未来 → 证书检预测移动球 → 过则飞绕行。④ **planner 无关降为支撑性质/通用臂,不是 headline**。M1 已跑通(见 `metaurban/ego_goaround.py` + `.claude/memory/sando-core-goaround-m1-2026-06.md`)。
 >
 > **2026-06-22 全量重写。** 重心从「冲 RA-L 9/15 的论文蓝图」转为 **工程实现优先**;论文降为下游目标(投不投、何时投未定)。
@@ -19,7 +27,7 @@ Claude:在本仓库工作前先读:
 
 仿真/评测在 **MetaUrban**(MetaDrive 系)里跑(2026-06-18 起从 Isaac 切过来)。
 
-**一句话现状**:精确证书 + 双 planner 适配 + 10-seed A/B + **M1 认证绕行(KF 预测,`metaurban/ego_goaround.py`)已跑通**——EGO 现在会为避开预测中的人群真绕行(横向甩到 y≈4.2)而非干等。**两个诚实点**:① **统计/conformal 半边还没做**(`q_conformal` 全程 0.0 占位 → 确定性几何 margin,不是 P(碰)≤ε 概率保证);② M1 实测**执行净空掉到 0.677 m < d_safe 0.8**(仍>0 没撞)——KF 预测误差吃了裕度,正是 conformal 层(C2)要补的。证书在 MINCO 核里**默认 OFF**。
+**一句话现状(⚠️ 2026-06-23 版,已被顶部 07-14 速览覆盖——其中"conformal 没建"已作废)**:精确证书 + 双 planner 适配 + 10-seed A/B + **M1 认证绕行(KF 预测,`metaurban/ego_goaround.py`)已跑通**——EGO 现在会为避开预测中的人群真绕行(横向甩到 y≈4.2)而非干等。**两个诚实点**:① **统计/conformal 半边还没做**(`q_conformal` 全程 0.0 占位 → 确定性几何 margin,不是 P(碰)≤ε 概率保证);② M1 实测**执行净空掉到 0.677 m < d_safe 0.8**(仍>0 没撞)——KF 预测误差吃了裕度,正是 conformal 层(C2)要补的。证书在 MINCO 核里**默认 OFF**。
 
 ## 仓库真相(分支/目录)
 
