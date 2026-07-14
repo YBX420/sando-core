@@ -26,6 +26,39 @@ from yolo_nusc import (WEIGHTS, COCO2GRP, RANGE_MAX, SIG_RANGE, SIGV_YOUNG,  # n
 
 MISS_SEC = 2.0                                          # kill a world-track after 2 s unseen
 
+# ---- the deployed v6.1 CAPSULE keep-out, THIN (oracle-arm) sizing, transplanted verbatim from
+# render_3d_video._cap_ring so what we draw here IS the algorithm's avoidance body ----
+# ILLUSTRATION ONLY on this face: the thin calibration was harvested on MetaUrban and carries no
+# estimation-error budget; on monocular nuScenes it shows the deployed SIZE, it certifies nothing.
+CAP_TAU, CAP_RDT = 0.75, 0.1            # trust window + replan_dt (metaurban_sando.yaml)
+CAP_Q, CAP_VEFF, CAP_DSAFE, CAP_K = 0.05, 0.1, 0.15, 6      # calib_v6_thin.json + MANDSAFE=0.15
+CAP_REAR = (0.05, 0.0)                  # v6.1 flat rear: rear-overrun quantile q0r + growth
+R_OBS = {"pedestrian": 0.30, "cycle": 0.40, "vehicle": 1.00}
+
+
+def capsule_ring(c0, vel, r_obs):
+    """Ground outline of the deployed thin capsule: stadium from the mover's flat BACK to the
+    KF-apex cap at c0 + v*tau. Verbatim geometry of render_3d_video._cap_ring (v6.1)."""
+    sp = float(np.hypot(vel[0], vel[1]))
+    veff = CAP_VEFF + sp / (2.0 * (CAP_K - 1))
+    rad = r_obs + CAP_DSAFE + CAP_Q + veff * (CAP_TAU + CAP_RDT)
+    c0 = np.asarray(c0[:2], float)
+    tip = c0 + np.asarray(vel[:2], float) * CAP_TAU
+    u = (tip - c0) / sp / CAP_TAU if sp > 1e-6 else np.array([1.0, 0.0])
+    a0 = float(np.arctan2(u[1], u[0]))
+    if sp > 1e-6:
+        back = CAP_REAR[0] + CAP_REAR[1] * (CAP_TAU + CAP_RDT) + r_obs + CAP_DSAFE
+        bl = c0 - u * back
+        n = np.array([-u[1], u[0]])
+        pts = [tuple(bl + n * rad)]
+        pts += [(float(tip[0] + rad * np.cos(a0 + th)), float(tip[1] + rad * np.sin(a0 + th)))
+                for th in np.linspace(np.pi / 2, -np.pi / 2, 13)]
+        pts += [tuple(bl - n * rad)]
+        return pts + [pts[0]], rad
+    pts = [(float(c0[0] + rad * np.cos(th)), float(c0[1] + rad * np.sin(th)))
+           for th in np.linspace(0, 2 * np.pi, 25)]
+    return pts, rad
+
 # bbox-bottom slide budget (m): passing a STATIC object slides its ground point along the body, so
 # "moved" must mean displacement beyond noise AND beyond this systematic slide -- per class.
 SLIDE = {"pedestrian": 0.3, "cycle": 0.8, "vehicle": 2.0}
@@ -273,6 +306,17 @@ def main(scene_names, render):
                     pr = px_r[okr].astype(int)
                     for p0, p1 in zip(pr, pr[1:]):                       # 1-sigma position ring
                         cv2.line(img, tuple(p0), tuple(p1), c, 1, cv2.LINE_AA)
+                    # --- the algorithm's avoidance body: deployed THIN capsule (cyan) ---
+                    v_cap = w["latch"].vel_win if w["latch"].state == "MOVING" else np.zeros(2)
+                    ring_c, rad_c = capsule_ring(c0, v_cap, R_OBS[w["grp"]])
+                    ring3 = np.array([[px_, py_, 0.0] for px_, py_ in ring_c])
+                    px_cap, okcap = world_to_px(ring3, sd_rec, nusc)
+                    pc = px_cap[okcap].astype(int)
+                    for p0, p1 in zip(pc, pc[1:]):
+                        cv2.line(img, tuple(p0), tuple(p1), (255, 255, 0), 2, cv2.LINE_AA)
+                    if okc[0]:
+                        cv2.putText(img, f"r{rad_c:.2f}", (cx + 8, cy + 16),
+                                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 1, cv2.LINE_AA)
                     tip = np.array([[c0[0] + v[0], c0[1] + v[1], 0.0]])  # velocity arrow (1 s)
                     px_t, okt = world_to_px(tip, sd_rec, nusc)
                     if okc[0] and okt[0]:
@@ -286,7 +330,7 @@ def main(scene_names, render):
                             cv2.line(img, tuple(p0), tuple(p1), col[w["grp"]], 2, cv2.LINE_AA)
                         if len(pts):
                             cv2.circle(img, tuple(pts[-1]), 5, col[w["grp"]], -1, cv2.LINE_AA)
-                cv2.putText(img, f"{scene['name']} YOLO26s+ByteTrack@12Hz -> KF | x=centre ring=1sig arrow=v*1s grey=FRZ", (16, 40),
+                cv2.putText(img, f"{scene['name']} YOLO26s+ByteTrack@12Hz -> KF | x=centre ring=1sig arrow=v*1s grey=FRZ cyan=THIN capsule (deployed size, illustrative)", (16, 40),
                             cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 255, 255), 2, cv2.LINE_AA)
                 if vw is None:
                     vw = cv2.VideoWriter(os.path.join(out_dir, f"byte_{scene['name']}.mp4"),
