@@ -6,6 +6,9 @@
 ## GT_XY 臂(当日最终章,99c7f10):钦定结论在 MetaUrban 面定量确认
 `GT_XY=1`(render_3d_video,默认关=字节回归):精确中心 xy+GT 身份进,**速度由生产 MoverTracker 估**(同 dt/meas_noise/young 门)=nuScenes gt3d 臂的 MetaUrban 版。**seed7 阶梯(全 0 撞):生产 KF 9.9s / GT_XY 8.3s / 全知 7.4s——稳定 xy 一项还掉感知税 64%(1.6/2.5s),切换 9→2、hold 10→0;剩 0.9s=从完美位置估速度的固有成本=直接测速传感器(雷达)的理论价值**,与 nuScenes radar 判决跨面互证。成片 out/drone_3d_gtxy_s7.mp4(渲染=headless 逐字)。阶梯三档常备:THIN=1 / THIN=1 GT_XY=1 / ORACLE_THIN=1。
 
+## gap 速度律(深夜加时,51d178f):塔菲大人设计,两版判负留档
+诊断成立:v2 速度轴=8 个只降不升的离散挡,"越犹豫越慢路径越重合"回路真实存在(spchurn 佐证)。实现:KF 预测→路径各点占用时窗→速度轴禁区间→取 cap 内最大可行速(抢先/让行一个 max 统一),ego_slip_feasible 重定时认证当裁判,EGO_GAPSPEED 默认关。**v1(3s 视界自由覆盖)17.3 vs 9.9s=在更大尺度复刻犹豫回路(决策视界不得超过承诺尺度 0.75s+lead 的量级)**;**v2(仅反犹豫、只准提速、1.5s 视界)KF 臂 9.7s 但净空 1.44→0.60/jerk 35→45——冲刺支吃的是 SLIP 薄站距不是本臂胶囊余量,时间全拿净空付账**;GT_XY 臂 8.6 vs 8.3 完美观测下也不赚。**复活条件:冲刺必须过本臂同款 conformal 胶囊认证,且大概率要活在 maneuver_decide_v2 内部而非外挂**。两版字节回归全过。
+
 ## MetaUrban 主线(上午)
 - **KF cut 1 已下**(53f8fe3+c3c18eb):young 诚实门 KF_SIGV_YOUNG+迟滞,seed7 KF 臂 10.6→9.4s。病②(coast 漂移加速)③(丢检串杀 track 重生)未修。
 - **场景池肃清完毕 21/21 绿**:手术表焊在 `plan_route`——`_GOAL_FIX={23:+5m}`(终点口袋)、`_ROUTE_SALT={1:1,11:2}`(路线穿楼)。**选刀法:hold 刷屏先看卡点离终点多远**,近=挪终点,远=重摇路线(+5m 对后者无效实测)。
