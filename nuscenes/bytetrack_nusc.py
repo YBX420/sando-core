@@ -297,9 +297,15 @@ def main(scene_names, render, use_lidar=False):
                 by_lidar = g is not None
                 if g is None:
                     # NEVER feed a lidar-raised track flat-earth points: their metre-level bias DRAGS
-                    # the KF off the object every no-point frame (the capsule-drift bug). Coast instead.
+                    # the KF off the object every no-point frame (the capsule-drift bug). Coast instead
+                    # -- and actually COAST (CA extrapolation + growing P + _gap bookkeeping), not
+                    # freeze: a skipped frame with no time-update left the capsule nailed in place
+                    # while the bbox drove on (the capsule-detaches-from-bbox bug).
                     _w0 = world.get(int(b.id))
                     if _w0 is not None and _w0.get("n_lidar", 0) >= 3:
+                        if _w0["t_last"] is not None:
+                            _w0["trk"].coast(dt=max(1e-3, t_now - _w0["t_last"]))
+                            _w0["t_last"] = t_now
                         _w0["bbox"] = (x0, y0, x1, y1); seen.add(int(b.id))
                         continue
                     g = px_to_ground(((x0 + x1) / 2.0, y1), sd_rec, nusc)   # flat-earth fallback
@@ -336,6 +342,8 @@ def main(scene_names, render, use_lidar=False):
                     dtj = max(1e-3, t_now - w["t_last"])
                     jump = float(np.linalg.norm(det[:2] - w["hist"][-1][:2]))
                     if jump > VMAX[grp] * dtj + 3.0 * sig:
+                        trk.coast(dt=dtj)                 # keep the state MOVING through the rejection
+                        w["t_last"] = t_now
                         w["bbox"] = (x0, y0, x1, y1)      # keep the box on screen, drop the sample
                         seen.add(tid)
                         continue
