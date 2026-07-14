@@ -303,10 +303,16 @@ def main(scene_names, render, use_lidar=False):
                     # while the bbox drove on (the capsule-detaches-from-bbox bug).
                     _w0 = world.get(int(b.id))
                     if _w0 is not None and _w0.get("n_lidar", 0) >= 3:
+                        # lidar dry for > MISS_SEC -> euthanise: an unobservable track coasting on a
+                        # stale velocity is the last drift tail (diag: coast bucket max 62 m). It is
+                        # reborn CLEAN at the next lidar fix (source-step re-init does the rest).
+                        if t_now - _w0.get("t_lid", t_now) > MISS_SEC:
+                            del world[int(b.id)]
+                            continue
                         if _w0["t_last"] is not None:
                             _w0["trk"].coast(dt=max(1e-3, t_now - _w0["t_last"]))
                             _w0["t_last"] = t_now
-                        _w0["bbox"] = (x0, y0, x1, y1); seen.add(int(b.id))
+                        _w0["bbox"] = (x0, y0, x1, y1); _w0["src"] = "coast"; seen.add(int(b.id))
                         continue
                     g = px_to_ground(((x0 + x1) / 2.0, y1), sd_rec, nusc)   # flat-earth fallback
                 if g is None:
@@ -332,30 +338,48 @@ def main(scene_names, render, use_lidar=False):
                         _ax.q_jerk = 2.0 if lidar else Q_JERK_FACE
                         _ax.F, _ax.Q = _ax._mats(_ax.dt)
                 trk = w["trk"]
+                # SOURCE-STEP RE-INIT: a track born on flat-earth obs carries metre-level bias AND a
+                # garbage two-point velocity (diag: sigv 44 -> coasted 88 m away). Its FIRST lidar fix
+                # is the first honest data -> restart the filter and the latch there, don't drag.
+                if by_lidar and w.get("n_lidar", 0) == 0 and w["t_last"] is not None:
+                    w["trk"] = trk = MoverTracker(dt=0.083, meas_noise=0.5)
+                    for _ax in (trk.fx, trk.fy):
+                        _ax.q_jerk = 2.0
+                        _ax.F, _ax.Q = _ax._mats(_ax.dt)
+                    w["latch"] = MotionLatch(grp)
+                    w["t_last"] = None; w["hist"] = []; w["v_feed"] = np.zeros(2)
                 sig = (0.15 + 0.01 * d_ego) if by_lidar else SIG_RANGE(d_ego)   # laser is honestly tight
                 trk.fx.R = trk.fy.R = sig * sig
                 det = np.array([g[0], g[1], 0.0])
-                # INNOVATION GATE: a single-frame world jump beyond class-vmax*dt + 3*sigma is a
-                # bbox-bottom/depth HOP (occlusion snap), not motion -- one hop otherwise poisons
-                # BOTH the latch verdict and its window velocity (10 m/s phantom -> r2.5 balloon).
+                # INNOVATION GATE vs the KF's CURRENT prediction (incl. coast), threshold carrying
+                # pos_sigma -- a coasting track's gate SELF-REOPENS as P grows. The old form (det vs
+                # stale hist[-1], no P term) was a rejection DEADLOCK: diag showed e_kf climbing
+                # 11->53 m at constant e_det~5 while the gate never let go. 4 straight rejections
+                # force a re-accept (memory-expiry backstop).
                 if w["t_last"] is not None and w["hist"]:
                     dtj = max(1e-3, t_now - w["t_last"])
-                    jump = float(np.linalg.norm(det[:2] - w["hist"][-1][:2]))
-                    if jump > VMAX[grp] * dtj + 3.0 * sig:
+                    pred_xy = trk.predict([0.0], model="cv")[0][:2]
+                    jump = float(np.linalg.norm(det[:2] - pred_xy))
+                    if jump > VMAX[grp] * dtj + 3.0 * sig + trk.pos_sigma and w.get("n_rej", 0) < 4:
                         trk.coast(dt=dtj)                 # keep the state MOVING through the rejection
                         w["t_last"] = t_now
+                        w["n_rej"] = w.get("n_rej", 0) + 1
                         w["bbox"] = (x0, y0, x1, y1)      # keep the box on screen, drop the sample
+                        w["src"] = "gated"
                         seen.add(tid)
                         continue
+                    w["n_rej"] = 0
                 if w["t_last"] is None:
                     trk.update(det)
                 else:
                     trk.update(det, dt=max(1e-3, t_now - w["t_last"]))
+                w["src"] = "lidar" if by_lidar else "ground"
                 w["t_last"] = t_now; w["hist"].append(det); w["bbox"] = (x0, y0, x1, y1)
                 w["r_obs"] = (1 - R_EMA) * w["r_obs"] + R_EMA * r_det
                 w["latch"].add(t_now, det[:2], sig)
                 if by_lidar:
                     w["n_lidar"] = w.get("n_lidar", 0) + 1
+                    w["t_lid"] = t_now
                 # planner-feed velocity: once sigma_v passes the production gate the KF's OWN velocity
                 # is the freshest trustworthy source (the latch window velocity is ~1 s stale by
                 # construction -- monocular-era medicine, the capsule-lag bug). Gate closed -> latch.
@@ -371,6 +395,31 @@ def main(scene_names, render, use_lidar=False):
                     if t_now - w["t_last"] > MISS_SEC:
                         del world[tid]
 
+            if os.environ.get("DIAG") and world:
+                if not hasattr(main, "_diag"):
+                    main._diag = open(os.path.join(_HERE, "out", "diag.csv"), "w")
+                    main._diag.write("scene,t,tid,grp,src,det_x,det_y,kf_x,kf_y,gt_x,gt_y,e_det,e_kf,sigv,possig,latch,nlid\n")
+                for tid, w in world.items():
+                    if tid not in seen or not w["trk"].ready or not w["hist"]:
+                        continue
+                    dxy = w["hist"][-1][:2]
+                    kf_xy = w["trk"].state()[0][:2]
+                    best, bxy = None, None
+                    for k in gt:
+                        gxy = gt_xy_at(k, t_now)
+                        if gxy is None:
+                            continue
+                        dd = float(np.linalg.norm(gxy - dxy))
+                        if best is None or dd < best:
+                            best, bxy = dd, gxy
+                    if bxy is None or best > 6.0:
+                        continue
+                    main._diag.write(f"{scene['name']},{t_now:.3f},{tid},{w['grp']},{w.get('src','?')},"
+                                     f"{dxy[0]:.2f},{dxy[1]:.2f},{kf_xy[0]:.2f},{kf_xy[1]:.2f},"
+                                     f"{bxy[0]:.2f},{bxy[1]:.2f},{best:.2f},"
+                                     f"{float(np.linalg.norm(kf_xy - bxy)):.2f},"
+                                     f"{w['trk'].sigma_v:.2f},{w['trk'].pos_sigma:.2f},"
+                                     f"{w['latch'].state},{w.get('n_lidar',0)}\n")
             is_key = bool(sd_rec["is_key_frame"])
             if is_key:                                   # same exam sheet as the other two arms
                 for tid, w in world.items():
