@@ -13,6 +13,7 @@ Run:  ~/miniconda3/envs/metaurban/bin/python sando-core/nuscenes/bytetrack_nusc.
 import argparse
 import os
 import sys
+import time
 
 import numpy as np
 
@@ -210,11 +211,14 @@ def main(scene_names, render):
 
         world = {}                                       # ByteTrack id -> dict(trk, t_last, grp, hist)
         vw = None
+        _bt = {"yolo": 0.0, "ours": 0.0, "draw": 0.0, "n": 0}   # BENCH=1 stage timers
         for sd_rec in frames[scene["name"]]:
             t_now = sd_rec["timestamp"] / 1e6
             img_path = os.path.join(DATA, sd_rec["filename"])
+            _t0 = time.perf_counter()
             res = model.track(img_path, persist=True, tracker="bytetrack.yaml",
                               conf=0.1, verbose=False)[0]
+            _t1 = time.perf_counter()
             W, H = sd_rec.get("width", 1600), sd_rec.get("height", 900)
             seen = set()
             for b in res.boxes:
@@ -315,6 +319,8 @@ def main(scene_names, render):
                                      float(w["trk"].sigma_v), st,
                                      ATTR_MOTION.get(gt_attr_at(inst, t_now), "-")))
 
+            _t2 = time.perf_counter()
+            _bt["yolo"] += _t1 - _t0; _bt["ours"] += _t2 - _t1; _bt["n"] += 1
             if render:
                 img = cv2.imread(img_path)
                 for tid, w in world.items():
@@ -387,9 +393,16 @@ def main(scene_names, render):
                                          cv2.VideoWriter_fourcc(*"mp4v"), 12,
                                          (img.shape[1], img.shape[0]))
                 vw.write(img)
+                _bt["draw"] += time.perf_counter() - _t2
         if vw is not None:
             vw.release()
             print("wrote", os.path.join(out_dir, f"byte_{scene['name']}.mp4"))
+        if os.environ.get("BENCH") == "1" and _bt["n"]:
+            n = _bt["n"]
+            tot = _bt["yolo"] + _bt["ours"] + (_bt["draw"] if render else 0.0)
+            print(f"[bench] {scene['name']} n={n}  yolo {1e3*_bt['yolo']/n:6.1f} ms"
+                  f"  ours {1e3*_bt['ours']/n:6.1f} ms  draw {1e3*_bt['draw']/n:6.1f} ms"
+                  f"  -> {n/tot:5.1f} fps (detect+track only: {n/_bt['yolo']:5.1f} fps)")
 
     if not rows:
         print("no scored rows"); return
