@@ -27,6 +27,64 @@ from yolo_nusc import (WEIGHTS, COCO2GRP, RANGE_MAX, SIG_RANGE, SIGV_YOUNG,  # n
 
 MISS_SEC = 2.0                                          # kill a world-track after 2 s unseen
 
+
+def world_to_cam(pts_w, sd_rec, nusc):
+    """Global Nx3 -> (Nx2 pixels, Nx1 cam-depth). Same maths as world_to_px but returns z."""
+    from kf_nusc import quat_rot as _qr
+    ego = nusc.ego[sd_rec["ego_pose_token"]]
+    cs = nusc.cs[sd_rec["calibrated_sensor_token"]]
+    p = (np.asarray(pts_w, float) - np.asarray(ego["translation"])) @ _qr(ego["rotation"])
+    p = (p - np.asarray(cs["translation"])) @ _qr(cs["rotation"])
+    K = np.asarray(cs["camera_intrinsic"])
+    z = p[:, 2]
+    zs = np.where(z > 0.1, z, 1.0)
+    px = np.stack([K[0, 0] * p[:, 0] / zs + K[0, 2], K[1, 1] * p[:, 1] / zs + K[1, 2]], axis=1)
+    return px, z
+
+
+class LidarDepth:
+    """LIDAR_TOP -> world points near a camera frame; median-of-nearest-cluster depth per bbox.
+    Kills the flat-earth wall: position comes from the laser, the ground can do what it wants."""
+
+    def __init__(self, nusc):
+        from kf_nusc import quat_rot as _qr
+        self._qr = _qr
+        self.nusc = nusc
+        self.recs = sorted((d for d in nusc.sd if "LIDAR_TOP" in d["filename"]),
+                           key=lambda d: d["timestamp"])
+        self.ts = np.array([d["timestamp"] for d in self.recs])
+        self._cache = (None, None)
+
+    def world_cloud(self, t_us):
+        i = int(np.clip(np.searchsorted(self.ts, t_us), 1, len(self.ts) - 1))
+        rec = self.recs[i] if abs(self.ts[i] - t_us) < abs(self.ts[i - 1] - t_us) else self.recs[i - 1]
+        if self._cache[0] == rec["token"]:
+            return self._cache[1]
+        pts = np.fromfile(os.path.join(DATA, rec["filename"]), dtype=np.float32).reshape(-1, 5)[:, :3]
+        cs = self.nusc.cs[rec["calibrated_sensor_token"]]
+        ego = self.nusc.ego[rec["ego_pose_token"]]
+        pw = pts.astype(float) @ self._qr(cs["rotation"]).T + np.asarray(cs["translation"])
+        pw = pw @ self._qr(ego["rotation"]).T + np.asarray(ego["translation"])
+        self._cache = (rec["token"], pw)
+        return pw
+
+    def locate(self, bbox, sd_rec, t_us):
+        """Median world-xy of the nearest lidar cluster inside the (shrunk) bbox, or None."""
+        pw = self.world_cloud(t_us)
+        px, z = world_to_cam(pw, sd_rec, self.nusc)
+        x0, y0, x1, y1 = bbox
+        cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
+        hw, hh = 0.375 * (x1 - x0), 0.4 * (y1 - y0)      # shrink 25/20% against edge bleed
+        m = ((z > 1.0) & (z < 60.0) & (np.abs(px[:, 0] - cx) < hw) & (np.abs(px[:, 1] - cy) < hh))
+        if m.sum() < 3:
+            return None
+        zz = z[m]
+        z_front = np.percentile(zz, 25)                   # nearest cluster beats the background wall
+        sel = m.copy(); sel[m] &= np.abs(zz - z_front) < 1.5
+        if sel.sum() < 3:
+            return None
+        return np.median(pw[sel], axis=0)
+
 # ---- the deployed v6.1 CAPSULE keep-out, THIN (oracle-arm) sizing, transplanted verbatim from
 # render_3d_video._cap_ring so what we draw here IS the algorithm's avoidance body ----
 # ILLUSTRATION ONLY on this face: the thin calibration was harvested on MetaUrban and carries no
@@ -154,10 +212,11 @@ class MotionLatch:
         return (pts * w[:, None]).sum(axis=0) / w.sum()
 
 
-def main(scene_names, render):
+def main(scene_names, render, use_lidar=False):
     import cv2
     from ultralytics import YOLO
     nusc = Nusc()
+    lidar = LidarDepth(nusc) if use_lidar else None
     out_dir = os.path.join(_HERE, "out")
     os.makedirs(out_dir, exist_ok=True)
     # ALL CAM_FRONT records (sweeps + keyframes) grouped per scene, time-ordered
@@ -230,7 +289,10 @@ def main(scene_names, render):
                 x0, y0, x1, y1 = [float(v) for v in b.xyxy[0]]
                 if x0 < 4 or x1 > W - 4 or y1 > H - 4 or (y1 - y0) < 18:
                     continue
-                g = px_to_ground(((x0 + x1) / 2.0, y1), sd_rec, nusc)
+                g = lidar.locate((x0, y0, x1, y1), sd_rec, sd_rec["timestamp"]) if lidar else None
+                by_lidar = g is not None
+                if g is None:
+                    g = px_to_ground(((x0 + x1) / 2.0, y1), sd_rec, nusc)   # flat-earth fallback
                 if g is None:
                     continue
                 ego_xy = np.asarray(nusc.ego[sd_rec["ego_pose_token"]]["translation"][:2])
@@ -252,7 +314,7 @@ def main(scene_names, render):
                         _ax.q_jerk = Q_JERK_FACE
                         _ax.F, _ax.Q = _ax._mats(_ax.dt)
                 trk = w["trk"]
-                sig = SIG_RANGE(d_ego)
+                sig = (0.15 + 0.01 * d_ego) if by_lidar else SIG_RANGE(d_ego)   # laser is honestly tight
                 trk.fx.R = trk.fy.R = sig * sig
                 det = np.array([g[0], g[1], 0.0])
                 # INNOVATION GATE: a single-frame world jump beyond class-vmax*dt + 3*sigma is a
@@ -446,5 +508,6 @@ if __name__ == "__main__":
     ap.add_argument("--scenes", type=str, default="scene-0103,scene-1094")
     ap.add_argument("--all", action="store_true")
     ap.add_argument("--no_render", action="store_true")
+    ap.add_argument("--lidar", action="store_true", help="bbox depth from LIDAR_TOP (nearest cluster) instead of flat-ground back-projection")
     args = ap.parse_args()
-    main(None if args.all else set(args.scenes.split(",")), not args.no_render)
+    main(None if args.all else set(args.scenes.split(",")), not args.no_render, args.lidar)
