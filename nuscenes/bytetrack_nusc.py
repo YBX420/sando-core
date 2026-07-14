@@ -42,6 +42,14 @@ CAP_REAR = (0.05, 0.0)                  # v6.1 flat rear: rear-overrun quantile 
 R_CLAMP = {"pedestrian": (0.20, 0.45), "cycle": (0.30, 0.80), "vehicle": (0.70, 1.40)}
 R_EMA = 0.3
 VMAX = {"pedestrian": 2.5, "cycle": 8.0, "vehicle": 15.0}   # class top speed: innovation gate + sp cap
+# DATA-level smoothing (user 2026-07-14: smooth the real content, not the pixels):
+# (a) the KF itself is the smoother -- q_jerk 2.0 was calibrated for MetaUrban's 0.07 m noise; this
+#     face has 10x the noise and slower dynamics, so a lower process noise IS the honest smoother
+#     (covariance/NIS semantics intact, unlike post-hoc EMA on observations);
+# (b) v_feed = EMA of the latch window velocity -- the production vel_smooth/VF_EMA law verbatim:
+#     smooth what the PLANNER eats (capsule geometry + eval), the certificate keeps raw state.
+Q_JERK_FACE = 0.5
+VFEED_EMA = 0.2
 
 
 def capsule_ring(c0, vel, r_obs, vmax=None):
@@ -234,7 +242,11 @@ def main(scene_names, render):
                 if w is None:
                     w = world[tid] = {"trk": MoverTracker(dt=0.083, meas_noise=0.5),
                                       "t_last": None, "grp": grp, "hist": [], "bbox": None,
-                                      "latch": MotionLatch(grp), "r_obs": r_det}
+                                      "latch": MotionLatch(grp), "r_obs": r_det,
+                                      "v_feed": np.zeros(2)}
+                    for _ax in (w["trk"].fx, w["trk"].fy):        # real-data face process noise
+                        _ax.q_jerk = Q_JERK_FACE
+                        _ax.F, _ax.Q = _ax._mats(_ax.dt)
                 trk = w["trk"]
                 sig = SIG_RANGE(d_ego)
                 trk.fx.R = trk.fy.R = sig * sig
@@ -256,6 +268,8 @@ def main(scene_names, render):
                 w["t_last"] = t_now; w["hist"].append(det); w["bbox"] = (x0, y0, x1, y1)
                 w["r_obs"] = (1 - R_EMA) * w["r_obs"] + R_EMA * r_det
                 w["latch"].add(t_now, det[:2], sig)
+                v_raw = w["latch"].vel_win if w["latch"].state == "MOVING" else np.zeros(2)
+                w["v_feed"] = (1 - VFEED_EMA) * w["v_feed"] + VFEED_EMA * np.asarray(v_raw[:2], float)
                 seen.add(tid)
             for tid, w in list(world.items()):
                 if tid not in seen and w["t_last"] is not None:
@@ -291,7 +305,7 @@ def main(scene_names, render):
                         # DIAGNOSTIC/classifier (vehicles: only 5 false-moving rows; slow peds: 31 missed,
                         # their true displacement sits under the noise+slide floor at range).
                         if st == "MOVING":
-                            pxy = obs_xy + w["latch"].vel_win * h   # kept for the shadow record only
+                            pxy = obs_xy + w["v_feed"] * h          # the planner-feed velocity (shadow record)
                         else:
                             pxy = obs_xy
                         rows.append((scene["name"], w["grp"], h,
@@ -308,10 +322,9 @@ def main(scene_names, render):
                         continue
                     trk = w["trk"]
                     frz = (not trk.ready) or trk.sigma_v > SIGV_YOUNG[w["grp"]]
-                    # ---- DISPLAY smoothing only (eval rows upstream stay raw): the same medicine as
-                    # the production face -- VF_EMA for fed velocity, hysteresis against state flicker.
-                    D = w.setdefault("draw", {"pos": None, "rad": None, "vel": np.zeros(2),
-                                              "sig": None, "frz": frz, "nflip": 0})
+                    # colour hysteresis only -- everything drawn below IS the data (smoothing now
+                    # lives in the data itself: Q_JERK_FACE in the KF + v_feed for the planner side).
+                    D = w.setdefault("draw", {"frz": frz, "nflip": 0})
                     if frz != D["frz"]:
                         D["nflip"] += 1
                         if D["nflip"] >= 4:                       # colour flips only after 4 agreeing frames
@@ -328,17 +341,13 @@ def main(scene_names, render):
                                     0.55, c, 2, cv2.LINE_AA)
                     if not trk.ready:
                         continue
-                    # --- the KF's own state, made visible (EMA'd for the eye only) ---
-                    c0r, v, _ = trk.state()
-                    D["pos"] = c0r[:2].copy() if D["pos"] is None else 0.75 * D["pos"] + 0.25 * c0r[:2]
-                    c0 = np.array([D["pos"][0], D["pos"][1], 0.0])
+                    # --- the KF's own state, made visible ---
+                    c0, v, _ = trk.state()
                     ctr_px, okc = world_to_px(np.array([[c0[0], c0[1], 0.0]]), sd_rec, nusc)
                     if okc[0]:
                         cx, cy = ctr_px[0].astype(int)
                         cv2.drawMarker(img, (cx, cy), c, cv2.MARKER_TILTED_CROSS, 14, 2)  # KF centre
-                    sig_raw = min(trk.pos_sigma, 6.0)
-                    D["sig"] = sig_raw if D["sig"] is None else 0.85 * D["sig"] + 0.15 * sig_raw
-                    sig_p = D["sig"]
+                    sig_p = min(trk.pos_sigma, 6.0)
                     ang = np.linspace(0, 2 * np.pi, 17)
                     ring = np.stack([c0[0] + sig_p * np.cos(ang), c0[1] + sig_p * np.sin(ang),
                                      np.zeros_like(ang)], axis=1)
@@ -347,13 +356,7 @@ def main(scene_names, render):
                     for p0, p1 in zip(pr, pr[1:]):                       # 1-sigma position ring
                         cv2.line(img, tuple(p0), tuple(p1), c, 1, cv2.LINE_AA)
                     # --- the algorithm's avoidance body: deployed THIN capsule (cyan) ---
-                    v_raw = w["latch"].vel_win if w["latch"].state == "MOVING" else np.zeros(2)
-                    D["vel"] = 0.8 * D["vel"] + 0.2 * np.asarray(v_raw[:2], float)   # kills heading wobble
-                    ring_c, rad_c = capsule_ring(c0, D["vel"], w["r_obs"], vmax=VMAX[w["grp"]])
-                    D["rad"] = rad_c if D["rad"] is None else 0.85 * D["rad"] + 0.15 * rad_c
-                    ring_c = [((px_ - c0[0]) * D["rad"] / rad_c + c0[0],
-                               (py_ - c0[1]) * D["rad"] / rad_c + c0[1]) for px_, py_ in ring_c]
-                    rad_c = D["rad"]
+                    ring_c, rad_c = capsule_ring(c0, w["v_feed"], w["r_obs"], vmax=VMAX[w["grp"]])
                     ring3 = np.array([[px_, py_, 0.0] for px_, py_ in ring_c])
                     px_cap, okcap = world_to_px(ring3, sd_rec, nusc)
                     pc = px_cap[okcap].astype(int)
@@ -362,7 +365,8 @@ def main(scene_names, render):
                     if okc[0]:
                         cv2.putText(img, f"r{rad_c:.2f}", (cx + 8, cy + 16),
                                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 1, cv2.LINE_AA)
-                    v = np.array([D["vel"][0], D["vel"][1], 0.0]) if not frz else v   # arrow follows the smoothed feed when speaking
+                    if not frz:
+                        v = np.array([w["v_feed"][0], w["v_feed"][1], 0.0])   # arrow shows the planner feed
                     tip = np.array([[c0[0] + v[0], c0[1] + v[1], 0.0]])  # velocity arrow (1 s)
                     px_t, okt = world_to_px(tip, sd_rec, nusc)
                     if okc[0] and okt[0]:
