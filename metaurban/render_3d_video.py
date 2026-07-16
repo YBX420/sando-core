@@ -108,6 +108,10 @@ if os.environ.get("THIN", "0") == "1":
     os.environ.setdefault("EGO_TDYN", "1")
     os.environ.setdefault("EGO_TDYN_PAD", "0.2")
     os.environ.setdefault("EGO_MANDSAFE", "0.15")
+    os.environ.setdefault("EGO_PERCLASS", "thin")   # 塔菲大人 2026-07-16 (option C, "选择薄的壁"): the THIN
+    #   pack DECLARES the scalar thin per-class law instead of the calibrated gen-1 table -- stacking the
+    #   fat calibrated q (1.054) on top of the thin standoff philosophy is double conservatism. Continuity:
+    #   these scalars are numerically what the dead-loader era actually flew (q 0.125 / veff 0.61).
     os.environ.setdefault("CALIB_FILE_V6", os.path.join(os.path.dirname(_HERE), "out", "conformal", "calib_v6_thin.json"))
     if os.environ.get("GT_ORACLE", "0") != "1":
         os.environ.setdefault("KF_SIGV_YOUNG", "0.5")
@@ -1264,6 +1268,12 @@ def _load_perclass_conf(eps):
     """Per-class (q_conformal, v_eff) from out/conformal/calib.json, keyed by the mover's per-class d_safe so cert_clear
     can use the VEHICLE / ANIMAL tube instead of the pedestrian scalar (code-review 2026-06-27 HIGH: ped tube was applied
     to all classes -> vehicles/animals under-/mis-covered). pedestrian/vehicle are measured; animal -> the pooled 'all'."""
+    if os.environ.get("EGO_PERCLASS", "calib") == "thin":
+        # DECLARED thin wall (塔菲大人 2026-07-16): every class gets the scalar (MAN_QCONF, MAN_VEFF).
+        # Honesty regime of the THIN pack: report MEASURED clearances, never claim conformal coverage.
+        print(f"[calib] EGO_PERCLASS=thin DECLARED: every class q={MAN_QCONF} veff={MAN_VEFF} "
+              f"(measured-clearance regime, NO conformal coverage claim)", flush=True)
+        return {}
     for cand in (os.path.join(os.path.dirname(_HERE), "out", "conformal", "calib.json"),
                  os.path.join(_HERE, "out", "conformal", "calib.json")):
         try:
