@@ -19,6 +19,12 @@ Run (metaurban env, from the metaurban repo root):
   # record an mp4:                            ... render_3d_video.py --seed 3 --mp4
 """
 import os, sys, time, argparse, random, copy
+if os.environ.get("LAYOUT_PROBE", "0") == "1":
+    # memory-layout perturbation probe (2026-07-16): a mere top-level `import json` here provably
+    # flips the GT_ORACLE arm 7.2s<->12.7s on seed7 (identical world, decisions diverge on float
+    # crumbs). Keep it switchable so the tie-pinning work (TIE_KEEP) can be tested for layout
+    # invariance: a pinned decision layer must produce the SAME flight with the probe on and off.
+    import json  # noqa: F401
 import cv2  # IMPORTANT: import cv2 BEFORE panda3d/metaurban — importing it after them segfaults (GL/X lib clash)
 import numpy as np
 import yaml
@@ -1477,6 +1483,10 @@ MAN_STATIC_BUF = float(os.environ.get("EGO_STATIC_BUF", 0.45))  # static gate ke
 MAN_STATIC_HZ = float(os.environ.get("EGO_STATIC_HZ", 1.20))   # forward-sim LOOKAHEAD (s) for the static gate. Longer =
 #   the drone starts avoiding static sooner so its inertia doesn't carry it into a building it only reacts to late
 #   (the 2026-06-27 diagnosis: most ours collisions are MODERATE-speed static grazes the short-horizon gate missed).
+MAN_SWATH = int(os.environ.get("EGO_SWATH", "0"))        # >1: pave now->meet corridor with K rings (racing-line probe)
+_SWATH_DBG = [0]
+_GTDUMP = os.environ.get("GTDUMP") or None               # offline workbench: per-tick GT scene dump (JSONL path)
+_GTDUMP_F = [None]
 MAN_PLANHI = float(os.environ.get("EGO_PLANHI", 0.7))   # how far ahead the KF-predicted SWEPT footprint is fed to
                                                         # EGO so it weaves around the FUTURE smoothly (one trajectory,
                                                         # no late braking) instead of reacting to the present
@@ -1592,6 +1602,17 @@ def _man_cloud(p_d, heading, t_sim, movers):
         # optimise fails -> stall. With d435i, feed ONLY the PREDICTED (t_cpa) ring (where the mover WILL be, which
         # depth can't see yet); the current-position d_safe is still enforced by cert_clear()'s static-mover check.
         leads = (tcpa,) if (args.d435i or EGO_TDYN) else (0.0, tcpa)   # TDYN: lead-only (meet-point ring)
+        if MAN_SWATH > 1 and tcpa > 1e-6:
+            # EGO_SWATH=K (racing-line probe 2026-07-16): pave the WHOLE now->meet corridor with K rings so the
+            # drawn route commits around the encounter corridor instead of threading it and paying at arrival
+            # (the planning-side twin of the cert's CAP_MEET stretch). Mature, actually-tracked movers only.
+            _et = _ELL_TRK.get(_oid)
+            if _et is None or (int(_et[0]) >= 4 and not _et[1]):
+                leads = tuple(np.linspace(0.0, tcpa, MAN_SWATH))
+                if _SWATH_DBG[0] < 5:
+                    _SWATH_DBG[0] += 1
+                    print(f"[SWATH] t={t_sim:5.2f} {_oid} tcpa={tcpa:.2f} |v|={float(np.hypot(vel[0], vel[1])):.2f} "
+                          f"leads={np.round(leads,2)}", flush=True)
         _eta = os.environ.get("ETA_FEED", "0") == "1"
         _qv = PERCLASS_CONF.get(d_safe, (MAN_QCONF, MAN_VEFF))
         for lead in leads:                                        # current + closest-approach predicted footprint
@@ -2442,6 +2463,39 @@ while not quit_now:
         _PFE_MEMO["t"] = None                            # and no stale same-t memo across laps
     while t < T_MAX and not reached:
         cur_wp = wp[wp_i]
+        if _GTDUMP is not None:
+            # offline racing-line workbench feed (GTDUMP=path, default off): GROUND-TRUTH scene per planner
+            # tick, full-field movers, exact pos/vel, plus the flown drone state. HAND-ROLLED JSON: a mere
+            # top-level `import json` provably flips the GT_ORACLE arm 7.2->12.7s (memory-layout knife-edge,
+            # 2026-07-16) -- serialise with f-strings so instrumentation cannot perturb the flight.
+            if _GTDUMP_F[0] is None:
+                _GTDUMP_F[0] = open(_GTDUMP, "w")
+                _sr = ",".join(f"[{float(c3[0]):.3f},{float(c3[1]):.3f},{0.5*float(sz[0]):.3f},{float(sz[2]):.3f}]"
+                               for (_c, c3, sz) in STATIC_FED)
+                _GTDUMP_F[0].write('{"meta":{"seed":%d,"start":[%.3f,%.3f,%.3f],"goal":[%.3f,%.3f,%.3f],'
+                                   '"min_goal":%.3f,"v_max":%.2f,"a_max":%.2f,"cruise_z":%.2f,"replan_dt":%.3f},'
+                                   '"statics":[%s]}\n'
+                                   % (int(args.seed), START[0], START[1], (START[2] if len(START) > 2 else 0.0),
+                                      GOAL[0], GOAL[1], (GOAL[2] if len(GOAL) > 2 else 0.0), float(MIN_GOAL),
+                                      float(PLN.get("v_max", 6.0)), float(PLN.get("a_max", 10.0)),
+                                      float(CRUISE_Z), float(REPLAN_DT), _sr))
+            _mvrow = []
+            for _do, _dc, _dp, _dv, _dsz in native_objects():
+                if _dc == "static":
+                    continue
+                _gv = _GT_VELFD.get(_do)
+                _fv = (((np.asarray(_dp[:2], float) - _gv[0]) / max(t - _gv[1], 1e-6)) if (_gv is not None and t > _gv[1])
+                       else np.asarray(_dv[:2], float))
+                _mvrow.append(f'["{_do}","{_dc}",{float(_dp[0]):.3f},{float(_dp[1]):.3f},{float(_fv[0]):.3f},'
+                              f'{float(_fv[1]):.3f},{0.5*float(max(_dsz[0], _dsz[1])):.3f},{float(_dsz[2]):.3f}]')
+            for _da in animals:
+                _ap = _da.p0 + _da.vel * t
+                _mvrow.append(f'["{getattr(_da, "id", id(_da))}","{getattr(_da, "cls_name", "animal")}",'
+                              f'{float(_ap[0]):.3f},{float(_ap[1]):.3f},{float(_da.vel[0]):.3f},{float(_da.vel[1]):.3f},'
+                              f'{0.5*float(max(_da.size[0], _da.size[1])):.3f},{float(_da.size[2]):.3f}]')
+            _GTDUMP_F[0].write('{"t":%.3f,"drone":[%.4f,%.4f,%.4f,%.4f,%.4f,%.4f],"movers":[%s]}\n'
+                               % (float(t), p_d[0], p_d[1], p_d[2], v_d[0], v_d[1], v_d[2], ",".join(_mvrow)))
+            _GTDUMP_F[0].flush()
         if ego is not None:
             # EGO-Planner core: perceive ONLY the depth-camera FOV cloud (not GT omniscience) PLUS the ground
             # plane (floor knowledge isn't FOV-limited), aim at the waypoint clipped to the receding horizon.
