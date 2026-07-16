@@ -23,8 +23,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 try:                                            # third baseline: MIT-ACL SANDO (GUROBI); needs
     import sando_native_bridge                  # LD_LIBRARY_PATH=~/gurobi1103/linux64/lib
     HAVE_SANDO = True
-except Exception:
+except Exception as e:                          # 2026-07-16 sweep: fallbacks must be loud
     HAVE_SANDO = False
+    print(f"[bench] sando_gt baseline DISABLED: {type(e).__name__}: {e}", flush=True)
 
 
 def run_arm(scn, mode, percept, seeds, dynamics=False):

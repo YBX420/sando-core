@@ -130,6 +130,8 @@ for scn_name, seed in jobs:
                           max_vel=float(scn["drone"].get("max_vel", 3.0)))
     except Exception as e:
         status = f"error:{type(e).__name__}"
+        # 2026-07-16 sweep: fallbacks must be loud (status lands in the manifest, but say it on console too)
+        print(f"[harvest] ep FAILED: ep={ep} scn={scn_name} seed={seed}: {type(e).__name__}: {e}", flush=True)
         r = {}
     rows = list(RC.PERCEPT_HARVEST)
     rows_all += rows

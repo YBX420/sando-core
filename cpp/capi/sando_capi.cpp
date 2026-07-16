@@ -202,7 +202,14 @@ SANDO_API int sando_replan(void* h, double last_rt, double t) {
   try {
     auto r = static_cast<SANDO*>(h)->replan(last_rt, t);
     return (r.first ? 1 : 0) | (r.second ? 2 : 0);
-  } catch (...) { return 0; }
+  } catch (const std::exception& e) {
+    // 2026-07-16 sweep: a crashing planner must not look like a planner that chose not to replan
+    fprintf(stderr, "[sando_capi] WARNING: replan threw: %s\n", e.what());
+    return 0;
+  } catch (...) {
+    fprintf(stderr, "[sando_capi] WARNING: replan threw a non-std exception\n");
+    return 0;
+  }
 }
 
 // out9 = [pos(3), vel(3), accel(3)]; returns 1 if a goal is available

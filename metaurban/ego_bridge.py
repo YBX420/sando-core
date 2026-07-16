@@ -81,8 +81,15 @@ class EGOPlanner:
 
     def set_moving_obstacles(self, rows, lam):
         """rows: (n, 8) [c0x c0y c0z vx vy vz r_clear z_top], time-aligned to the next replan's t=0.
-        n=0 or lam=0 clears the term. No-op on a stale .so (missing export)."""
+        n=0 or lam=0 clears the term."""
         if _set_moving is None:
+            # 2026-07-16 sweep: this was the ONE optional export that degraded SILENTLY on a stale
+            # .so (siblings all raise) -- and under EGO_TDYN the planner cloud deliberately withholds
+            # the lead-0 mover ring because this term owns it, so a silent no-op leaves the mover's
+            # current position guarded by NOTHING in the solver. Loud like the siblings:
+            if len(np.atleast_2d(rows)) and float(lam) != 0.0:
+                raise RuntimeError("ego_capi.so is stale: rebuild it (missing ego_set_moving_obstacles; "
+                                   "the EGO_TDYN time-aware term would silently vanish)")
             return
         r = np.ascontiguousarray(np.asarray(rows, np.float64).reshape(-1, 8))
         n = r.shape[0]; rp = r.ctypes.data_as(_d) if n else _d()

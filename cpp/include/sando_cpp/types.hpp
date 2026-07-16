@@ -17,6 +17,7 @@
 #include <stdexcept>
 #include <cmath>
 #include <cstddef>
+#include <cstdio>
 #include <memory>
 #include <algorithm>
 
@@ -428,7 +429,12 @@ class DynTraj {
       (void)probe;
       analytic_compiled = true;
       return true;
-    } catch (const std::exception&) {
+    } catch (const std::exception& e) {
+      // 2026-07-16 sweep: fallbacks must be loud. A silently-failed expression compile made the
+      // obstacle live at (0,0,0) forever -- the planner "avoided" a ghost while the real body flew.
+      std::fprintf(stderr, "[sando] WARNING: obstacle trajectory expression FAILED to compile (%s); "
+                           "eval() will return (0,0,0): x='%s'\n", e.what(),
+                   traj_x.empty() ? "<empty>" : traj_x.c_str());
       analytic_compiled = false;
       return false;
     }

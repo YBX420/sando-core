@@ -80,6 +80,9 @@ def _obj_size(o):
     return np.array([0.6, 0.6, 1.7], float)     # ped-ish default
 
 
+_NAV_MOVER_ERR = {}   # 2026-07-16 sweep: fallbacks must be loud
+
+
 class MetaUrbanNavEnv(gym.Env):
     metadata = {}
 
@@ -106,7 +109,11 @@ class MetaUrbanNavEnv(gym.Env):
             try:
                 pos = np.asarray(o.position, float)
                 vel = np.asarray(o.velocity, float)
-            except Exception:
+            except Exception as e:
+                k = type(e).__name__
+                _NAV_MOVER_ERR[k] = _NAV_MOVER_ERR.get(k, 0) + 1
+                if _NAV_MOVER_ERR[k] == 1:
+                    print(f"[nav] WARNING: dropping native mover, position/velocity read failed: {k}: {e} (first occurrence; counted silently after)", flush=True)
                 continue
             if pos.shape[0] < 2 or not np.all(np.isfinite(pos)):
                 continue

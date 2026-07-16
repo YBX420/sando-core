@@ -101,13 +101,22 @@ env = SidewalkDynamicMetaUrbanEnv(env_cfg)
 eng = None; ego = None
 
 
+_EVAL_MOVER_ERR = {}   # 2026-07-16 sweep: fallbacks must be loud
+_EVAL_STEP_ERR = {}
+
+
 def native_objects():
     out = []
     for oid, o in eng.get_objects().items():
         if o is ego: continue
         try:
             pos = np.asarray(o.position, float); vel = np.asarray(o.velocity, float)
-        except Exception: continue
+        except Exception as e:
+            k = type(e).__name__
+            _EVAL_MOVER_ERR[k] = _EVAL_MOVER_ERR.get(k, 0) + 1
+            if _EVAL_MOVER_ERR[k] == 1:
+                print(f"[eval] WARNING: dropping native mover, position/velocity read failed: {k}: {e} (first occurrence; counted silently after)", flush=True)
+            continue
         if pos.shape[0] < 2 or not np.all(np.isfinite(pos)): continue
         out.append((oid, classify(o), pos[:2], vel[:2] if vel.shape[0] >= 2 else np.zeros(2), obj_size(o)))
     return out
@@ -153,6 +162,9 @@ def plan_route(ep):
 par = Parameters()
 for k, v in PLN.items():
     if hasattr(par, k): setattr(par, k, v)
+# 2026-07-16 sweep: fallbacks must be loud
+_unk = [k for k in PLN if not hasattr(par, k)]
+if _unk: print(f"[eval] WARNING: planner-config keys with no Parameters attribute (silently unapplied): {_unk}", flush=True)
 par.replan_dt = REPLAN_DT
 DT = float(par.dc)
 GOAL_R = float(par.goal_radius)
@@ -273,7 +285,11 @@ def run_episode(ep):
                 p_d = np.asarray(ng.pos, float); v_d = np.asarray(ng.vel, float); a_d = np.asarray(ng.accel, float)
             t += DT
         try: env.step([0.0, 0.0])
-        except Exception: pass
+        except Exception as e:                              # 2026-07-16 sweep: fallbacks must be loud
+            k = type(e).__name__
+            _EVAL_STEP_ERR[k] = _EVAL_STEP_ERR.get(k, 0) + 1
+            if _EVAL_STEP_ERR[k] == 1:
+                print(f"[eval] WARNING: env.step failed (world may stop advancing): {k}: {e} (first occurrence; counted silently after)", flush=True)
         c, per = clearance(p_d, fed); mclr = min(mclr, c)
         for k, val in per.items(): per_all[k] = min(per_all.get(k, np.inf), val)
         if c < 0:                                          # drone body penetrated an obstacle MODEL bbox

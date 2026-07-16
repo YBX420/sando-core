@@ -52,7 +52,8 @@ def prop_catalog():
         for f in sorted(glob.glob(os.path.join(_ADJ, "*.json"))):
             try:
                 meta = json.load(open(f))
-            except Exception:
+            except (OSError, ValueError) as e:      # 2026-07-16 sweep: fallbacks must be loud (ValueError covers JSONDecodeError)
+                print(f"[designer] SKIP prop metainfo {os.path.basename(f)}: {type(e).__name__}: {e}", flush=True)
                 continue
             fn = meta.get("filename")
             if not fn or not os.path.exists(os.path.join(_TEST_MODELS, fn)):
@@ -261,6 +262,8 @@ class Scene3D:
             self.tracks = SLB.to_movers_raw(resolved)
             return None
         except Exception as e:
+            # 2026-07-16 sweep: fallbacks must be loud
+            print(f"[designer] COMPILE ERROR: {type(e).__name__}: {e}", flush=True)
             self.tracks = []
             return str(e)
 

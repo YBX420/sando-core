@@ -28,6 +28,8 @@ from typing import List, Optional
 
 import numpy as np
 
+_PARAMS_ERR = {}   # 2026-07-16 sweep: fallbacks must be loud (Parameters.from_ros_node field failures)
+
 
 # ---------------------------------------------------------------------------
 # Simple value structs
@@ -338,8 +340,11 @@ class Parameters:
                 val = node.get_parameter(name).value
                 if val is not None:
                     setattr(p, name, val)
-            except Exception:
-                pass
+            except Exception as e:
+                k = type(e).__name__
+                _PARAMS_ERR[k] = _PARAMS_ERR.get(k, 0) + 1
+                if _PARAMS_ERR[k] == 1:
+                    print(f"[params] WARNING: parameter '{name}' not applied (default kept): {k}: {e} (first occurrence; counted silently after)", flush=True)
         # Map alias used in C++ sando.yaml
         # C++ 那边 yaml 里分辨率叫 sando_map_res, 这里额外认一下这个别名, 读到就覆盖 res。
         try:
@@ -347,8 +352,11 @@ class Parameters:
             v = node.get_parameter("sando_map_res").value
             if v is not None:
                 p.res = float(v)
-        except Exception:
-            pass
+        except Exception as e:
+            k = type(e).__name__
+            _PARAMS_ERR[k] = _PARAMS_ERR.get(k, 0) + 1
+            if _PARAMS_ERR[k] == 1:
+                print(f"[params] WARNING: parameter alias 'sando_map_res' not applied (default kept): {k}: {e} (first occurrence; counted silently after)", flush=True)
         return p
 
 

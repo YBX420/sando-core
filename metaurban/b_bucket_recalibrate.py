@@ -79,10 +79,13 @@ def harvest(quick=False):
     #   small cone + spacing rules push cars away) -> vehicle-rich scenarios get 12 extra sensor seeds
     t0 = time.time()
     n_ep = 0
+    n_skipped = 0
     for f in scns:
         try:
             scn = SLB.load(f)
-        except Exception:
+        except Exception as e:                  # 2026-07-16 sweep: fallbacks must be loud
+            print(f"[bbucket] SKIP {f}: {type(e).__name__}: {e}", flush=True)
+            n_skipped += 1
             continue
         movers = SLB.apply_rh_overrides(RC.Movers(SLB.to_movers_raw(scn)), scn)
         ep = SLB.to_episode(scn)
@@ -102,6 +105,8 @@ def harvest(quick=False):
                            ("dd", "f4")])
     RC.PERCEPT_HARVEST = None
     print(f"[harvest] {len(data)} residuals from {n_ep} episodes in {time.time()-t0:.0f}s")
+    if n_skipped > 0:
+        print(f"[bbucket] WARNING: {n_skipped} scenario file(s) SKIPPED (failed to load; see SKIP lines above)", flush=True)
     return data
 
 

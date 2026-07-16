@@ -44,6 +44,9 @@ def quat_to_R(x, y, z, w):
         [2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)]])
 
 
+_EGO_TF_ERR = {}   # 2026-07-16 sweep: fallbacks must be loud
+
+
 class EgoNode(Node):
     def __init__(self):
         super().__init__("ego_node", namespace=os.environ.get("EGO_NS", "NX01"))
@@ -109,7 +112,11 @@ class EgoNode(Node):
         """PointCloud2 -> Nx3 map-frame points (identity if already in map), z/nan filtered."""
         try:
             tr = self.tfb.lookup_transform("map", m.header.frame_id, rclpy.time.Time())
-        except Exception:
+        except Exception as e:
+            k = type(e).__name__
+            _EGO_TF_ERR[k] = _EGO_TF_ERR.get(k, 0) + 1
+            if _EGO_TF_ERR[k] == 1:
+                print(f"[ego_node] WARNING: TF lookup failing; clouds are being dropped: {k}: {e} (first occurrence; counted silently after)", flush=True)
             return None
         q, t = tr.transform.rotation, tr.transform.translation
         R = quat_to_R(q.x, q.y, q.z, q.w)

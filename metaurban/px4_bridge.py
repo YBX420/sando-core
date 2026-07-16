@@ -18,6 +18,8 @@ We map world (x,y,z) -> NED (y, x, -z) relative to the PX4 local origin set at f
 import threading, asyncio, math, time
 import numpy as np
 
+_PX4_SP_ERR = {}   # 2026-07-16 sweep: fallbacks must be loud
+
 
 class PX4Bridge:
     def __init__(self, system_address="udpin://0.0.0.0:14540", takeoff_alt=1.5):
@@ -118,7 +120,11 @@ class PX4Bridge:
             with self._lock:
                 sp = PositionNedYaw(self._sp["n"], self._sp["e"], self._sp["d"], self._sp["yaw"])
             try: await self._drone.offboard.set_position_ned(sp)
-            except Exception: pass
+            except Exception as e:
+                k = type(e).__name__
+                _PX4_SP_ERR[k] = _PX4_SP_ERR.get(k, 0) + 1
+                if _PX4_SP_ERR[k] == 1:
+                    print(f"[px4] WARNING: offboard setpoint stream failing (drone may not track the plan): {k}: {e} (first occurrence; counted silently after)", flush=True)
             await asyncio.sleep(0.04)
 
     async def _telemetry_task(self):

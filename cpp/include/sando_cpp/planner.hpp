@@ -1204,7 +1204,12 @@ class SANDO {
         mj_ptr = std::make_shared<MinjerkTraj>(pr2.first);
         info = pr2.second;
       }
-    } catch (const std::exception&) {
+    } catch (const std::exception& e) {
+      // 2026-07-16 sweep: a deterministic bug here would present as a permanent silent
+      // "planner can't find a plan" -- say what actually happened (throttled by caller counters)
+      if (replanning_failure_count < 5 || replanning_failure_count % 100 == 0)
+        fprintf(stderr, "[sando] WARNING: plan_minco threw (#%d): %s\n",
+                replanning_failure_count + 1, e.what());
       replanning_failure_count += 1;
       return false;
     }

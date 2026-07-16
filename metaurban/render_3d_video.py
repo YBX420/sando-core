@@ -194,13 +194,25 @@ eng = env.engine; agent_ego = env.agent
 cam = None if args.headless else eng.get_sensor("rgb_camera")
 
 
+_NOBJ_DROP = {}   # perception-ingest drops by exception type: loud on FIRST occurrence, counted after
+#   (2026-07-16 sweep: native_objects is the SOLE perception source of the whole stack; a silent
+#   `except: continue` here is the same shape as the dead-calib-loader incident. Body-less props
+#   raising on .velocity are legitimately dropped -- but the drop must be visible at least once.)
+
+
 def native_objects():
     out = []
     for oid, o in eng.get_objects().items():
         if o is agent_ego: continue
         try:
             pos = np.asarray(o.position, float); vel = np.asarray(o.velocity, float)
-        except Exception: continue
+        except Exception as e:
+            k = type(e).__name__
+            _NOBJ_DROP[k] = _NOBJ_DROP.get(k, 0) + 1
+            if _NOBJ_DROP[k] == 1:
+                print(f"[3dv] WARNING: perception ingest dropped {type(o).__name__} {oid}: {k}: {e} "
+                      f"(first occurrence; further drops of this type counted silently)", flush=True)
+            continue
         if pos.shape[0] < 2 or not np.all(np.isfinite(pos)): continue
         out.append((oid, classify(o), pos[:2], vel[:2] if vel.shape[0] >= 2 else np.zeros(2), obj_size(o)))
     return out
@@ -2010,10 +2022,6 @@ def ego_maneuver_replan(p_d, v_d, a_d, cur_wp, t_sim):
         _cyl = []
         for (_oid, c3, vel, r_obs, d_safe) in movers:
             q_c, veff_c = PERCLASS_CONF.get(d_safe, (MAN_QCONF, MAN_VEFF))
-            if _FPRINT is not None:
-                _fpr_write(f"t={t_sim:.3f} CYL c0={float(c3[0]).hex()},{float(c3[1]).hex()} "
-                           f"r={float(r_obs).hex()} ds={d_safe!r} q={float(q_c).hex()} vf={float(veff_c).hex()} "
-                           f"ell={_ELL_TRK.get(_oid)}")
             _e7 = _ell_of_mover(_oid, vel, r_obs)
             _c7 = _cap_of_mover(_oid, vel, r_obs)
             tag7 = ()
@@ -2344,9 +2352,18 @@ def set_goal(s, goal):
     g = RobotState(); g.pos = np.asarray(goal, float).copy(); s.set_terminal_goal(g)
 
 
+_STEP_ERR = {}   # env.step failures by exception type: loud once, counted after (a silently dead
+#   env.step freezes the whole crowd while the drone keeps scoring -- 2026-07-16 sweep)
+
+
 def step_env():
     try: env.step([0.0, 0.0])
-    except Exception: pass   # ego may "arrive_dest"; we don't care, keep rendering the scene
+    except Exception as e:   # ego may "arrive_dest" at episode end; anything else must be visible
+        k = type(e).__name__
+        _STEP_ERR[k] = _STEP_ERR.get(k, 0) + 1
+        if _STEP_ERR[k] == 1:
+            print(f"[3dv] WARNING: env.step failed: {k}: {e} (world may stop advancing; "
+                  f"further failures of this type counted silently)", flush=True)
 
 
 DT = float(par.dc); T_MAX = float(args.t_max)
@@ -2565,11 +2582,6 @@ while not quit_now:
                 # NO-HOLD cylinder fastest-safe tournament (fly over / around / climb); leaves EGO holding the winner
                 t0 = time.perf_counter(); man_kind, ego_traj_pts2, man_g = ego_maneuver_replan(p_d, v_d, a_d, cur_wp, t)
                 last_rt = time.perf_counter() - t0
-                if _FPRINT is not None:
-                    _du = ego.duration()
-                    _sp = ([x for u in np.linspace(0.0, max(_du - 1e-3, 0.0), 12) for x in (ego.eval(u) or [[0, 0, 0]])[0]]
-                           if _du > 1e-3 else [0.0])
-                    _fpr_write(f"t={t:.3f} DECIDE kind={man_kind} g={man_g:.4f} dur={_du!r} spline={_fpx(_sp)}")
                 ego_dur = ego.duration(); ego_ok = ego_dur > 1e-3
             else:
                 to_wp = cur_wp[:2] - p_d[:2]; dwp = float(np.linalg.norm(to_wp))

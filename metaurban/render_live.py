@@ -110,13 +110,21 @@ for _ in range(10): env.step([0.0, 0.0])
 eng = env.engine; ego = env.agent
 
 
+_LIVE_MOVER_ERR = {}   # 2026-07-16 sweep: fallbacks must be loud
+
+
 def native_objects():
     out = []
     for oid, o in eng.get_objects().items():
         if o is ego: continue
         try:
             pos = np.asarray(o.position, float); vel = np.asarray(o.velocity, float)
-        except Exception: continue
+        except Exception as e:
+            k = type(e).__name__
+            _LIVE_MOVER_ERR[k] = _LIVE_MOVER_ERR.get(k, 0) + 1
+            if _LIVE_MOVER_ERR[k] == 1:
+                print(f"[live] WARNING: dropping native mover, position/velocity read failed: {k}: {e} (first occurrence; counted silently after)", flush=True)
+            continue
         if pos.shape[0] < 2 or not np.all(np.isfinite(pos)): continue
         out.append((oid, classify(o), pos[:2], vel[:2] if vel.shape[0] >= 2 else np.zeros(2), obj_size(o)))
     return out
