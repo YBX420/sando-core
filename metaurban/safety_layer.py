@@ -181,20 +181,6 @@ def _cap_behind(ent, ego, tau, d, warp=1.0):
     return ok
 
 
-_FPC = os.environ.get("FPRINT_CERT") or None   # forensic: per-call cert input+margin bit dump (layout-flip hunt)
-_FPC_F = [None]
-
-
-def _fpc(line):
-    if _FPC_F[0] is None:
-        _FPC_F[0] = open(_FPC, "w")
-    _FPC_F[0].write(line + "\n")
-
-
-def _hx(x):
-    return float(x).hex()
-
-
 def cert_clear(ego, cyl, tau=TAU, delta=None):
     """The cylinder disjunction on ego's CURRENTLY-committed B-spline: per mover, (horiz-predicted AND
     horiz-current) OR above. AND across movers. A mover carrying the v4 ellipse field is judged in the
@@ -208,11 +194,8 @@ def cert_clear(ego, cyl, tau=TAU, delta=None):
             # frozen-current conjunct, s=1 the predicted tube, at the collapsed radius.
             hb = True
             for s in _cap_grid(cap):
-                hs, _m = ego.certify_horizontal(obs_c0=c0, R=R, obs_vel=tuple(np.asarray(vv, float) * s),
-                                                obs_acc=(0, 0, 0), t_hi=tau, v_eff=veff, delta=d)
-                if _FPC:
-                    _fpc(f"CH tau={_hx(tau)} d={_hx(d)} c0={_hx(c0[0])},{_hx(c0[1])} R={_hx(R)} "
-                         f"v={_hx(vv[0])},{_hx(vv[1])} s={_hx(s)} veff={_hx(veff)} ok={int(hs)} m={_hx(_m)}")
+                hs, _ = ego.certify_horizontal(obs_c0=c0, R=R, obs_vel=tuple(np.asarray(vv, float) * s),
+                                               obs_acc=(0, 0, 0), t_hi=tau, v_eff=veff, delta=d)
                 if not hs:
                     hb = False
                     break
@@ -228,14 +211,9 @@ def cert_clear(ego, cyl, tau=TAU, delta=None):
                 hc, _ = ego.certify_horizontal_aniso(obs_c0=c0, R=_rw, obs_vel=(0, 0, 0), t_hi=tau,
                                                      v_eff=veff, delta=d, ux=_ux, uy=_uy, kappa=_k)
             else:
-                hp, _m1 = ego.certify_horizontal(obs_c0=c0, R=R, obs_vel=vv, obs_acc=aa, t_hi=tau, v_eff=veff, delta=d)
-                hc, _m2 = ego.certify_horizontal(obs_c0=c0, R=R, obs_vel=(0, 0, 0), t_hi=tau, v_eff=veff, delta=d)
-                if _FPC:
-                    _fpc(f"CP tau={_hx(tau)} d={_hx(d)} c0={_hx(c0[0])},{_hx(c0[1])} R={_hx(R)} "
-                         f"v={_hx(vv[0])},{_hx(vv[1])} veff={_hx(veff)} hp={int(hp)}:{_hx(_m1)} hc={int(hc)}:{_hx(_m2)}")
-        vo, _mv = ego.certify_above(z_clear=zc, t_hi=tau, v_eff_z=0.0, delta=d)
-        if _FPC:
-            _fpc(f"CA tau={_hx(tau)} d={_hx(d)} zc={_hx(zc)} ok={int(vo)} m={_hx(_mv)}")
+                hp, _ = ego.certify_horizontal(obs_c0=c0, R=R, obs_vel=vv, obs_acc=aa, t_hi=tau, v_eff=veff, delta=d)
+                hc, _ = ego.certify_horizontal(obs_c0=c0, R=R, obs_vel=(0, 0, 0), t_hi=tau, v_eff=veff, delta=d)
+        vo, _ = ego.certify_above(z_clear=zc, t_hi=tau, v_eff_z=0.0, delta=d)
         if not ((hp and hc) or vo):
             return False
     return True
@@ -381,34 +359,11 @@ def maneuver_decide_sticky(ego, p_d, v_d, a_d, goal, ztop, clear_fn, state,
     L = min(horizon, max(dist, 1.0))
 
     _gaps = {}
-    if os.environ.get("GAP_CARROT", "0") == "1" and cyl:
-        # WORLD-AIMED carrots (GapWeave S3): the fixed +-PHI fan is BLIND -- when a crosser owns the
-        # corridor the tournament flip-flops between left/right guesses. Aim instead at the crosser's
-        # WAKE: the point just behind its closest-approach position (pass-behind, the human road-
-        # crossing move); pass-ahead as the alternate. Speed-first ranking untouched.
-        _cand = None
-        for c in cyl:
-            _vv = np.asarray(c[1][:2], float)
-            if float(np.hypot(*_vv)) < 0.5:
-                continue
-            _d = np.asarray(c[0][:2], float) - p_d[:2]
-            _dn = float(np.linalg.norm(_d))
-            if _dn < 1e-6 or float(_d @ gdir) / _dn < 0.2:
-                continue
-            if _cand is None or _dn < _cand[0]:
-                _cand = (_dn, np.asarray(c[0][:2], float), _vv, float(c[3]))
-        if _cand is not None:
-            _, _c0, _vv, _R = _cand
-            _vn = _vv / max(float(np.hypot(*_vv)), 1e-6)
-            _tc = max(0.0, min(2.5, float(-((_c0 - p_d[:2]) @ (_vv - gdir * 3.0))
-                                          / max(float((_vv - gdir * 3.0) @ (_vv - gdir * 3.0)), 1e-6))))
-            _pc = _c0 + _vv * _tc
-            for _tag, _sgn in (("gap_b", -1.0), ("gap_a", +1.0)):
-                _pt = _pc + _vn * _sgn * (_R + 0.8)
-                _dirv = _pt - p_d[:2]
-                _dl = float(np.linalg.norm(_dirv))
-                if _dl > 0.5:
-                    _gaps[_tag] = np.array([*(p_d[:2] + _dirv / _dl * L), cruise_z])
+    # GAP_CARROT is v2-only: the world-aimed carrot builder needs the mover cylinders (cyl), which
+    # this sticky signature does not receive. A copy of the v2 block lived here referencing the
+    # UNDEFINED name `cyl` -- an armed NameError whenever GAP_CARROT=1 reached the replay sticky path
+    # (pyflakes sweep 2026-07-16, same family as the dead calib loader). _gaps stays empty: _gsub
+    # returns None for gap keys and the grid skips them, the sound carrot-absent behaviour.
 
     def _gsub(kind):
         if kind in _gaps:
@@ -594,8 +549,6 @@ def maneuver_decide_v2(ego, p_d, v_d, a_d, goal, ztop, cyl, state,
     state: caller-persisted dict (kind / gsub / s / age)."""
     if speeds is None:
         speeds = (1.0, 0.6, 0.3, 0.15) if os.environ.get("SPEEDS_CRAWL", "0") == "1" else (1.0, 0.6, 0.3)
-    _slew = os.environ.get("SPEED_SLEW", "0") == "1"       # per-tick one-grid-step speed changes
-    #   (both directions): incremental vector edits, not jumps -- kills speed churn
     d = (tau if delta is None else delta)
     p_d = np.asarray(p_d, float); goal = np.asarray(goal, float)
     gxy = goal[:2] - p_d[:2]; dist = float(np.linalg.norm(gxy))

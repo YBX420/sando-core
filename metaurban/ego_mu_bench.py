@@ -61,7 +61,7 @@ for ep in range(args.episodes):
                                    0.3, min(tr.h, 2.5))
             mlist.append((np.array([c0[0], c0[1], Z]), np.array([vv[0], vv[1], 0.0]),
                           np.zeros(3), tr.r, 50.0, str(tr.cls), int(tr.trk.n),
-                          int(tr.trk.miss > 0), float(getattr(tr.trk, "nis_ewma", 0.0)),
+                          int(tr.trk.miss > 0), float(getattr(tr.trk, "nis", None) or 0.0),   # was nis_ewma: nonexistent attr, column was constant 0.0 (2026-07-16 KF audit; .nis is None pre-update)
                           float(getattr(tr.trk, "sigma_v", 0.0))))
         ego.update_cloud(np.asarray(cloud, float) if cloud else np.zeros((0, 3)), p3)
         cyl, _zt = SL.build_cylinders(mlist, None, predict=True, calib_v2=CAL2)

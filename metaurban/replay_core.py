@@ -575,7 +575,11 @@ def run_replay(movers, ep, mode="ours", calib=None, predict=True, max_vel=3.0, m
                     aa = np.zeros(3)                     # CV deployment: cert polynomial matches the CV-calibrated tube
                 mlist.append((c0, vv, aa, r_o, h_o, cls_o, int(getattr(trk, "n", 99)),
                               int(getattr(trk, "miss", 0) > 0),
-                              float(getattr(trk, "nis_ewma", 0.0)), float(getattr(trk, "sigma_v", 0.0))))
+                              float(getattr(trk, "nis", None) or 0.0), float(getattr(trk, "sigma_v", 0.0))))
+        #                                       ^ was "nis_ewma" -- an attribute that has NEVER existed on
+        #   MoverTracker (only .nis/.last_nis), so the NIS zombie gate and every logged NIS column were a
+        #   constant 0.0 since birth (2026-07-16 KF audit). NIS_GATE defaults 0 = behaviour unchanged;
+        #   the instrument merely reads a real value now.
             cyl, ztop = SL.build_cylinders(mlist, calib, predict=predict,
                                            track_margin=(float(os.environ.get("DYN_TRACK", "0.473"))
                                                          if dynamics else 0.0),
