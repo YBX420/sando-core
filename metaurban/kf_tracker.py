@@ -177,6 +177,31 @@ class MoverTracker:
         ts = np.asarray(ts, float).reshape(-1, 1)
         return c0[None, :] + ts * v[None, :] + 0.5 * ts**2 * a[None, :]
 
+    def predict_sigma(self, ts):
+        """The sigma(t) HORN (M1a, timespace plan 2026-07-17): predicted-POSITION 1-sigma at each time
+        offset in ts, from the filter's own covariance propagated to that horizon -- F(t) P F(t)^T + Q(t)
+        per axis, axes combined exactly like pos_sigma (sqrt(Px(t)+Py(t))). Includes the accumulated
+        white-jerk process noise, so even a fully converged track grows honestly uncertain with horizon
+        (a converged pedestrian at q_jerk=2 is ~0.09m at 0.3s, ~0.9m at 1.5s -- the horn shape the
+        margin/ST-graph consumers scale by). Returns np.ndarray len(ts); 1e3 sentinel while P is unset.
+        NOTE: this is the filter's MODEL uncertainty, not a coverage guarantee -- calibration
+        (calibrate_norm's sigma-normalized line) owns the honest multiplier."""
+        ts = np.asarray(ts, float).reshape(-1)
+        out = np.empty(len(ts))
+        for i, t in enumerate(ts):
+            if self.fx.P is None or self.fy.P is None:
+                out[i] = 1e3
+                continue
+            if t <= 0.0:
+                out[i] = self.pos_sigma
+                continue
+            Fx, Qx = self.fx._mats(float(t))
+            Fy, Qy = self.fy._mats(float(t))
+            px = Fx @ self.fx.P @ Fx.T + Qx
+            py = Fy @ self.fy.P @ Fy.T + Qy
+            out[i] = float(np.sqrt(max(px[0, 0], 0.0) + max(py[0, 0], 0.0)))
+        return out
+
 
 if __name__ == "__main__":
     # self-test: a human walking +y at 1 m/s, observed with noise -> KF should recover v_y ~ 1 and predict ahead
@@ -226,3 +251,18 @@ if __name__ == "__main__":
         tc.coast(dt=0.10)                         # three 0.1 s coasts
     ok4 = np.allclose(ta.fx.x, tc.fx.x, atol=1e-12) and np.allclose(ta.fx.P, tc.fx.P, atol=1e-12)
     print("[kf] 3x0.1s == 1x0.3s composition PASS" if ok4 else "[kf] composition FAIL")
+
+    # sigma(t) horn regressions (M1a 2026-07-17):
+    # (a) sigma(0) == pos_sigma exactly; (b) monotone growth with horizon (white-jerk Q accumulates);
+    # (c) coasting shifts the whole horn UP (P grew, so every horizon is more uncertain).
+    sg = trk.predict_sigma([0.0, 0.3, 0.75, 1.5])
+    okA = abs(sg[0] - trk.pos_sigma) < 1e-12
+    okB = bool(np.all(np.diff(sg) > 0))
+    trk_c = _copy.deepcopy(trk)
+    for _ in range(3):
+        trk_c.coast()
+    sg_c = trk_c.predict_sigma([0.0, 0.3, 0.75, 1.5])
+    okC = bool(np.all(sg_c > sg))
+    print(f"[kf] sigma horn @[0,0.3,0.75,1.5]s = {np.round(sg, 3)}  after 3 coasts = {np.round(sg_c, 3)}")
+    print("[kf] sigma-horn PASS" if (okA and okB and okC) else
+          f"[kf] sigma-horn FAIL (sigma0={okA} monotone={okB} coast-lift={okC})")
