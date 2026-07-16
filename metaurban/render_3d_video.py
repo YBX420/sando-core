@@ -910,6 +910,7 @@ def _kf_movers_realistic(p_d, t_sim, cam_heading):
                 kv = np.zeros(3)
             pred = kc0[None, :] + np.linspace(0.0, _pred_tend(kc0, kv, p_d), 6)[:, None] * kv[None, :]
             _ELL_TRK[oid] = (99, False, str(cls))           # mature, never coasting -> shape always eligible
+            _TRK_SIG[oid] = (0.0, 0.0)                       # omniscient: exact state, zero sigma
             out.append((oid, kc0, (float(kv[0]), float(kv[1]), 0.0), float(r),
                         EGO_PERCLASS_DSAFE.get(cls, 0.8)))
             _KF_PRED.append((p2.copy(), p2.copy(), [(float(p[0]), float(p[1])) for p in pred], zc)
@@ -965,6 +966,7 @@ def _kf_movers_realistic(p_d, t_sim, cam_heading):
                     kv = np.zeros(3)
                     pred = np.asarray([kc0, kc0])
             _ELL_TRK[oid] = (int(trk.n), False, str(cls))
+            _TRK_SIG[oid] = (0.0, float(trk.sigma_v))        # exact xy, estimated velocity
             if KFDBG and cls == "pedestrian":
                 print(f"[XYDBG] t={t_sim:6.2f} {oid} gtv=({v2[0]:6.2f},{v2[1]:6.2f}) "
                       f"kfv=({kv[0]:6.2f},{kv[1]:6.2f}) verr={float(np.hypot(kv[0]-v2[0], kv[1]-v2[1])):5.2f} "
@@ -1040,6 +1042,7 @@ def _kf_movers_realistic(p_d, t_sim, cam_heading):
                       f"kf=({kc0[0]:7.2f},{kc0[1]:7.2f}) kfv=({kv[0]:6.2f},{kv[1]:6.2f})", flush=True)
         r_eff = tr.r + (MAN_MEM_K * tr.trk.pos_sigma if tr.miss > 0 else 0.0)
         _ELL_TRK[f"trk{tr.id}"] = (int(tr.trk.n), tr.miss > 0, str(tr.cls))   # v5 ellipse eligibility
+        _TRK_SIG[f"trk{tr.id}"] = (float(tr.trk.pos_sigma), float(tr.trk.sigma_v))
         out.append((f"trk{tr.id}", kc0, (float(kv[0]), float(kv[1]), 0.0), float(r_eff), d_safe))
         _KF_PRED.append((np.asarray(tr.xy[:2], float).copy(), np.asarray(kc0[:2], float).copy(),
                          [(float(p[0]), float(p[1])) for p in pred], float(zc))
@@ -1107,6 +1110,7 @@ def kf_movers(p_d, t_sim, cam_heading=None):
                   f"det=({det[0]:7.2f},{det[1]:7.2f}) kf=({kc0[0]:7.2f},{kc0[1]:7.2f}) "
                   f"kfv=({kv[0]:6.2f},{kv[1]:6.2f})", flush=True)
         _ELL_TRK[oid] = (int(trk.n), False, str(_cls))                     # v5 ellipse eligibility
+        _TRK_SIG[oid] = (0.0, 0.0) if GT_ORACLE else (float(trk.pos_sigma), float(trk.sigma_v))
         out.append((oid, kc0, (float(kv[0]), float(kv[1]), 0.0), r, d))
         _KF_PRED.append((det[:2].copy(), kc0[:2].copy(), [(float(p[0]), float(p[1])) for p in pred], float(c3[2]))
                         + ((_ell_ring(oid, kc0, kv, r),) if MAN_ELLIPSE else
@@ -1128,6 +1132,7 @@ def kf_movers(p_d, t_sim, cam_heading=None):
             r_mem = trk.r_obs + MAN_MEM_K * trk.pos_sigma                  # covariance growth -> bigger keep-out tube
             if oid in _ELL_TRK:                                            # coasting -> ellipse ineligible
                 _ELL_TRK[oid] = (_ELL_TRK[oid][0], True, _ELL_TRK[oid][2])
+            _TRK_SIG[oid] = (float(trk.pos_sigma), float(trk.sigma_v))
             out.append((oid, kc0, (float(kv[0]), float(kv[1]), 0.0), r_mem, trk.d_safe))
             pred = trk.predict(np.linspace(0.0, _tau_now(), 6))
             _KF_PRED.append((kc0[:2].copy(), kc0[:2].copy(), [(float(p[0]), float(p[1])) for p in pred], float(kc0[2])))
@@ -1379,6 +1384,10 @@ def _pred_tend(kc0, kv, p_d):
     return max(_tau_now(), tcpa)
 assert not (MAN_ELLIPSE and MAN_CAPSULE), "ELLIPSE=1 and CAPSULE=1 are mutually exclusive"
 _ELL_V5 = {}; _ELL_VMIN = 0.5; _ELL_TRK = {}      # _ELL_TRK: oid -> (kf_age, coasting, cls)
+_TRK_SIG = {}   # oid -> (pos_sigma, sigma_v) live filter covariance sidecar (M1b sigma-scaled margins);
+#   the oracle arm writes (0,0) = exact state, so sigma-scaled bands vanish there BY CONSTRUCTION
+ETA_K = float(os.environ.get("ETA_K", "2.0"))     # ETA_FEED=2 sigma-budget scale (~2-sigma band). seed7 KF arm:
+#   K=1.0 8.9s/clr1.65, K=1.5 11.2s/hold40 (route-topology flip, NON-monotone landscape), K=2.0 8.5s/clr1.61
 _CAP_V6 = {}; _CAP_K = 4
 if MAN_CAPSULE:
     _v6 = _SL.load_calib_v6(eps=MAN_EPS)
@@ -1666,17 +1675,31 @@ def _man_cloud(p_d, heading, t_sim, movers):
                     _SWATH_DBG[0] += 1
                     print(f"[SWATH] t={t_sim:5.2f} {_oid} tcpa={tcpa:.2f} |v|={float(np.hypot(vel[0], vel[1])):.2f} "
                           f"leads={np.round(leads,2)}", flush=True)
-        _eta = os.environ.get("ETA_FEED", "0") == "1"
+        _eta = os.environ.get("ETA_FEED", "0")
         _qv = PERCLASS_CONF.get(d_safe, (MAN_QCONF, MAN_VEFF))
         for lead in leads:                                        # current + closest-approach predicted footprint
             cx, cy = c3[0] + vel[0] * lead, c3[1] + vel[1] * lead
             R_l = R
-            if _eta and lead > 0.0:
+            if _eta not in ("0", "") and lead > 0.0:
                 # GapWeave S1 (time-matched feed radius): the planner must avoid the ring the
                 # CERTIFICATE will demand at arrival time -- q + v_eff*(t_view+delta), capped, plus
-                # the band offset so the unconstrained optimum sits at floor+0.25 (plan once,
+                # a band offset so the unconstrained optimum sits off the floor (plan once,
                 # certify once; the plan-small/cert-big mismatch was the recurring kill->hold chain).
-                R_l = min(R + _qv[0] + _qv[1] * (min(lead, REPLAN_DT) + REPLAN_DT), R + 2.6) + 0.25
+                # ETA_FEED=1: constant 0.25 band (07-16: KF arm 10.1->8.5s but POISONS the oracle arm
+                # -- margin is an ERROR BUDGET, a perfect estimator owes none).
+                # ETA_FEED=2 (M1b): band scaled by THIS track's live covariance, ring-displacement
+                # error ~ pos_sigma + sigma_v*lead -- oracle arm carries sigma=(0,0) so the band
+                # vanishes there BY CONSTRUCTION; unknown tracks get a modest default budget.
+                if _eta == "2":
+                    # PURE sigma budget -- v1 kept the q+veff cert-match term and it alone bent the
+                    # oracle's straight line (9.6s vs 7.2 anchor, gate-1 fail): for a perfect estimator
+                    # ANY ring inflation is a spatial veto the cert never asked for. Mode 2 therefore
+                    # scales the ENTIRE inflation by the track's live covariance: sigma=(0,0) => R_l==R
+                    # bit-exact, zero ceiling damage BY CONSTRUCTION.
+                    _ps, _sv = _TRK_SIG.get(_oid, (0.15, 0.5))
+                    R_l = min(R + ETA_K * (_ps + _sv * (lead + REPLAN_DT)), R + 2.6)
+                else:
+                    R_l = min(R + _qv[0] + _qv[1] * (min(lead, REPLAN_DT) + REPLAN_DT), R + 2.6) + 0.25
             _n_th = max(10, int(np.ceil(2 * np.pi * R_l / 0.5)))   # gap-free ring at any radius
             ring = [[cx + R_l * np.cos(a), cy + R_l * np.sin(a), z]
                     for a in np.linspace(0, 2 * np.pi, _n_th, endpoint=False)
