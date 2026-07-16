@@ -5,7 +5,7 @@ Produces (out/conformal/):
   fig_predictor.png       CA vs CV predictor -> per-class conformal keep-out v_eff (CV halves pedestrian)
   fig_ab.png              ours vs native EGO: time scatter + time-delta hist + min-clearance (the headline)
 """
-import os, sys, json
+import os, json
 import numpy as np
 import matplotlib
 matplotlib.use("Agg")

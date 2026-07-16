@@ -9,7 +9,7 @@ Usage (from anywhere; workers cd into the metaurban repo themselves):
   python eval_parallel.py --n 200 --k 8 --t_max 30
   python eval_parallel.py --n 96 --k 6 --reset_every 2
 """
-import os, sys, json, time, argparse, subprocess
+import os, json, time, argparse, subprocess
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 MU_ROOT = "/media/boxuan/Data21/projects/metaurban"

@@ -1,5 +1,4 @@
 """eval_ppo — run the learned planner through the SAME protocol as bench_run arms."""
-import glob
 import os
 import time
 import numpy as np

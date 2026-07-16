@@ -8,7 +8,7 @@ seeds>=20 are fresh scenarios.
 
 Run: python metaurban/render_screen.py --seeds 0-59 -P 3 --t_max 20
 """
-import os, re, sys, csv, glob, argparse, subprocess, collections
+import os, re, csv, argparse, subprocess, collections
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

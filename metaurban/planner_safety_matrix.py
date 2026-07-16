@@ -22,7 +22,7 @@ Run one chunk (one planner, one safety setting) as a FRESH process (sidesteps EG
 and APPEND its rows to the CSV:
   python metaurban/planner_safety_matrix.py --planner ego --safety on  --seeds 0-9 --n_ep 6 --csv out/conformal/planner_safety.csv
 """
-import os, sys, math, json, glob, argparse, csv as _csv
+import os, sys, argparse, csv as _csv
 import numpy as np
 
 HERE = os.path.dirname(os.path.abspath(__file__))

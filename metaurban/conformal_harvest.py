@@ -14,7 +14,7 @@ Output per seed: out/conformal/traj_seed{N}.npz
 Run (metaurban conda env):
   PYTHONPATH=/media/boxuan/Data2/projects/metaurban python metaurban/conformal_harvest.py --seeds 0-19 --steps 600
 """
-import os, sys, argparse, time
+import os, argparse, time
 import numpy as np
 
 HERE = os.path.dirname(os.path.abspath(__file__))

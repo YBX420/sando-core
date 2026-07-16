@@ -7,7 +7,6 @@ over fold-B5 per-flight sups of r; deployment tube for a track of age a is q_hat
 shipped as per-age AFFINE plates (q0_a = q_hat*sigma(a,delta), v_a = q_hat*max-secant -- a sound
 linear majorant of the sigma curve on the sample grid), consumed by the EXISTING plate machinery.
 """
-import hashlib
 import json
 import os
 import sys

@@ -12,7 +12,6 @@ Run (metaurban env, cwd+PYTHONPATH = metaurban repo):  python render_shield_ab_v
 import os
 import pickle
 import sys
-import time
 
 _HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, _HERE)
 import numpy as np

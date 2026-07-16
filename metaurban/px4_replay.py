@@ -12,7 +12,7 @@ Prereq: PX4 SITL up (px4 binary + jmavsim, MAVSDK on udp 14540). Run in the meta
   LD_PRELOAD=$HOME/miniconda3/envs/sando/lib/libstdc++.so.6 \
   python metaurban/px4_replay.py --seed 1 --n_ep 3 --speedup 1.33
 """
-import os, sys, math, time, json, glob, argparse
+import os, sys, math, time, json, argparse
 import numpy as np
 
 HERE = os.path.dirname(os.path.abspath(__file__))

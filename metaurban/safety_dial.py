@@ -7,8 +7,7 @@ This aggregates the per-eps A/B summaries + the calibration into one table + a P
 
 Run (after ab_replay at several eps):  python metaurban/safety_dial.py
 """
-import os, sys, json, glob
-import numpy as np
+import os, sys, json
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 OUTDIR = os.path.join(os.path.dirname(HERE), "out", "conformal")

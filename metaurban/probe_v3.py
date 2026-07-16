@@ -1,10 +1,9 @@
 """probe_v3 — 小而快的 CPL-v3 reach 诊断:固定 8 场景,报 reach/clean/evade + v3 的 kind 分布。
 用法: DECIDE=v2|v3 [DELTA_OVR=0.05 V3_VCAP=1 ...] python probe_v3.py"""
-import os, sys, json
+import os, sys
 os.environ.setdefault("CALIB_V2", "1"); os.environ.setdefault("CALIB_EPS", "0.10")
 os.environ.setdefault("PERCEPT", "realistic")
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, HERE); os.chdir(HERE)
-import numpy as np
 import replay_core as RC
 import scenario_lib as SLB
 

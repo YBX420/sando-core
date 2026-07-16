@@ -9,7 +9,6 @@ Fail-loud: UNDER_CALIBRATED / UNCALIBRATED explicit, no +inf, no silent zeros.
 import hashlib
 import json
 import os
-import sys
 
 import numpy as np
 

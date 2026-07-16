@@ -7,7 +7,7 @@ reports the trend + the conformal guarantee backing it. Tighter eps -> wider kee
 
 Run:  python metaurban/reliability.py --eps 0.01 --seeds 0-19 --n_ep 60
 """
-import os, sys, glob, json, csv, argparse, contextlib
+import os, sys, json, csv, argparse, contextlib
 import numpy as np
 
 HERE = os.path.dirname(os.path.abspath(__file__))

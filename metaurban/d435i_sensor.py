@@ -12,7 +12,7 @@ consumes it (the intrinsics below are the D435i's), so this is the sim half of o
 D435i depth module (datasheet): depth FOV 87 deg x 58 deg, range ~0.3-10 m (best <~3 m), stereo depth noise
 ~< 2% of range. We model FOV + range gating + an axial gaussian noise ~ k*z^2.
 """
-import os, math
+import math
 import numpy as np
 
 # ---- D435i depth intrinsics / limits (datasheet) ----

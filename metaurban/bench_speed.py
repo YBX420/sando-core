@@ -1,7 +1,7 @@
 """bench_speed — drone-speed sweep of the full benchmark: how does safety scale with vmax?
 Overrides every scenario's drone.max_vel; note fast_canyon natively specifies 5.0 (kept overridden
 too -- the sweep is THE variable). New static semantics (online mapping) baseline."""
-import glob, os, sys
+import glob
 import numpy as np
 import replay_core as RC
 import scenario_lib as SLB

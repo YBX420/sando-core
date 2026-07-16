@@ -18,7 +18,6 @@ Usage (metaurban conda env; builds the map to read its geometry):
 import argparse
 import json
 import os
-import sys
 
 import numpy as np
 

@@ -14,7 +14,7 @@ Run (metaurban env, with both preloads):
   LD_LIBRARY_PATH=/home/boxuan/gurobi1103/linux64/lib \
   python metaurban/px4_batch.py --modes ours,native,sando --seeds 0-4 --n_ep 3 --speedup 1.33
 """
-import os, sys, math, time, json, glob, argparse, subprocess
+import os, sys, math, time, json, argparse, subprocess
 import numpy as np
 
 HERE = os.path.dirname(os.path.abspath(__file__))

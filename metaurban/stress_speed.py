@@ -1,7 +1,6 @@
 """stress_speed — theorem-v2 tube × speed × per-speed-retimed scenes; every failure logged for
 autopsy (collision / near-miss / DNF, with per-episode detail)."""
-import glob, json, os, sys
-import numpy as np
+import glob, json, os
 import replay_core as RC
 import scenario_lib as SLB
 

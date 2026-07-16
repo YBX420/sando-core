@@ -5,7 +5,7 @@ native EGO reacts late and grazes/collides. Picks an episode where native collid
 
 Run:  python metaurban/traj_plot.py            (auto-picks a native-collides episode)
 """
-import os, sys, math, glob, contextlib
+import os, sys, glob, contextlib
 import numpy as np
 import matplotlib
 matplotlib.use("Agg")

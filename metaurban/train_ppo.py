@@ -1,6 +1,5 @@
 """train_ppo — end-to-end learned planner arm for the MetaDrone benchmark."""
 import time
-import numpy as np
 from stable_baselines3 import PPO
 from stable_baselines3.common.vec_env import SubprocVecEnv, VecMonitor
 from stable_baselines3.common.logger import configure

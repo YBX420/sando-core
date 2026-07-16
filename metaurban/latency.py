@@ -12,7 +12,7 @@ Reports mean / median / p95 / max per call + per tick, so you can see it against
 Run:  python metaurban/latency.py --seeds 0-2 --n_ep 3
       (add SANDO: LD_LIBRARY_PATH=~/gurobi1103/linux64/lib python metaurban/latency.py --sando)
 """
-import os, sys, time, glob, argparse
+import os, sys, time, argparse
 import numpy as np
 
 HERE = os.path.dirname(os.path.abspath(__file__))

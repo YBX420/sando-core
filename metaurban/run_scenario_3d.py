@@ -22,7 +22,6 @@ inside the budget, the cert itself is ~us-scale. --speed 2.0 runs 2x faster than
 import argparse
 import json
 import os
-import sys
 import time
 
 import numpy as np

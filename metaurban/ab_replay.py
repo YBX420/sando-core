@@ -9,7 +9,7 @@ the contrast is the point. We report time deltas, min clearances, collision/reac
 
 Run:  python metaurban/ab_replay.py --seeds 0-19 --n_ep 6 --eps 0.05
 """
-import os, sys, json, glob, argparse, contextlib
+import os, sys, json, argparse, contextlib
 import numpy as np
 
 HERE = os.path.dirname(os.path.abspath(__file__))

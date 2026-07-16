@@ -11,7 +11,7 @@ median clearance per planner). Needs LD_LIBRARY_PATH=~/gurobi1103/linux64/lib fo
 
 Run:  python metaurban/compare3.py --regime matched --max_vel 3.0 --seeds 0-19 --n_ep 6
 """
-import os, sys, csv, json, glob, argparse, contextlib
+import os, sys, csv, json, argparse, contextlib
 import numpy as np
 
 HERE = os.path.dirname(os.path.abspath(__file__))
