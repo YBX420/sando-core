@@ -173,8 +173,12 @@ class RadarVel:
             print(f"[radar] WARNING: truncated PCD {rec['filename']}", flush=True)
             return None
         pts = np.frombuffer(body, dtype=self._DT)
-        # devkit-default validity: invalid_state==0, ambig_state==3 (ambiguity resolved)
-        pts = pts[(pts["invalid"] == 0) & (pts["ambig"] == 3)]
+        # validity (2026-07-17 review): devkit-default invalid_state==0 & ambig_state==3, plus
+        # dyn_prop<=6 (7=undefined) and an rms-code sanity cut -- the PCD carries per-point
+        # vx_rms/vy_rms QUALITY CODES; without the devkit LUT vendored we use them as a relative
+        # filter (drop the worst codes), not as metric sigmas. COMPROMISE, documented.
+        pts = pts[(pts["invalid"] == 0) & (pts["ambig"] == 3) & (pts["dyn_prop"] <= 6)
+                  & (pts["vx_rms"] < 24) & (pts["vy_rms"] < 24)]
         cs = self.nusc.cs[rec["calibrated_sensor_token"]]
         ego = self.nusc.ego[rec["ego_pose_token"]]
         Rcs, Rego = self._qr(cs["rotation"]), self._qr(ego["rotation"])
@@ -590,12 +594,17 @@ def main(scene_names, render, use_lidar=False, det_mode="yolo", use_seg=False, g
                     trk.update(det, dt=max(1e-3, t_now - w["t_last"]))
                 w["src"] = "gt3d" if _gtp is not None else ("lidar" if by_lidar else "hprior")
                 if rvel is not None:
-                    _rv = rvel.velocity_at(det[:2], sd_rec["timestamp"])   # same-instant Doppler fusion
+                    # same-instant Doppler fusion; position gate widened by the track's own pos_sigma
+                    # (a half-converged track's radar lives further from its estimate than 2.5 m),
+                    # velocity INNOVATION gate inside update_velocity (3*sqrt(S)+0.5) rejects
+                    # neighbour/clutter returns -- the double insurance of the 2026-07-17 review.
+                    _rv = rvel.velocity_at(det[:2], sd_rec["timestamp"],
+                                           gate_m=2.5 + min(float(trk.pos_sigma), 2.5))
                     if _rv is not None:
                         _vr, _nr = _rv
                         # r_vel: sensor floor 0.1-0.4 m/s; fewer matched returns -> trust less
-                        trk.update_velocity(_vr, r_vel=0.3 if _nr >= 3 else 0.5)
-                        w["src"] += "+rad"
+                        if trk.update_velocity(_vr, r_vel=0.3 if _nr >= 3 else 0.5):
+                            w["src"] += "+rad"
                 w["t_last"] = t_now; w["hist"].append(det)
                 w["bbox"] = (x0, y0, x1, y1) if _bb is not None else None
                 w["msk"] = _msk

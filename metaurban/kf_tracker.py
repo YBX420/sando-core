@@ -90,11 +90,12 @@ class _AxisCAKalman:
     def update_velocity(self, zv, r_vel):
         """DIRECT velocity measurement update, H=[0,1,0] -- the radar port (M1c, timespace plan).
         SAME-INSTANT fusion: no predict step here, so the one-coast-or-update-per-tick time contract
-        stays with update()/coast(); call this right after them when a Doppler velocity is available.
-        r_vel = the measurement's own 1-sigma (radar vx_comp/vy_comp: ~0.1-0.4 m/s, zero lag) --
-        this is what collapses sigma_v without waiting for position differencing to converge."""
+        stays with update()/coast() (t_last/clock is owned by the caller, never advanced here);
+        call this right after them when a Doppler velocity is available. r_vel = the measurement's
+        own 1-sigma (radar vx_comp/vy_comp: ~0.1-0.4 m/s, zero lag) -- collapses sigma_v without
+        waiting for position differencing to converge. Returns True iff fused."""
         if self.x is None or self.P is None:
-            return                                            # position owns track birth
+            return False                                      # position owns track birth
         Rv = float(r_vel) ** 2
         y = float(zv) - self.x[1]
         S = self.P[1, 1] + Rv
@@ -103,6 +104,12 @@ class _AxisCAKalman:
         self.x = self.x + K * y
         Hv = np.array([0.0, 1.0, 0.0])
         self.P = (np.eye(3) - np.outer(K, Hv)) @ self.P
+        # CRITICAL (2026-07-17 review): disarm the two-point-differencing latch. With a direct
+        # velocity in the state, the SECOND camera detection must go through the plain Kalman
+        # update -- the two-point re-init would OVERWRITE the fused velocity with (z2-z1)/dt
+        # garbage (sigma_v 0.2 -> ~8) exactly in the young window radar exists to save.
+        self._z0 = None
+        return True
 
 
 class MoverTracker:
@@ -124,13 +131,24 @@ class MoverTracker:
         self.fx.update(det[0], dt); self.fy.update(det[1], dt); self.z = float(det[2]); self.n += 1
         self.miss = 0                                        # detected this tick -> reset the out-of-FOV miss counter
 
-    def update_velocity(self, v_xy, r_vel):
+    def update_velocity(self, v_xy, r_vel, gate_sigma=3.0, gate_slack=0.5):
         """Fuse a DIRECT ground-plane velocity measurement (the radar port, M1c): call right after
-        this tick's update()/coast() -- same-instant fusion, no extra time step. r_vel = the sensor's
-        own 1-sigma (nuScenes radar vx_comp/vy_comp: 0.1-0.4 m/s, zero lag). This is the input that
-        collapses sigma_v directly instead of waiting ~n ticks of position differencing."""
-        self.fx.update_velocity(float(v_xy[0]), r_vel)
-        self.fy.update_velocity(float(v_xy[1]), r_vel)
+        this tick's update()/coast() -- same-instant fusion, no extra time step (the clock stays
+        with update/coast). r_vel = the sensor's own 1-sigma (nuScenes vx_comp/vy_comp: 0.1-0.4 m/s).
+        INNOVATION GATE (2026-07-17 review): reject the fusion when the measured velocity sits
+        further than gate_sigma*sqrt(S) + gate_slack from the filter's own velocity -- a mis-matched
+        return (neighbouring car / clutter) must not steer this track. Returns True iff fused."""
+        if self.fx.x is None or self.fy.x is None or self.fx.P is None:
+            return False
+        Rv = float(r_vel) ** 2
+        dvx = float(v_xy[0]) - self.fx.x[1]
+        dvy = float(v_xy[1]) - self.fy.x[1]
+        S = self.fx.P[1, 1] + self.fy.P[1, 1] + 2.0 * Rv
+        if float(np.hypot(dvx, dvy)) > gate_sigma * float(np.sqrt(max(S, 1e-9))) + gate_slack:
+            return False
+        fused_x = self.fx.update_velocity(float(v_xy[0]), r_vel)
+        fused_y = self.fy.update_velocity(float(v_xy[1]), r_vel)
+        return bool(fused_x and fused_y)
 
     def coast(self, dt=None):
         """Out-of-FOV time update: extrapolate both ground-plane axes one dt and GROW covariance; count the miss.
@@ -309,3 +327,21 @@ if __name__ == "__main__":
     okT = abs(trk_r.state()[0][0] - p_before[0]) < 0.5      # no time advance (small gain-coupled nudge ok)
     print(f"[kf] radar port: sigma_v {sv_before:.2f} -> {sv_after:.2f}  v={v_r[0]:.2f} (truth 1.4)")
     print("[kf] radar-port PASS" if (okR and okT) else f"[kf] radar-port FAIL (collapse={okR} timefreeze={okT})")
+
+    # RADAR-SANDWICH regression (2026-07-17 review, the _z0 latch bug): det1 -> radar -> det2.
+    # Without disarming the two-point latch, det2's re-init OVERWRITES the fused velocity
+    # (sigma_v 0.2 -> ~8 at dt=0.1); with the fix the fused velocity must SURVIVE det2.
+    trk_s = MoverTracker(dt=0.10, meas_noise=0.07)
+    true = np.array([1.0, 0.0, 1.5]); vel = np.array([1.4, 0.0, 0.0])
+    trk_s.update(true + rng.normal(0, 0.07, 3))               # det1 (arms the two-point latch)
+    fused = trk_s.update_velocity((1.4, 0.0), r_vel=0.2)      # radar between det1 and det2
+    true = true + vel * 0.10
+    trk_s.update(true + rng.normal(0, 0.07, 3))               # det2 -- must NOT two-point re-init
+    _, v_s, _ = trk_s.state()
+    okS = fused and trk_s.sigma_v < 0.5 and abs(v_s[0] - 1.4) < 0.4
+    print(f"[kf] radar sandwich: fused={fused} sigma_v after det2 = {trk_s.sigma_v:.2f}  v={v_s[0]:.2f}")
+    print("[kf] radar-sandwich PASS" if okS else "[kf] radar-sandwich FAIL (the _z0 latch nuked the fusion)")
+
+    # innovation-gate regression: a wildly wrong Doppler (clutter/neighbour) must be REJECTED.
+    ok_gate = not trk_s.update_velocity((9.0, -7.0), r_vel=0.2)
+    print("[kf] radar innovation-gate PASS" if ok_gate else "[kf] radar innovation-gate FAIL (clutter steered the track)")
