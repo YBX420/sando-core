@@ -87,5 +87,11 @@ for eps in (0.05, 0.10):
     if eps == 0.10:
         p = res["groups"]["pedestrian"]["levels"]["0.1"]["plates"]
         print("  ped 盘样例:", {k: (p[k]["q_conformal"], p[k]["v_eff"]) for k in ("a2", "a4", "a8", "a13", "a20")})
-json.dump(res, open(os.path.join("..", "out", "conformal", "calib_norm.json"), "w"), indent=1)
-print("[calib] wrote ../out/conformal/calib_norm.json")
+# overwrite protection (2026-07-17 traceability guardrail): a committed calibration must not be
+# silently clobbered by a re-run -- default output is date-stamped; FORCE=1 writes the canonical name.
+import time as _time
+_name = ("calib_norm.json" if os.environ.get("FORCE") == "1"
+         else _time.strftime("calib_norm_%Y%m%d_%H%M%S.json"))
+_out = os.path.join("..", "out", "conformal", _name)
+json.dump(res, open(_out, "w"), indent=1)
+print(f"[calib] wrote {_out}" + ("" if _name == "calib_norm.json" else "  (FORCE=1 to overwrite the canonical calib_norm.json)"))

@@ -1,0 +1,1325 @@
+{
+ "provenance": {
+  "spec": "sigma_kf-normalized (memo#7)",
+  "config_sha": "779ab1f213bd889b",
+  "n_flights": 38,
+  "date": "2026-07-07"
+ },
+ "groups": {
+  "pedestrian": {
+   "levels": {
+    "0.05": {
+     "q_conformal": 1.6958,
+     "v_eff": 9.0648,
+     "status": "ok",
+     "plates": {
+      "a2": {
+       "q_conformal": 1.8479,
+       "v_eff": 12.5227,
+       "age_lo": 2,
+       "age_hi": 2,
+       "coast": null
+      },
+      "a3": {
+       "q_conformal": 2.1428,
+       "v_eff": 15.9381,
+       "age_lo": 3,
+       "age_hi": 3,
+       "coast": null
+      },
+      "a4": {
+       "q_conformal": 2.1632,
+       "v_eff": 12.6986,
+       "age_lo": 4,
+       "age_hi": 4,
+       "coast": null
+      },
+      "a5": {
+       "q_conformal": 1.859,
+       "v_eff": 9.7591,
+       "age_lo": 5,
+       "age_hi": 5,
+       "coast": null
+      },
+      "a6": {
+       "q_conformal": 1.7159,
+       "v_eff": 9.0445,
+       "age_lo": 6,
+       "age_hi": 6,
+       "coast": null
+      },
+      "a7": {
+       "q_conformal": 1.6919,
+       "v_eff": 9.0495,
+       "age_lo": 7,
+       "age_hi": 7,
+       "coast": null
+      },
+      "a8": {
+       "q_conformal": 1.6958,
+       "v_eff": 9.0648,
+       "age_lo": 8,
+       "age_hi": 8,
+       "coast": null
+      },
+      "a9": {
+       "q_conformal": 1.6944,
+       "v_eff": 9.0354,
+       "age_lo": 9,
+       "age_hi": 9,
+       "coast": null
+      },
+      "a10": {
+       "q_conformal": 1.6918,
+       "v_eff": 9.0216,
+       "age_lo": 10,
+       "age_hi": 10,
+       "coast": null
+      },
+      "a11": {
+       "q_conformal": 1.6912,
+       "v_eff": 9.0218,
+       "age_lo": 11,
+       "age_hi": 11,
+       "coast": null
+      },
+      "a12": {
+       "q_conformal": 1.6913,
+       "v_eff": 9.0223,
+       "age_lo": 12,
+       "age_hi": 12,
+       "coast": null
+      },
+      "a13": {
+       "q_conformal": 1.6913,
+       "v_eff": 9.0215,
+       "age_lo": 13,
+       "age_hi": 13,
+       "coast": null
+      },
+      "a14": {
+       "q_conformal": 1.6912,
+       "v_eff": 9.021,
+       "age_lo": 14,
+       "age_hi": 14,
+       "coast": null
+      },
+      "a15": {
+       "q_conformal": 1.6912,
+       "v_eff": 9.021,
+       "age_lo": 15,
+       "age_hi": 15,
+       "coast": null
+      },
+      "a16": {
+       "q_conformal": 1.6912,
+       "v_eff": 9.0211,
+       "age_lo": 16,
+       "age_hi": 16,
+       "coast": null
+      },
+      "a17": {
+       "q_conformal": 1.6912,
+       "v_eff": 9.021,
+       "age_lo": 17,
+       "age_hi": 17,
+       "coast": null
+      },
+      "a18": {
+       "q_conformal": 1.6912,
+       "v_eff": 9.021,
+       "age_lo": 18,
+       "age_hi": 18,
+       "coast": null
+      },
+      "a19": {
+       "q_conformal": 1.6912,
+       "v_eff": 9.021,
+       "age_lo": 19,
+       "age_hi": 19,
+       "coast": null
+      },
+      "a20": {
+       "q_conformal": 1.6912,
+       "v_eff": 9.021,
+       "age_lo": 20,
+       "age_hi": 20,
+       "coast": null
+      },
+      "a21": {
+       "q_conformal": 1.6912,
+       "v_eff": 9.021,
+       "age_lo": 21,
+       "age_hi": 21,
+       "coast": null
+      },
+      "a22": {
+       "q_conformal": 1.6912,
+       "v_eff": 9.021,
+       "age_lo": 22,
+       "age_hi": 22,
+       "coast": null
+      },
+      "a23": {
+       "q_conformal": 1.6912,
+       "v_eff": 9.021,
+       "age_lo": 23,
+       "age_hi": 23,
+       "coast": null
+      },
+      "a24": {
+       "q_conformal": 1.6912,
+       "v_eff": 9.021,
+       "age_lo": 24,
+       "age_hi": 24,
+       "coast": null
+      },
+      "a25": {
+       "q_conformal": 1.6912,
+       "v_eff": 9.021,
+       "age_lo": 25,
+       "age_hi": 25,
+       "coast": null
+      },
+      "a26": {
+       "q_conformal": 1.6912,
+       "v_eff": 9.021,
+       "age_lo": 26,
+       "age_hi": 26,
+       "coast": null
+      },
+      "a27": {
+       "q_conformal": 1.6912,
+       "v_eff": 9.021,
+       "age_lo": 27,
+       "age_hi": 27,
+       "coast": null
+      },
+      "a28": {
+       "q_conformal": 1.6912,
+       "v_eff": 9.021,
+       "age_lo": 28,
+       "age_hi": 28,
+       "coast": null
+      },
+      "a29": {
+       "q_conformal": 1.6912,
+       "v_eff": 9.021,
+       "age_lo": 29,
+       "age_hi": 29,
+       "coast": null
+      },
+      "a30": {
+       "q_conformal": 1.6912,
+       "v_eff": 9.021,
+       "age_lo": 30,
+       "age_hi": 999,
+       "coast": null
+      }
+     }
+    },
+    "0.1": {
+     "q_conformal": 1.4595,
+     "v_eff": 7.8018,
+     "status": "ok",
+     "plates": {
+      "a2": {
+       "q_conformal": 1.5905,
+       "v_eff": 10.778,
+       "age_lo": 2,
+       "age_hi": 2,
+       "coast": null
+      },
+      "a3": {
+       "q_conformal": 1.8443,
+       "v_eff": 13.7175,
+       "age_lo": 3,
+       "age_hi": 3,
+       "coast": null
+      },
+      "a4": {
+       "q_conformal": 1.8618,
+       "v_eff": 10.9294,
+       "age_lo": 4,
+       "age_hi": 4,
+       "coast": null
+      },
+      "a5": {
+       "q_conformal": 1.6,
+       "v_eff": 8.3994,
+       "age_lo": 5,
+       "age_hi": 5,
+       "coast": null
+      },
+      "a6": {
+       "q_conformal": 1.4768,
+       "v_eff": 7.7844,
+       "age_lo": 6,
+       "age_hi": 6,
+       "coast": null
+      },
+      "a7": {
+       "q_conformal": 1.4561,
+       "v_eff": 7.7887,
+       "age_lo": 7,
+       "age_hi": 7,
+       "coast": null
+      },
+      "a8": {
+       "q_conformal": 1.4595,
+       "v_eff": 7.8018,
+       "age_lo": 8,
+       "age_hi": 8,
+       "coast": null
+      },
+      "a9": {
+       "q_conformal": 1.4584,
+       "v_eff": 7.7766,
+       "age_lo": 9,
+       "age_hi": 9,
+       "coast": null
+      },
+      "a10": {
+       "q_conformal": 1.4561,
+       "v_eff": 7.7647,
+       "age_lo": 10,
+       "age_hi": 10,
+       "coast": null
+      },
+      "a11": {
+       "q_conformal": 1.4556,
+       "v_eff": 7.7649,
+       "age_lo": 11,
+       "age_hi": 11,
+       "coast": null
+      },
+      "a12": {
+       "q_conformal": 1.4557,
+       "v_eff": 7.7653,
+       "age_lo": 12,
+       "age_hi": 12,
+       "coast": null
+      },
+      "a13": {
+       "q_conformal": 1.4557,
+       "v_eff": 7.7646,
+       "age_lo": 13,
+       "age_hi": 13,
+       "coast": null
+      },
+      "a14": {
+       "q_conformal": 1.4556,
+       "v_eff": 7.7642,
+       "age_lo": 14,
+       "age_hi": 14,
+       "coast": null
+      },
+      "a15": {
+       "q_conformal": 1.4556,
+       "v_eff": 7.7642,
+       "age_lo": 15,
+       "age_hi": 15,
+       "coast": null
+      },
+      "a16": {
+       "q_conformal": 1.4556,
+       "v_eff": 7.7642,
+       "age_lo": 16,
+       "age_hi": 16,
+       "coast": null
+      },
+      "a17": {
+       "q_conformal": 1.4556,
+       "v_eff": 7.7642,
+       "age_lo": 17,
+       "age_hi": 17,
+       "coast": null
+      },
+      "a18": {
+       "q_conformal": 1.4556,
+       "v_eff": 7.7642,
+       "age_lo": 18,
+       "age_hi": 18,
+       "coast": null
+      },
+      "a19": {
+       "q_conformal": 1.4556,
+       "v_eff": 7.7642,
+       "age_lo": 19,
+       "age_hi": 19,
+       "coast": null
+      },
+      "a20": {
+       "q_conformal": 1.4556,
+       "v_eff": 7.7642,
+       "age_lo": 20,
+       "age_hi": 20,
+       "coast": null
+      },
+      "a21": {
+       "q_conformal": 1.4556,
+       "v_eff": 7.7642,
+       "age_lo": 21,
+       "age_hi": 21,
+       "coast": null
+      },
+      "a22": {
+       "q_conformal": 1.4556,
+       "v_eff": 7.7642,
+       "age_lo": 22,
+       "age_hi": 22,
+       "coast": null
+      },
+      "a23": {
+       "q_conformal": 1.4556,
+       "v_eff": 7.7642,
+       "age_lo": 23,
+       "age_hi": 23,
+       "coast": null
+      },
+      "a24": {
+       "q_conformal": 1.4556,
+       "v_eff": 7.7642,
+       "age_lo": 24,
+       "age_hi": 24,
+       "coast": null
+      },
+      "a25": {
+       "q_conformal": 1.4556,
+       "v_eff": 7.7642,
+       "age_lo": 25,
+       "age_hi": 25,
+       "coast": null
+      },
+      "a26": {
+       "q_conformal": 1.4556,
+       "v_eff": 7.7642,
+       "age_lo": 26,
+       "age_hi": 26,
+       "coast": null
+      },
+      "a27": {
+       "q_conformal": 1.4556,
+       "v_eff": 7.7642,
+       "age_lo": 27,
+       "age_hi": 27,
+       "coast": null
+      },
+      "a28": {
+       "q_conformal": 1.4556,
+       "v_eff": 7.7642,
+       "age_lo": 28,
+       "age_hi": 28,
+       "coast": null
+      },
+      "a29": {
+       "q_conformal": 1.4556,
+       "v_eff": 7.7642,
+       "age_lo": 29,
+       "age_hi": 29,
+       "coast": null
+      },
+      "a30": {
+       "q_conformal": 1.4556,
+       "v_eff": 7.7642,
+       "age_lo": 30,
+       "age_hi": 999,
+       "coast": null
+      }
+     }
+    }
+   }
+  },
+  "vehicle": {
+   "levels": {
+    "0.05": {
+     "q_conformal": 1.6958,
+     "v_eff": 9.0648,
+     "status": "ok",
+     "plates": {
+      "a2": {
+       "q_conformal": 1.8479,
+       "v_eff": 12.5227,
+       "age_lo": 2,
+       "age_hi": 2,
+       "coast": null
+      },
+      "a3": {
+       "q_conformal": 2.1428,
+       "v_eff": 15.9381,
+       "age_lo": 3,
+       "age_hi": 3,
+       "coast": null
+      },
+      "a4": {
+       "q_conformal": 2.1632,
+       "v_eff": 12.6986,
+       "age_lo": 4,
+       "age_hi": 4,
+       "coast": null
+      },
+      "a5": {
+       "q_conformal": 1.859,
+       "v_eff": 9.7591,
+       "age_lo": 5,
+       "age_hi": 5,
+       "coast": null
+      },
+      "a6": {
+       "q_conformal": 1.7159,
+       "v_eff": 9.0445,
+       "age_lo": 6,
+       "age_hi": 6,
+       "coast": null
+      },
+      "a7": {
+       "q_conformal": 1.6919,
+       "v_eff": 9.0495,
+       "age_lo": 7,
+       "age_hi": 7,
+       "coast": null
+      },
+      "a8": {
+       "q_conformal": 1.6958,
+       "v_eff": 9.0648,
+       "age_lo": 8,
+       "age_hi": 8,
+       "coast": null
+      },
+      "a9": {
+       "q_conformal": 1.6944,
+       "v_eff": 9.0354,
+       "age_lo": 9,
+       "age_hi": 9,
+       "coast": null
+      },
+      "a10": {
+       "q_conformal": 1.6918,
+       "v_eff": 9.0216,
+       "age_lo": 10,
+       "age_hi": 10,
+       "coast": null
+      },
+      "a11": {
+       "q_conformal": 1.6912,
+       "v_eff": 9.0218,
+       "age_lo": 11,
+       "age_hi": 11,
+       "coast": null
+      },
+      "a12": {
+       "q_conformal": 1.6913,
+       "v_eff": 9.0223,
+       "age_lo": 12,
+       "age_hi": 12,
+       "coast": null
+      },
+      "a13": {
+       "q_conformal": 1.6913,
+       "v_eff": 9.0215,
+       "age_lo": 13,
+       "age_hi": 13,
+       "coast": null
+      },
+      "a14": {
+       "q_conformal": 1.6912,
+       "v_eff": 9.021,
+       "age_lo": 14,
+       "age_hi": 14,
+       "coast": null
+      },
+      "a15": {
+       "q_conformal": 1.6912,
+       "v_eff": 9.021,
+       "age_lo": 15,
+       "age_hi": 15,
+       "coast": null
+      },
+      "a16": {
+       "q_conformal": 1.6912,
+       "v_eff": 9.0211,
+       "age_lo": 16,
+       "age_hi": 16,
+       "coast": null
+      },
+      "a17": {
+       "q_conformal": 1.6912,
+       "v_eff": 9.021,
+       "age_lo": 17,
+       "age_hi": 17,
+       "coast": null
+      },
+      "a18": {
+       "q_conformal": 1.6912,
+       "v_eff": 9.021,
+       "age_lo": 18,
+       "age_hi": 18,
+       "coast": null
+      },
+      "a19": {
+       "q_conformal": 1.6912,
+       "v_eff": 9.021,
+       "age_lo": 19,
+       "age_hi": 19,
+       "coast": null
+      },
+      "a20": {
+       "q_conformal": 1.6912,
+       "v_eff": 9.021,
+       "age_lo": 20,
+       "age_hi": 20,
+       "coast": null
+      },
+      "a21": {
+       "q_conformal": 1.6912,
+       "v_eff": 9.021,
+       "age_lo": 21,
+       "age_hi": 21,
+       "coast": null
+      },
+      "a22": {
+       "q_conformal": 1.6912,
+       "v_eff": 9.021,
+       "age_lo": 22,
+       "age_hi": 22,
+       "coast": null
+      },
+      "a23": {
+       "q_conformal": 1.6912,
+       "v_eff": 9.021,
+       "age_lo": 23,
+       "age_hi": 23,
+       "coast": null
+      },
+      "a24": {
+       "q_conformal": 1.6912,
+       "v_eff": 9.021,
+       "age_lo": 24,
+       "age_hi": 24,
+       "coast": null
+      },
+      "a25": {
+       "q_conformal": 1.6912,
+       "v_eff": 9.021,
+       "age_lo": 25,
+       "age_hi": 25,
+       "coast": null
+      },
+      "a26": {
+       "q_conformal": 1.6912,
+       "v_eff": 9.021,
+       "age_lo": 26,
+       "age_hi": 26,
+       "coast": null
+      },
+      "a27": {
+       "q_conformal": 1.6912,
+       "v_eff": 9.021,
+       "age_lo": 27,
+       "age_hi": 27,
+       "coast": null
+      },
+      "a28": {
+       "q_conformal": 1.6912,
+       "v_eff": 9.021,
+       "age_lo": 28,
+       "age_hi": 28,
+       "coast": null
+      },
+      "a29": {
+       "q_conformal": 1.6912,
+       "v_eff": 9.021,
+       "age_lo": 29,
+       "age_hi": 29,
+       "coast": null
+      },
+      "a30": {
+       "q_conformal": 1.6912,
+       "v_eff": 9.021,
+       "age_lo": 30,
+       "age_hi": 999,
+       "coast": null
+      }
+     }
+    },
+    "0.1": {
+     "q_conformal": 1.4595,
+     "v_eff": 7.8018,
+     "status": "ok",
+     "plates": {
+      "a2": {
+       "q_conformal": 1.5905,
+       "v_eff": 10.778,
+       "age_lo": 2,
+       "age_hi": 2,
+       "coast": null
+      },
+      "a3": {
+       "q_conformal": 1.8443,
+       "v_eff": 13.7175,
+       "age_lo": 3,
+       "age_hi": 3,
+       "coast": null
+      },
+      "a4": {
+       "q_conformal": 1.8618,
+       "v_eff": 10.9294,
+       "age_lo": 4,
+       "age_hi": 4,
+       "coast": null
+      },
+      "a5": {
+       "q_conformal": 1.6,
+       "v_eff": 8.3994,
+       "age_lo": 5,
+       "age_hi": 5,
+       "coast": null
+      },
+      "a6": {
+       "q_conformal": 1.4768,
+       "v_eff": 7.7844,
+       "age_lo": 6,
+       "age_hi": 6,
+       "coast": null
+      },
+      "a7": {
+       "q_conformal": 1.4561,
+       "v_eff": 7.7887,
+       "age_lo": 7,
+       "age_hi": 7,
+       "coast": null
+      },
+      "a8": {
+       "q_conformal": 1.4595,
+       "v_eff": 7.8018,
+       "age_lo": 8,
+       "age_hi": 8,
+       "coast": null
+      },
+      "a9": {
+       "q_conformal": 1.4584,
+       "v_eff": 7.7766,
+       "age_lo": 9,
+       "age_hi": 9,
+       "coast": null
+      },
+      "a10": {
+       "q_conformal": 1.4561,
+       "v_eff": 7.7647,
+       "age_lo": 10,
+       "age_hi": 10,
+       "coast": null
+      },
+      "a11": {
+       "q_conformal": 1.4556,
+       "v_eff": 7.7649,
+       "age_lo": 11,
+       "age_hi": 11,
+       "coast": null
+      },
+      "a12": {
+       "q_conformal": 1.4557,
+       "v_eff": 7.7653,
+       "age_lo": 12,
+       "age_hi": 12,
+       "coast": null
+      },
+      "a13": {
+       "q_conformal": 1.4557,
+       "v_eff": 7.7646,
+       "age_lo": 13,
+       "age_hi": 13,
+       "coast": null
+      },
+      "a14": {
+       "q_conformal": 1.4556,
+       "v_eff": 7.7642,
+       "age_lo": 14,
+       "age_hi": 14,
+       "coast": null
+      },
+      "a15": {
+       "q_conformal": 1.4556,
+       "v_eff": 7.7642,
+       "age_lo": 15,
+       "age_hi": 15,
+       "coast": null
+      },
+      "a16": {
+       "q_conformal": 1.4556,
+       "v_eff": 7.7642,
+       "age_lo": 16,
+       "age_hi": 16,
+       "coast": null
+      },
+      "a17": {
+       "q_conformal": 1.4556,
+       "v_eff": 7.7642,
+       "age_lo": 17,
+       "age_hi": 17,
+       "coast": null
+      },
+      "a18": {
+       "q_conformal": 1.4556,
+       "v_eff": 7.7642,
+       "age_lo": 18,
+       "age_hi": 18,
+       "coast": null
+      },
+      "a19": {
+       "q_conformal": 1.4556,
+       "v_eff": 7.7642,
+       "age_lo": 19,
+       "age_hi": 19,
+       "coast": null
+      },
+      "a20": {
+       "q_conformal": 1.4556,
+       "v_eff": 7.7642,
+       "age_lo": 20,
+       "age_hi": 20,
+       "coast": null
+      },
+      "a21": {
+       "q_conformal": 1.4556,
+       "v_eff": 7.7642,
+       "age_lo": 21,
+       "age_hi": 21,
+       "coast": null
+      },
+      "a22": {
+       "q_conformal": 1.4556,
+       "v_eff": 7.7642,
+       "age_lo": 22,
+       "age_hi": 22,
+       "coast": null
+      },
+      "a23": {
+       "q_conformal": 1.4556,
+       "v_eff": 7.7642,
+       "age_lo": 23,
+       "age_hi": 23,
+       "coast": null
+      },
+      "a24": {
+       "q_conformal": 1.4556,
+       "v_eff": 7.7642,
+       "age_lo": 24,
+       "age_hi": 24,
+       "coast": null
+      },
+      "a25": {
+       "q_conformal": 1.4556,
+       "v_eff": 7.7642,
+       "age_lo": 25,
+       "age_hi": 25,
+       "coast": null
+      },
+      "a26": {
+       "q_conformal": 1.4556,
+       "v_eff": 7.7642,
+       "age_lo": 26,
+       "age_hi": 26,
+       "coast": null
+      },
+      "a27": {
+       "q_conformal": 1.4556,
+       "v_eff": 7.7642,
+       "age_lo": 27,
+       "age_hi": 27,
+       "coast": null
+      },
+      "a28": {
+       "q_conformal": 1.4556,
+       "v_eff": 7.7642,
+       "age_lo": 28,
+       "age_hi": 28,
+       "coast": null
+      },
+      "a29": {
+       "q_conformal": 1.4556,
+       "v_eff": 7.7642,
+       "age_lo": 29,
+       "age_hi": 29,
+       "coast": null
+      },
+      "a30": {
+       "q_conformal": 1.4556,
+       "v_eff": 7.7642,
+       "age_lo": 30,
+       "age_hi": 999,
+       "coast": null
+      }
+     }
+    }
+   }
+  },
+  "animal": {
+   "levels": {
+    "0.05": {
+     "status": "UNCALIBRATED"
+    },
+    "0.1": {
+     "status": "UNCALIBRATED"
+    }
+   }
+  },
+  "static": {
+   "levels": {
+    "0.05": {
+     "q_conformal": 0.6986,
+     "v_eff": 0.0,
+     "status": "ok",
+     "plates": {
+      "a2": {
+       "q_conformal": 0.7666,
+       "v_eff": 0.0,
+       "age_lo": 2,
+       "age_hi": 2,
+       "coast": null
+      },
+      "a3": {
+       "q_conformal": 0.7083,
+       "v_eff": 0.0,
+       "age_lo": 3,
+       "age_hi": 3,
+       "coast": null
+      },
+      "a4": {
+       "q_conformal": 0.722,
+       "v_eff": 0.0,
+       "age_lo": 4,
+       "age_hi": 4,
+       "coast": null
+      },
+      "a5": {
+       "q_conformal": 0.7227,
+       "v_eff": 0.0,
+       "age_lo": 5,
+       "age_hi": 5,
+       "coast": null
+      },
+      "a6": {
+       "q_conformal": 0.709,
+       "v_eff": 0.0,
+       "age_lo": 6,
+       "age_hi": 6,
+       "coast": null
+      },
+      "a7": {
+       "q_conformal": 0.7002,
+       "v_eff": 0.0,
+       "age_lo": 7,
+       "age_hi": 7,
+       "coast": null
+      },
+      "a8": {
+       "q_conformal": 0.6986,
+       "v_eff": 0.0,
+       "age_lo": 8,
+       "age_hi": 8,
+       "coast": null
+      },
+      "a9": {
+       "q_conformal": 0.6989,
+       "v_eff": 0.0,
+       "age_lo": 9,
+       "age_hi": 9,
+       "coast": null
+      },
+      "a10": {
+       "q_conformal": 0.6988,
+       "v_eff": 0.0,
+       "age_lo": 10,
+       "age_hi": 10,
+       "coast": null
+      },
+      "a11": {
+       "q_conformal": 0.6986,
+       "v_eff": 0.0,
+       "age_lo": 11,
+       "age_hi": 11,
+       "coast": null
+      },
+      "a12": {
+       "q_conformal": 0.6986,
+       "v_eff": 0.0,
+       "age_lo": 12,
+       "age_hi": 12,
+       "coast": null
+      },
+      "a13": {
+       "q_conformal": 0.6986,
+       "v_eff": 0.0,
+       "age_lo": 13,
+       "age_hi": 13,
+       "coast": null
+      },
+      "a14": {
+       "q_conformal": 0.6986,
+       "v_eff": 0.0,
+       "age_lo": 14,
+       "age_hi": 14,
+       "coast": null
+      },
+      "a15": {
+       "q_conformal": 0.6986,
+       "v_eff": 0.0,
+       "age_lo": 15,
+       "age_hi": 15,
+       "coast": null
+      },
+      "a16": {
+       "q_conformal": 0.6986,
+       "v_eff": 0.0,
+       "age_lo": 16,
+       "age_hi": 16,
+       "coast": null
+      },
+      "a17": {
+       "q_conformal": 0.6986,
+       "v_eff": 0.0,
+       "age_lo": 17,
+       "age_hi": 17,
+       "coast": null
+      },
+      "a18": {
+       "q_conformal": 0.6986,
+       "v_eff": 0.0,
+       "age_lo": 18,
+       "age_hi": 18,
+       "coast": null
+      },
+      "a19": {
+       "q_conformal": 0.6986,
+       "v_eff": 0.0,
+       "age_lo": 19,
+       "age_hi": 19,
+       "coast": null
+      },
+      "a20": {
+       "q_conformal": 0.6986,
+       "v_eff": 0.0,
+       "age_lo": 20,
+       "age_hi": 20,
+       "coast": null
+      },
+      "a21": {
+       "q_conformal": 0.6986,
+       "v_eff": 0.0,
+       "age_lo": 21,
+       "age_hi": 21,
+       "coast": null
+      },
+      "a22": {
+       "q_conformal": 0.6986,
+       "v_eff": 0.0,
+       "age_lo": 22,
+       "age_hi": 22,
+       "coast": null
+      },
+      "a23": {
+       "q_conformal": 0.6986,
+       "v_eff": 0.0,
+       "age_lo": 23,
+       "age_hi": 23,
+       "coast": null
+      },
+      "a24": {
+       "q_conformal": 0.6986,
+       "v_eff": 0.0,
+       "age_lo": 24,
+       "age_hi": 24,
+       "coast": null
+      },
+      "a25": {
+       "q_conformal": 0.6986,
+       "v_eff": 0.0,
+       "age_lo": 25,
+       "age_hi": 25,
+       "coast": null
+      },
+      "a26": {
+       "q_conformal": 0.6986,
+       "v_eff": 0.0,
+       "age_lo": 26,
+       "age_hi": 26,
+       "coast": null
+      },
+      "a27": {
+       "q_conformal": 0.6986,
+       "v_eff": 0.0,
+       "age_lo": 27,
+       "age_hi": 27,
+       "coast": null
+      },
+      "a28": {
+       "q_conformal": 0.6986,
+       "v_eff": 0.0,
+       "age_lo": 28,
+       "age_hi": 28,
+       "coast": null
+      },
+      "a29": {
+       "q_conformal": 0.6986,
+       "v_eff": 0.0,
+       "age_lo": 29,
+       "age_hi": 29,
+       "coast": null
+      },
+      "a30": {
+       "q_conformal": 0.6986,
+       "v_eff": 0.0,
+       "age_lo": 30,
+       "age_hi": 999,
+       "coast": null
+      }
+     }
+    },
+    "0.1": {
+     "q_conformal": 0.6013,
+     "v_eff": 0.0,
+     "status": "ok",
+     "plates": {
+      "a2": {
+       "q_conformal": 0.6598,
+       "v_eff": 0.0,
+       "age_lo": 2,
+       "age_hi": 2,
+       "coast": null
+      },
+      "a3": {
+       "q_conformal": 0.6097,
+       "v_eff": 0.0,
+       "age_lo": 3,
+       "age_hi": 3,
+       "coast": null
+      },
+      "a4": {
+       "q_conformal": 0.6214,
+       "v_eff": 0.0,
+       "age_lo": 4,
+       "age_hi": 4,
+       "coast": null
+      },
+      "a5": {
+       "q_conformal": 0.622,
+       "v_eff": 0.0,
+       "age_lo": 5,
+       "age_hi": 5,
+       "coast": null
+      },
+      "a6": {
+       "q_conformal": 0.6102,
+       "v_eff": 0.0,
+       "age_lo": 6,
+       "age_hi": 6,
+       "coast": null
+      },
+      "a7": {
+       "q_conformal": 0.6027,
+       "v_eff": 0.0,
+       "age_lo": 7,
+       "age_hi": 7,
+       "coast": null
+      },
+      "a8": {
+       "q_conformal": 0.6013,
+       "v_eff": 0.0,
+       "age_lo": 8,
+       "age_hi": 8,
+       "coast": null
+      },
+      "a9": {
+       "q_conformal": 0.6015,
+       "v_eff": 0.0,
+       "age_lo": 9,
+       "age_hi": 9,
+       "coast": null
+      },
+      "a10": {
+       "q_conformal": 0.6014,
+       "v_eff": 0.0,
+       "age_lo": 10,
+       "age_hi": 10,
+       "coast": null
+      },
+      "a11": {
+       "q_conformal": 0.6013,
+       "v_eff": 0.0,
+       "age_lo": 11,
+       "age_hi": 11,
+       "coast": null
+      },
+      "a12": {
+       "q_conformal": 0.6012,
+       "v_eff": 0.0,
+       "age_lo": 12,
+       "age_hi": 12,
+       "coast": null
+      },
+      "a13": {
+       "q_conformal": 0.6012,
+       "v_eff": 0.0,
+       "age_lo": 13,
+       "age_hi": 13,
+       "coast": null
+      },
+      "a14": {
+       "q_conformal": 0.6012,
+       "v_eff": 0.0,
+       "age_lo": 14,
+       "age_hi": 14,
+       "coast": null
+      },
+      "a15": {
+       "q_conformal": 0.6012,
+       "v_eff": 0.0,
+       "age_lo": 15,
+       "age_hi": 15,
+       "coast": null
+      },
+      "a16": {
+       "q_conformal": 0.6012,
+       "v_eff": 0.0,
+       "age_lo": 16,
+       "age_hi": 16,
+       "coast": null
+      },
+      "a17": {
+       "q_conformal": 0.6012,
+       "v_eff": 0.0,
+       "age_lo": 17,
+       "age_hi": 17,
+       "coast": null
+      },
+      "a18": {
+       "q_conformal": 0.6012,
+       "v_eff": 0.0,
+       "age_lo": 18,
+       "age_hi": 18,
+       "coast": null
+      },
+      "a19": {
+       "q_conformal": 0.6012,
+       "v_eff": 0.0,
+       "age_lo": 19,
+       "age_hi": 19,
+       "coast": null
+      },
+      "a20": {
+       "q_conformal": 0.6012,
+       "v_eff": 0.0,
+       "age_lo": 20,
+       "age_hi": 20,
+       "coast": null
+      },
+      "a21": {
+       "q_conformal": 0.6012,
+       "v_eff": 0.0,
+       "age_lo": 21,
+       "age_hi": 21,
+       "coast": null
+      },
+      "a22": {
+       "q_conformal": 0.6012,
+       "v_eff": 0.0,
+       "age_lo": 22,
+       "age_hi": 22,
+       "coast": null
+      },
+      "a23": {
+       "q_conformal": 0.6012,
+       "v_eff": 0.0,
+       "age_lo": 23,
+       "age_hi": 23,
+       "coast": null
+      },
+      "a24": {
+       "q_conformal": 0.6012,
+       "v_eff": 0.0,
+       "age_lo": 24,
+       "age_hi": 24,
+       "coast": null
+      },
+      "a25": {
+       "q_conformal": 0.6012,
+       "v_eff": 0.0,
+       "age_lo": 25,
+       "age_hi": 25,
+       "coast": null
+      },
+      "a26": {
+       "q_conformal": 0.6012,
+       "v_eff": 0.0,
+       "age_lo": 26,
+       "age_hi": 26,
+       "coast": null
+      },
+      "a27": {
+       "q_conformal": 0.6012,
+       "v_eff": 0.0,
+       "age_lo": 27,
+       "age_hi": 27,
+       "coast": null
+      },
+      "a28": {
+       "q_conformal": 0.6012,
+       "v_eff": 0.0,
+       "age_lo": 28,
+       "age_hi": 28,
+       "coast": null
+      },
+      "a29": {
+       "q_conformal": 0.6012,
+       "v_eff": 0.0,
+       "age_lo": 29,
+       "age_hi": 29,
+       "coast": null
+      },
+      "a30": {
+       "q_conformal": 0.6012,
+       "v_eff": 0.0,
+       "age_lo": 30,
+       "age_hi": 999,
+       "coast": null
+      }
+     }
+    }
+   }
+  }
+ },
+ "young": {
+  "pedestrian": {
+   "0.05": {
+    "q0y": 1.8479,
+    "growth": 12.5227
+   },
+   "0.1": {
+    "q0y": 1.5905,
+    "growth": 10.778
+   }
+  },
+  "vehicle": {
+   "0.05": {
+    "q0y": 1.8479,
+    "growth": 12.5227
+   },
+   "0.1": {
+    "q0y": 1.5905,
+    "growth": 10.778
+   }
+  },
+  "static": {
+   "0.05": {
+    "q0y": 0.7666,
+    "growth": 0.0
+   },
+   "0.1": {
+    "q0y": 0.6598,
+    "growth": 0.0
+   }
+  }
+ },
+ "flags": []
+}

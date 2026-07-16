@@ -1,0 +1,74 @@
+{
+ "crossers.json:11": {
+  "hash": "99ad25ff68743bbd",
+  "reached": true,
+  "collided": false,
+  "min_clr": 2.929797
+ },
+ "crossers.json:42": {
+  "hash": "bac0dd0d8c9f0136",
+  "reached": true,
+  "collided": false,
+  "min_clr": 2.824232
+ },
+ "fast_canyon.json:11": {
+  "hash": "0b0c8da41eaccaff",
+  "reached": true,
+  "collided": false,
+  "min_clr": 2.719214
+ },
+ "fast_canyon.json:42": {
+  "hash": "7c3e928243ea9110",
+  "reached": false,
+  "collided": false,
+  "min_clr": 3.074294
+ },
+ "dual_blindside.json:11": {
+  "hash": "e3f63162535db3a0",
+  "reached": true,
+  "collided": false,
+  "min_clr": 2.897854
+ },
+ "dual_blindside.json:42": {
+  "hash": "6bda57b053abfb49",
+  "reached": true,
+  "collided": false,
+  "min_clr": 3.221467
+ },
+ "crowd_dense.json:11": {
+  "hash": "93a49bb10a5b738a",
+  "reached": true,
+  "collided": false,
+  "min_clr": 2.523486
+ },
+ "crowd_dense.json:42": {
+  "hash": "f051141e66f87167",
+  "reached": true,
+  "collided": false,
+  "min_clr": 2.458826
+ },
+ "street_busy_s0.json:11": {
+  "hash": "626965ce91a27a3a",
+  "reached": true,
+  "collided": false,
+  "min_clr": 4.200557
+ },
+ "street_busy_s0.json:42": {
+  "hash": "626965ce91a27a3a",
+  "reached": true,
+  "collided": false,
+  "min_clr": 4.200557
+ },
+ "street_busy_s1.json:11": {
+  "hash": "5e3239ff36ac8078",
+  "reached": true,
+  "collided": false,
+  "min_clr": 5.628327
+ },
+ "street_busy_s1.json:42": {
+  "hash": "5e3239ff36ac8078",
+  "reached": true,
+  "collided": false,
+  "min_clr": 5.628327
+ }
+}
