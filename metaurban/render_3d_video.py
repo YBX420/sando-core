@@ -18,13 +18,12 @@ Run (metaurban env, from the metaurban repo root):
   # one verification frame (no live window):  ... render_3d_video.py --seed 3 --frame_only
   # record an mp4:                            ... render_3d_video.py --seed 3 --mp4
 """
-import os, sys, time, argparse, random, copy
-if os.environ.get("LAYOUT_PROBE", "0") == "1":
-    # memory-layout perturbation probe (2026-07-16): a mere top-level `import json` here provably
-    # flips the GT_ORACLE arm 7.2s<->12.7s on seed7 (identical world, decisions diverge on float
-    # crumbs). Keep it switchable so the tie-pinning work (TIE_KEEP) can be tested for layout
-    # invariance: a pinned decision layer must produce the SAME flight with the probe on and off.
-    import json  # noqa: F401
+import os, sys, time, argparse, random, copy, json
+# ^ `json` at module top is LOAD-BEARING (2026-07-16 postmortem): _load_perclass_conf() calls
+#   json.load but this file never imported json, so the loader raised NameError on its FIRST line,
+#   the bare `except Exception` swallowed it, and the per-class conformal table silently fell back
+#   to the scalar defaults for 17 days (6-30..7-16) -- q 0.125 flown where the calibrated 1.054 was
+#   claimed. Every "one import flips the flight" mystery of 07-16 was THIS, not memory layout.
 import cv2  # IMPORTANT: import cv2 BEFORE panda3d/metaurban — importing it after them segfaults (GL/X lib clash)
 import numpy as np
 import yaml
@@ -1270,9 +1269,19 @@ def _load_perclass_conf(eps):
         try:
             cj = json.load(open(cand)); g = cj["groups"]; k = str(eps)
             lv = lambda grp: (float(g[grp]["levels"][k]["q_conformal"]), float(g[grp]["levels"][k]["v_eff"]))
-            return {0.8: lv("pedestrian"), 0.6: lv("vehicle"), 0.7: lv("all")}   # keyed by EGO_PERCLASS_DSAFE values
-        except Exception:
+            out = {0.8: lv("pedestrian"), 0.6: lv("vehicle"), 0.7: lv("all")}   # keyed by EGO_PERCLASS_DSAFE values
+            print(f"[calib] per-class conformal loaded from {cand}: eps={eps} " +
+                  " ".join(f"ds{ds}=(q {q:.3f}, veff {v:.3f})" for ds, (q, v) in sorted(out.items())), flush=True)
+            return out
+        except FileNotFoundError:
             continue
+        except Exception as e:
+            # LOUD (2026-07-16 law: a swallowed loader error silently voided the per-class
+            # calibration for 17 days -- a fallback may be sound, but it must never be silent)
+            print(f"[calib] PERCLASS LOAD FAILED on {cand}: {type(e).__name__}: {e}", flush=True)
+            continue
+    print(f"[calib] WARNING: NO per-class conformal table -- every class falls back to the scalar "
+          f"defaults (q {MAN_QCONF}, veff {MAN_VEFF}). If this is intended, say it in the run notes.", flush=True)
     return {}
 
 
@@ -1487,6 +1496,28 @@ MAN_SWATH = int(os.environ.get("EGO_SWATH", "0"))        # >1: pave now->meet co
 _SWATH_DBG = [0]
 _GTDUMP = os.environ.get("GTDUMP") or None               # offline workbench: per-tick GT scene dump (JSONL path)
 _GTDUMP_F = [None]
+_FPRINT = os.environ.get("FPRINT") or None               # forensic per-tick stage fingerprints (layout-flip hunt)
+_FPR = [None]
+
+
+def _fpx(arr):
+    """bit-exact fingerprint of a float array with ZERO new imports (instrumentation must not alter
+    the system under test -- the 07-16 lesson): xor-fold the raw bytes as uint64 lanes + the byte
+    length. Any single-bit change anywhere flips the fingerprint."""
+    b = np.ascontiguousarray(np.asarray(arr, float)).tobytes()
+    pad = (-len(b)) % 8
+    if pad:
+        b += b"\x00" * pad
+    lanes = np.frombuffer(b, dtype=np.uint64)
+    x = int(np.bitwise_xor.reduce(lanes)) if len(lanes) else 0
+    return f"{len(b)}:{x:016x}"
+
+
+def _fpr_write(line):
+    if _FPR[0] is None:
+        _FPR[0] = open(_FPRINT, "w")
+    _FPR[0].write(line + "\n")
+    _FPR[0].flush()
 MAN_PLANHI = float(os.environ.get("EGO_PLANHI", 0.7))   # how far ahead the KF-predicted SWEPT footprint is fed to
                                                         # EGO so it weaves around the FUTURE smoothly (one trajectory,
                                                         # no late braking) instead of reacting to the present
@@ -1764,7 +1795,15 @@ def ego_maneuver_replan(p_d, v_d, a_d, cur_wp, t_sim):
     cam_heading = float(quad.yaw)
     _VD_NOW[0] = np.asarray(v_d, float)                    # drawing-side TTC reads the real drone velocity
     movers = kf_movers(p_d, t_sim, cam_heading)            # cone-DETECTED movers + their KF prediction (the safety layer)
-    ego.update_cloud(_man_cloud(p_d, cam_heading, t_sim, movers), p_d)
+    _mc = _man_cloud(p_d, cam_heading, t_sim, movers)
+    ego.update_cloud(_mc, p_d)
+    if _FPRINT is not None:
+        # stage fingerprints: movers (KF/oracle output) | occupancy cloud | drone state. First stage
+        # whose fingerprint diverges between the probe-off / probe-on runs = where the flip leaks in.
+        _fm = _fpx([v for (_o, c3, vel, r_obs, _ds) in movers
+                    for v in (c3[0], c3[1], c3[2], vel[0], vel[1], r_obs, _ds)])
+        _fpr_write(f"t={t_sim:.3f} movers[{len(movers)}]={_fm} oids={'|'.join(str(_o) for (_o, *_r) in movers)} "
+                   f"cloud={_fpx(_mc)} state={_fpx([*p_d, *v_d, *a_d, quad.yaw])}")
     if EGO_TDYN:                                           # feed mover polys to the solver's time-aligned term
         # hinge radius must reach CERT scale (r + per-class d_safe + pad), not the ring's r+0.45: the
         # tournament keeps the drone ~1.5m off movers, so a smaller hinge never activates (verified:
@@ -1961,6 +2000,10 @@ def ego_maneuver_replan(p_d, v_d, a_d, cur_wp, t_sim):
         _cyl = []
         for (_oid, c3, vel, r_obs, d_safe) in movers:
             q_c, veff_c = PERCLASS_CONF.get(d_safe, (MAN_QCONF, MAN_VEFF))
+            if _FPRINT is not None:
+                _fpr_write(f"t={t_sim:.3f} CYL c0={float(c3[0]).hex()},{float(c3[1]).hex()} "
+                           f"r={float(r_obs).hex()} ds={d_safe!r} q={float(q_c).hex()} vf={float(veff_c).hex()} "
+                           f"ell={_ELL_TRK.get(_oid)}")
             _e7 = _ell_of_mover(_oid, vel, r_obs)
             _c7 = _cap_of_mover(_oid, vel, r_obs)
             tag7 = ()
@@ -2465,9 +2508,10 @@ while not quit_now:
         cur_wp = wp[wp_i]
         if _GTDUMP is not None:
             # offline racing-line workbench feed (GTDUMP=path, default off): GROUND-TRUTH scene per planner
-            # tick, full-field movers, exact pos/vel, plus the flown drone state. HAND-ROLLED JSON: a mere
-            # top-level `import json` provably flips the GT_ORACLE arm 7.2->12.7s (memory-layout knife-edge,
-            # 2026-07-16) -- serialise with f-strings so instrumentation cannot perturb the flight.
+            # tick, full-field movers, exact pos/vel, plus the flown drone state. HAND-ROLLED serialisation
+            # kept on principle: instrumentation must not add imports/dependencies to the system under test
+            # (2026-07-16: an instrumentation `import json` is what resurrected the dead calib loader and
+            # changed every flight -- the probe must never move the patient).
             if _GTDUMP_F[0] is None:
                 _GTDUMP_F[0] = open(_GTDUMP, "w")
                 _sr = ",".join(f"[{float(c3[0]):.3f},{float(c3[1]):.3f},{0.5*float(sz[0]):.3f},{float(sz[2]):.3f}]"
@@ -2511,6 +2555,11 @@ while not quit_now:
                 # NO-HOLD cylinder fastest-safe tournament (fly over / around / climb); leaves EGO holding the winner
                 t0 = time.perf_counter(); man_kind, ego_traj_pts2, man_g = ego_maneuver_replan(p_d, v_d, a_d, cur_wp, t)
                 last_rt = time.perf_counter() - t0
+                if _FPRINT is not None:
+                    _du = ego.duration()
+                    _sp = ([x for u in np.linspace(0.0, max(_du - 1e-3, 0.0), 12) for x in (ego.eval(u) or [[0, 0, 0]])[0]]
+                           if _du > 1e-3 else [0.0])
+                    _fpr_write(f"t={t:.3f} DECIDE kind={man_kind} g={man_g:.4f} dur={_du!r} spline={_fpx(_sp)}")
                 ego_dur = ego.duration(); ego_ok = ego_dur > 1e-3
             else:
                 to_wp = cur_wp[:2] - p_d[:2]; dwp = float(np.linalg.norm(to_wp))

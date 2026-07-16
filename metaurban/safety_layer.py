@@ -181,6 +181,20 @@ def _cap_behind(ent, ego, tau, d, warp=1.0):
     return ok
 
 
+_FPC = os.environ.get("FPRINT_CERT") or None   # forensic: per-call cert input+margin bit dump (layout-flip hunt)
+_FPC_F = [None]
+
+
+def _fpc(line):
+    if _FPC_F[0] is None:
+        _FPC_F[0] = open(_FPC, "w")
+    _FPC_F[0].write(line + "\n")
+
+
+def _hx(x):
+    return float(x).hex()
+
+
 def cert_clear(ego, cyl, tau=TAU, delta=None):
     """The cylinder disjunction on ego's CURRENTLY-committed B-spline: per mover, (horiz-predicted AND
     horiz-current) OR above. AND across movers. A mover carrying the v4 ellipse field is judged in the
@@ -194,8 +208,11 @@ def cert_clear(ego, cyl, tau=TAU, delta=None):
             # frozen-current conjunct, s=1 the predicted tube, at the collapsed radius.
             hb = True
             for s in _cap_grid(cap):
-                hs, _ = ego.certify_horizontal(obs_c0=c0, R=R, obs_vel=tuple(np.asarray(vv, float) * s),
-                                               obs_acc=(0, 0, 0), t_hi=tau, v_eff=veff, delta=d)
+                hs, _m = ego.certify_horizontal(obs_c0=c0, R=R, obs_vel=tuple(np.asarray(vv, float) * s),
+                                                obs_acc=(0, 0, 0), t_hi=tau, v_eff=veff, delta=d)
+                if _FPC:
+                    _fpc(f"CH tau={_hx(tau)} d={_hx(d)} c0={_hx(c0[0])},{_hx(c0[1])} R={_hx(R)} "
+                         f"v={_hx(vv[0])},{_hx(vv[1])} s={_hx(s)} veff={_hx(veff)} ok={int(hs)} m={_hx(_m)}")
                 if not hs:
                     hb = False
                     break
@@ -211,9 +228,14 @@ def cert_clear(ego, cyl, tau=TAU, delta=None):
                 hc, _ = ego.certify_horizontal_aniso(obs_c0=c0, R=_rw, obs_vel=(0, 0, 0), t_hi=tau,
                                                      v_eff=veff, delta=d, ux=_ux, uy=_uy, kappa=_k)
             else:
-                hp, _ = ego.certify_horizontal(obs_c0=c0, R=R, obs_vel=vv, obs_acc=aa, t_hi=tau, v_eff=veff, delta=d)
-                hc, _ = ego.certify_horizontal(obs_c0=c0, R=R, obs_vel=(0, 0, 0), t_hi=tau, v_eff=veff, delta=d)
-        vo, _ = ego.certify_above(z_clear=zc, t_hi=tau, v_eff_z=0.0, delta=d)
+                hp, _m1 = ego.certify_horizontal(obs_c0=c0, R=R, obs_vel=vv, obs_acc=aa, t_hi=tau, v_eff=veff, delta=d)
+                hc, _m2 = ego.certify_horizontal(obs_c0=c0, R=R, obs_vel=(0, 0, 0), t_hi=tau, v_eff=veff, delta=d)
+                if _FPC:
+                    _fpc(f"CP tau={_hx(tau)} d={_hx(d)} c0={_hx(c0[0])},{_hx(c0[1])} R={_hx(R)} "
+                         f"v={_hx(vv[0])},{_hx(vv[1])} veff={_hx(veff)} hp={int(hp)}:{_hx(_m1)} hc={int(hc)}:{_hx(_m2)}")
+        vo, _mv = ego.certify_above(z_clear=zc, t_hi=tau, v_eff_z=0.0, delta=d)
+        if _FPC:
+            _fpc(f"CA tau={_hx(tau)} d={_hx(d)} zc={_hx(zc)} ok={int(vo)} m={_hx(_mv)}")
         if not ((hp and hc) or vo):
             return False
     return True
@@ -782,10 +804,11 @@ def maneuver_decide_v2(ego, p_d, v_d, a_d, goal, ztop, cyl, state,
     best = (None, 0.0, -1e9)
     # TIE_KEEP=eps (塔菲大人 2026-07-16, 平手裁决=变动最小): quantise the progress score to eps-wide
     # buckets and, inside a bucket, prefer the INCUMBENT direction -- switching arms must be worth a
-    # real progress difference, never a float-crumb one. Motive: (a) the oracle arm provably flips
-    # 7.2s<->12.7s from a mere top-level `import json` (memory-layout crumbs deciding near-ties);
-    # (b) every switch is a jerk event -- ties resolved toward "keep flying what you committed".
-    # Certificates untouched: this reorders CERTIFIED candidates only. Default 0 = byte-identical.
+    # real progress difference. (History: built chasing the 07-16 "import flips the flight" case and
+    # booked NEGATIVE for it -- the true cause was the dead per-class calib loader in the renderer,
+    # not score ties. Kept, default 0 = byte-identical, as the deterministic commitment hook for the
+    # racing-line work: every switch is a jerk event. Certificates untouched -- reorders CERTIFIED
+    # candidates only.)
     _tie_eps = float(os.environ.get("TIE_KEEP", "0"))
     _inc0 = state.get("kind")
     last_replanned = None
