@@ -780,6 +780,14 @@ def maneuver_decide_v2(ego, p_d, v_d, a_d, goal, ztop, cyl, state,
 
     # --- full grid: replan per direction (expensive), scan speeds (cheap), score retimed progress
     best = (None, 0.0, -1e9)
+    # TIE_KEEP=eps (塔菲大人 2026-07-16, 平手裁决=变动最小): quantise the progress score to eps-wide
+    # buckets and, inside a bucket, prefer the INCUMBENT direction -- switching arms must be worth a
+    # real progress difference, never a float-crumb one. Motive: (a) the oracle arm provably flips
+    # 7.2s<->12.7s from a mere top-level `import json` (memory-layout crumbs deciding near-ties);
+    # (b) every switch is a jerk event -- ties resolved toward "keep flying what you committed".
+    # Certificates untouched: this reorders CERTIFIED candidates only. Default 0 = byte-identical.
+    _tie_eps = float(os.environ.get("TIE_KEEP", "0"))
+    _inc0 = state.get("kind")
     last_replanned = None
     for dk in DIRS:
         gs = _gsub(dk)
@@ -819,6 +827,10 @@ def maneuver_decide_v2(ego, p_d, v_d, a_d, goal, ztop, cyl, state,
             key = tuple(key)
             _prev = tuple(best[1:]) + (-1e9,) * (len(key) - len(best) + 1)
             if key > _prev:
+                best = (dk,) + key
+        elif _tie_eps > 0.0:
+            key = (s_ok, round(sc / _tie_eps), 1 if dk == _inc0 else 0)
+            if key > tuple(best[1:]) + ((-1e9,) * (len(key) - len(best) + 1)):
                 best = (dk,) + key
         elif (s_ok, sc) > (best[1], best[2]):
             best = (dk, s_ok, sc)
