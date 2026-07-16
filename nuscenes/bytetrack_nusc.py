@@ -130,6 +130,78 @@ class LidarDepth:
             return None
         return np.median(pw[sel], axis=0)
 
+class RadarVel:
+    """RADAR_FRONT -> ego-motion-compensated DIRECT velocity per return, world frame (M1c radar port;
+    07-14 audit: vx_comp/vy_comp noise 0.1-0.4 m/s, ZERO lag -- treats 'velocity by position
+    differencing' at the root). World-frame gate match around a track's position; the median of the
+    matched returns feeds MoverTracker.update_velocity (H=[0,1,0] same-instant fusion)."""
+
+    _DT = np.dtype([("x", "<f4"), ("y", "<f4"), ("z", "<f4"), ("dyn_prop", "i1"), ("id", "<i2"),
+                    ("rcs", "<f4"), ("vx", "<f4"), ("vy", "<f4"), ("vx_comp", "<f4"), ("vy_comp", "<f4"),
+                    ("q", "i1"), ("ambig", "i1"), ("x_rms", "i1"), ("y_rms", "i1"), ("invalid", "i1"),
+                    ("pdh0", "i1"), ("vx_rms", "i1"), ("vy_rms", "i1")])
+
+    def __init__(self, nusc):
+        from kf_nusc import quat_rot as _qr
+        self._qr = _qr
+        self.nusc = nusc
+        self.recs = sorted((d for d in nusc.sd if "/RADAR_FRONT/" in d["filename"]),
+                           key=lambda d: d["timestamp"])
+        self.ts = np.array([d["timestamp"] for d in self.recs])
+        self._cache = (None, None)
+
+    def _sweep(self, t_us):
+        if not len(self.recs):
+            return None
+        i = int(np.clip(np.searchsorted(self.ts, t_us), 1, len(self.ts) - 1))
+        rec = self.recs[i] if abs(self.ts[i] - t_us) < abs(self.ts[i - 1] - t_us) else self.recs[i - 1]
+        if abs(rec["timestamp"] - t_us) > 0.25e6:          # no radar sweep within 0.25 s -> no fusion
+            return None
+        if self._cache[0] == rec["token"]:
+            return self._cache[1]
+        raw = open(os.path.join(DATA, rec["filename"]), "rb").read()
+        k = raw.find(b"DATA binary\n")
+        if k < 0:
+            return None
+        try:
+            npts = int(raw[:k].split(b"POINTS")[1].split(b"\n")[0])
+        except Exception as e:
+            print(f"[radar] WARNING: bad PCD header {rec['filename']}: {e}", flush=True)
+            return None
+        body = raw[k + 12: k + 12 + npts * self._DT.itemsize]
+        if len(body) < npts * self._DT.itemsize:
+            print(f"[radar] WARNING: truncated PCD {rec['filename']}", flush=True)
+            return None
+        pts = np.frombuffer(body, dtype=self._DT)
+        # devkit-default validity: invalid_state==0, ambig_state==3 (ambiguity resolved)
+        pts = pts[(pts["invalid"] == 0) & (pts["ambig"] == 3)]
+        cs = self.nusc.cs[rec["calibrated_sensor_token"]]
+        ego = self.nusc.ego[rec["ego_pose_token"]]
+        Rcs, Rego = self._qr(cs["rotation"]), self._qr(ego["rotation"])
+        pw = np.c_[pts["x"], pts["y"], pts["z"]].astype(float) @ Rcs.T + np.asarray(cs["translation"])
+        pw = pw @ Rego.T + np.asarray(ego["translation"])
+        vs = np.c_[pts["vx_comp"], pts["vy_comp"], np.zeros(len(pts))].astype(float)
+        vw = vs @ Rcs.T @ Rego.T                            # rotation only: velocities are vectors
+        out = (pw[:, :2], vw[:, :2])
+        self._cache = (rec["token"], out)
+        return out
+
+    def velocity_at(self, xy, t_us, gate_m=2.5):
+        """(median world-xy velocity, n_matched) of returns within gate_m of xy, or None."""
+        sw = self._sweep(t_us)
+        if sw is None:
+            return None
+        pw, vw = sw
+        d = np.hypot(pw[:, 0] - xy[0], pw[:, 1] - xy[1])
+        m = d < gate_m
+        if not m.any():
+            return None
+        v = np.median(vw[m], axis=0)
+        if not np.isfinite(v).all() or np.hypot(v[0], v[1]) > 20.0:
+            return None
+        return v, int(m.sum())
+
+
 # ---- the deployed v6.1 CAPSULE keep-out, THIN (oracle-arm) sizing, transplanted verbatim from
 # render_3d_video._cap_ring so what we draw here IS the algorithm's avoidance body ----
 # ILLUSTRATION ONLY on this face: the thin calibration was harvested on MetaUrban and carries no
@@ -260,7 +332,7 @@ class MotionLatch:
 SEG_W = "/media/boxuan/Data2/projects/cvmusecore/yolo11s-seg.pt"
 
 
-def main(scene_names, render, use_lidar=False, det_mode="yolo", use_seg=False, gt_mask=False):
+def main(scene_names, render, use_lidar=False, det_mode="yolo", use_seg=False, gt_mask=False, use_radar=False):
     """det_mode: yolo (real detector) | gtbox (GT boxes projected to 2D, SAME sensing chain) |
     gt3d (oracle GT centres straight into the same KF/latch/capsule downstream)."""
     import cv2
@@ -270,6 +342,7 @@ def main(scene_names, render, use_lidar=False, det_mode="yolo", use_seg=False, g
            "gtbox": ("gtmask" if gt_mask else "gtbbx"), "gt3d": "gt"}[det_mode]
     nusc = Nusc()
     lidar = LidarDepth(nusc) if use_lidar else None
+    rvel = RadarVel(nusc) if use_radar else None
     # gate must match estimation quality (the tdyn law): with lidar R but production q_jerk=2.0 the
     # sigma_v floor sits just above 0.5, and the [0.5,1.0) shadow bucket BEATS still (ped 2.02/0.83
     # vs 2.49/2.47, veh mean 4.07 vs 7.61 @2s) -> the lidar face earns a 1.0 gate. Monocular keeps 0.5.
@@ -516,6 +589,13 @@ def main(scene_names, render, use_lidar=False, det_mode="yolo", use_seg=False, g
                 else:
                     trk.update(det, dt=max(1e-3, t_now - w["t_last"]))
                 w["src"] = "gt3d" if _gtp is not None else ("lidar" if by_lidar else "hprior")
+                if rvel is not None:
+                    _rv = rvel.velocity_at(det[:2], sd_rec["timestamp"])   # same-instant Doppler fusion
+                    if _rv is not None:
+                        _vr, _nr = _rv
+                        # r_vel: sensor floor 0.1-0.4 m/s; fewer matched returns -> trust less
+                        trk.update_velocity(_vr, r_vel=0.3 if _nr >= 3 else 0.5)
+                        w["src"] += "+rad"
                 w["t_last"] = t_now; w["hist"].append(det)
                 w["bbox"] = (x0, y0, x1, y1) if _bb is not None else None
                 w["msk"] = _msk
@@ -754,5 +834,7 @@ if __name__ == "__main__":
                     help="detection source: yolo | gtbox (GT boxes, same sensing chain) | gt3d (oracle)")
     ap.add_argument("--seg", action="store_true", help="yolo11s-seg instance masks select the lidar points (silhouette instead of rectangle)")
     ap.add_argument("--gtmask", action="store_true", help="with --det gtbox: select lidar points by GT 3-D box membership (the selection CEILING)")
+    ap.add_argument("--radar", action="store_true", help="fuse RADAR_FRONT ego-compensated Doppler as a DIRECT velocity observation (H=[0,1,0]) -- the M1c radar port")
     args = ap.parse_args()
-    main(None if args.all else set(args.scenes.split(",")), not args.no_render, args.lidar, args.det, args.seg, args.gtmask)
+    main(None if args.all else set(args.scenes.split(",")), not args.no_render, args.lidar, args.det, args.seg, args.gtmask,
+         use_radar=args.radar)

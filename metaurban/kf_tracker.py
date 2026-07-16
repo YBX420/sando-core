@@ -87,6 +87,23 @@ class _AxisCAKalman:
         F, Q = (self.F, self.Q) if step == self.dt else self._mats(step)
         self.x = F @ self.x; self.P = F @ self.P @ F.T + Q
 
+    def update_velocity(self, zv, r_vel):
+        """DIRECT velocity measurement update, H=[0,1,0] -- the radar port (M1c, timespace plan).
+        SAME-INSTANT fusion: no predict step here, so the one-coast-or-update-per-tick time contract
+        stays with update()/coast(); call this right after them when a Doppler velocity is available.
+        r_vel = the measurement's own 1-sigma (radar vx_comp/vy_comp: ~0.1-0.4 m/s, zero lag) --
+        this is what collapses sigma_v without waiting for position differencing to converge."""
+        if self.x is None or self.P is None:
+            return                                            # position owns track birth
+        Rv = float(r_vel) ** 2
+        y = float(zv) - self.x[1]
+        S = self.P[1, 1] + Rv
+        self.last_nis_v = float(y * y / S)
+        K = self.P[:, 1] / S
+        self.x = self.x + K * y
+        Hv = np.array([0.0, 1.0, 0.0])
+        self.P = (np.eye(3) - np.outer(K, Hv)) @ self.P
+
 
 class MoverTracker:
     """One CA-Kalman track for a single mover. Feed noisy detections; read back the certificate's
@@ -106,6 +123,14 @@ class MoverTracker:
         det = np.asarray(det_xyz, float)
         self.fx.update(det[0], dt); self.fy.update(det[1], dt); self.z = float(det[2]); self.n += 1
         self.miss = 0                                        # detected this tick -> reset the out-of-FOV miss counter
+
+    def update_velocity(self, v_xy, r_vel):
+        """Fuse a DIRECT ground-plane velocity measurement (the radar port, M1c): call right after
+        this tick's update()/coast() -- same-instant fusion, no extra time step. r_vel = the sensor's
+        own 1-sigma (nuScenes radar vx_comp/vy_comp: 0.1-0.4 m/s, zero lag). This is the input that
+        collapses sigma_v directly instead of waiting ~n ticks of position differencing."""
+        self.fx.update_velocity(float(v_xy[0]), r_vel)
+        self.fy.update_velocity(float(v_xy[1]), r_vel)
 
     def coast(self, dt=None):
         """Out-of-FOV time update: extrapolate both ground-plane axes one dt and GROW covariance; count the miss.
@@ -266,3 +291,21 @@ if __name__ == "__main__":
     print(f"[kf] sigma horn @[0,0.3,0.75,1.5]s = {np.round(sg, 3)}  after 3 coasts = {np.round(sg_c, 3)}")
     print("[kf] sigma-horn PASS" if (okA and okB and okC) else
           f"[kf] sigma-horn FAIL (sigma0={okA} monotone={okB} coast-lift={okC})")
+
+    # radar velocity-port regressions (M1c 2026-07-17): a 2-detection YOUNG track has garbage
+    # two-point velocity uncertainty; ONE direct velocity fusion (r_vel=0.2) must (a) collapse
+    # sigma_v below the young gate 0.5, (b) pull the velocity to truth, (c) advance NO time
+    # (fusing twice in a row changes nothing but the gain-weighted average -- position stays put).
+    trk_r = MoverTracker(dt=0.10, meas_noise=0.07)          # render-face cadence: worst young sigma_v
+    true = np.array([3.0, 0.0, 1.5]); vel = np.array([1.4, 0.0, 0.0])
+    for _ in range(2):
+        trk_r.update(true + rng.normal(0, 0.07, 3)); true = true + vel * 0.10
+    sv_before = trk_r.sigma_v
+    p_before = trk_r.state()[0].copy()
+    trk_r.update_velocity((1.4, 0.0), r_vel=0.2)
+    sv_after = trk_r.sigma_v
+    _, v_r, _ = trk_r.state()
+    okR = sv_before > 0.5 and sv_after < 0.5 and abs(v_r[0] - 1.4) < 0.3
+    okT = abs(trk_r.state()[0][0] - p_before[0]) < 0.5      # no time advance (small gain-coupled nudge ok)
+    print(f"[kf] radar port: sigma_v {sv_before:.2f} -> {sv_after:.2f}  v={v_r[0]:.2f} (truth 1.4)")
+    print("[kf] radar-port PASS" if (okR and okT) else f"[kf] radar-port FAIL (collapse={okR} timefreeze={okT})")
