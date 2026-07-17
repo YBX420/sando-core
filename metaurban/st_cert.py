@@ -116,13 +116,19 @@ def _cap_grid(K):
 
 
 def certify_profile(ego, cyl, profile, tau, delta, u_start=0.0):
-    """cert_clear semantics for a piecewise-warped flight: per mover
-    (horizontal predicted AND horizontal frozen) OR above; capsule-tagged movers pearl-certified.
+    """PRODUCTION-PARITY policy for a piecewise-warped flight (2026-07-17 fix): a pure full-speed
+    profile (every piece at gear ~1.0) gets cert_clear's strict pair (predicted AND frozen); any
+    profile with a warped piece gets cert_clear_warp's PREDICTED-ONLY tube -- the frozen conjunct
+    pins the mover's CURRENT spot for the whole window, which forbids exactly the pass-behind
+    schedules this certificate exists for (the SLIP lesson, render_3d_video ego_speed_search
+    docstring). The 'he might stop' concern belongs to the s=0 pearl of the capsule law (kept) and
+    the per-tick re-decide, same as production. Capsule-tagged movers pearl-certified as before.
     cyl rows are the safety_layer 6/7-tuples. Real-time trust window = tau. Returns (ok, worst_margin)."""
     cp, u0s, dus = ego.get_bsegs()
     if len(dus) == 0:
         return False, -1.0
     rcp, rt0, rdur = retime(cp, u0s, dus, profile, u_start=u_start)
+    all_full = all(g >= 0.999 for _dt, g in profile)
     worst = np.inf
     for ent in cyl:
         (c0, vv, aa, R, zc, veff) = ent[:6]
@@ -144,9 +150,12 @@ def certify_profile(ego, cyl, profile, tau, delta, u_start=0.0):
             hp, m1 = CB.Certifier.certify_horizontal(rcp, rt0, rdur, c0, R, vel=tuple(vv),
                                                      acc=tuple(aa), t_hi=tau, v_eff=veff,
                                                      delta=delta, n_axes=2)
-            hc, m2 = CB.Certifier.certify_horizontal(rcp, rt0, rdur, c0, R, vel=(0, 0, 0),
-                                                     acc=(0, 0, 0), t_hi=tau, v_eff=veff,
-                                                     delta=delta, n_axes=2)
+            if all_full:                                   # cert_clear parity: frozen conjunct too
+                hc, m2 = CB.Certifier.certify_horizontal(rcp, rt0, rdur, c0, R, vel=(0, 0, 0),
+                                                         acc=(0, 0, 0), t_hi=tau, v_eff=veff,
+                                                         delta=delta, n_axes=2)
+            else:                                          # cert_clear_warp parity: predicted-only
+                hc, m2 = hp, m1
             mh = min(m1, m2)
         vo, mv = CB.Certifier.certify_above(rcp, rt0, rdur, zc, t_hi=tau, v_eff_z=0.0, delta=delta)
         if not ((hp and hc) or vo):

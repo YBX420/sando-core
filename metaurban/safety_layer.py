@@ -847,15 +847,18 @@ def maneuver_decide_v2(ego, p_d, v_d, a_d, goal, ztop, cyl, state,
         if not _ok_plan():
             continue
         s_ok = _best_s()
-        if s_ok <= 0.0:
-            continue
-        if _ST_ON:
+        if _ST_ON and s_ok >= 0.0:
             # ST stage (M2-4): a certified piecewise schedule replaces the constant gear ONLY when
             # STRICTLY better (window progress rank > constant gear + 0.02); ties keep the tree.
+            # s_ok == 0 (every constant gear uncertified = today's HOLD) is ALSO offered to the
+            # stage: a certified wait-THEN-go schedule rescues the candidate instead of dropping it
+            # -- purposeful waiting, the schedule head may legitimately be gear 0 for a tick.
             _str = _st_stage(float(state.get("s_prev") or state.get("s", 1.0)))
             if _str is not None and _str[0] > s_ok + 0.02:
                 _st_by[dk] = _str
                 s_ok = float(_str[0])       # rank by schedule progress (window-normalized)
+        if s_ok <= 0.0:
+            continue
         sc = _progress(s_ok)
         # LEXICOGRAPHIC rank (speed first): a full-speed detour beats ANY slowdown -- pure
         # window-progress scoring is myopic (slow-and-straight outscores fast-but-sideways over

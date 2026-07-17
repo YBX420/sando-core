@@ -13,8 +13,10 @@ case "$ARM" in
   base)    ENVS="THIN=1";                              SEEDS=$(seq 0 19) ;;
   k10)     ENVS="THIN=1 ETA_FEED=2 ETA_K=1.0";         SEEDS=$(seq 0 19) ;;
   k05)     ENVS="THIN=1 ETA_FEED=2 ETA_K=0.5";         SEEDS=$(seq 0 19) ;;
+  st)      ENVS="THIN=1 ST_SPEED=1";                   SEEDS=$(seq 0 19) ;;   # M2-4 ST speed stage
   orabase) ENVS="ORACLE_THIN=1";                       SEEDS="3 7 11 15 19" ;;
   oraeta)  ENVS="ORACLE_THIN=1 ETA_FEED=2 ETA_K=1.0";  SEEDS="3 7 11 15 19" ;;
+  orast)   ENVS="ORACLE_THIN=1 ST_SPEED=1";            SEEDS="3 7 11 15 19" ;;
   *) echo "unknown arm $ARM"; exit 1 ;;
 esac
 
