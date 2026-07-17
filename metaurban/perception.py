@@ -211,10 +211,10 @@ class PerceptionFrontEnd:
         pairs = sorted(((float(np.hypot(*(pred[tr.id] - dets[di]["xy"]))), ti, di)
                         for ti, tr in enumerate(self.tracks) for di in unmatched), key=lambda x: x[0])
         used_t, used_d = set(), set()
+        step_dt = float(dt) if dt is not None else self.cfg.dt
         for dist, ti, di in pairs:
             # ready tracks predict their motion -> tight gate; a 1-detection track has v=0 by construction,
             # so it gets the wide birth gate (covers birth_vmax*dt) or fast movers never re-associate.
-            step_dt = float(dt) if dt is not None else self.cfg.dt
             gate = self.cfg.gate_m if self.tracks[ti].trk.ready else \
                 (self.cfg.gate_m + self.cfg.birth_vmax * step_dt)   # birth gate covers TRUE unmodelled motion
             _kg = float(os.environ.get("ASSOC_KGATE", "0"))
@@ -228,9 +228,40 @@ class PerceptionFrontEnd:
                 continue
             self.tracks[ti].update(dets[di], dt)
             used_t.add(ti); used_d.add(di)
+        _racc = int(os.environ.get("PERCEPT_REACCEPT", "0"))
+        if _racc > 0:
+            # nuScenes lesson #3 (M1d, reworked per 2026-07-17 review): REJECTION-EVENT counting,
+            # not miss counting. A rejection event = a READY MOVING track went unmatched THIS tick
+            # while an unclaimed mover detection sat inside its sigma-widened wide gate -- evidence
+            # existed and the gate refused it. n_rej straight events = deadlock (bad prediction ->
+            # gate fail -> coast -> worse), so force-accept the NEAREST unused det, capped at
+            # birth_vmax*dt + 3*sigma(d). Absence of nearby detections RESETS the counter (a mover
+            # that genuinely left is not a deadlock). Static tracks, births and YOUNG_TTL untouched.
+            _cap = self.cfg.gate_m + self.cfg.birth_vmax * step_dt
+            for ti, tr in enumerate(self.tracks):
+                if ti in used_t or not tr.trk.ready or tr.cls == "static":
+                    continue
+                best = None
+                for di in range(len(dets)):
+                    if di in used_d or dets[di]["cls"] == "static":
+                        continue
+                    dd = float(np.hypot(*(pred[tr.id] - dets[di]["xy"])))
+                    if best is None or dd < best[0]:
+                        best = (dd, di)
+                _sig = self.cfg.sigma0 + self.cfg.sigma_k * float(np.hypot(*(pred[tr.id] - p_xy)))
+                if best is not None and best[0] <= _cap + 3.0 * _sig + float(tr.trk.pos_sigma):
+                    tr.n_rej = getattr(tr, "n_rej", 0) + 1
+                    if tr.n_rej >= _racc and best[0] <= _cap + 3.0 * _sig:
+                        tr.update(dets[best[1]], dt)
+                        used_t.add(ti); used_d.add(best[1])
+                        tr.n_rej = 0
+                else:
+                    tr.n_rej = 0
         for ti, tr in enumerate(self.tracks):
             if ti not in used_t:
                 tr.coast(dt)
+                if _racc == 0:
+                    tr.n_rej = 0
         for di in range(len(dets)):
             if di not in used_d:
                 self.tracks.append(Track(dets[di], self.cfg))
