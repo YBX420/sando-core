@@ -1388,8 +1388,10 @@ _TRK_SIG = {}   # oid -> (tracker_or_None, coasting, kf_age) covariance sidecar 
 #   guardrailed 2026-07-17): band uses the tracker's predict_sigma(lead) HORN, MATURE (n>=4) and
 #   non-coasting tracks only (a coasting track's sigma already pays via MAN_MEM_K*pos_sigma in
 #   r_mem -- banding it again would double-count); oracle arm writes tracker=None = hard zero
-ETA_K = float(os.environ.get("ETA_K", "2.0"))     # ETA_FEED=2 sigma-budget scale (~2-sigma band). seed7 KF arm:
-#   K=1.0 8.9s/clr1.65, K=1.5 11.2s/hold40 (route-topology flip, NON-monotone landscape), K=2.0 8.5s/clr1.61
+ETA_K = float(os.environ.get("ETA_K", "1.0"))     # ETA_FEED=2 sigma-budget scale on the predict_sigma horn.
+#   v3 sweep @52de418 (seed7 KF arm): K=0.5 7.8s/clr1.69/sw2 (speed candidate, off-plateau);
+#   K=1.0..2.0 PLATEAU 8.2s/clr1.96 (= oracle-level pedestrian clearance) -- default 1.0 = plateau edge.
+#   (v2 scalar-band sweep numbers voided per 2026-07-17 review.)
 _CAP_V6 = {}; _CAP_K = 4
 if MAN_CAPSULE:
     _v6 = _SL.load_calib_v6(eps=MAN_EPS)
