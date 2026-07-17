@@ -4,7 +4,7 @@
 # vcru = 路线长 / 基线臂实测 t_goal(读 out/m1b_pool/base_s<seed>.log,没有就先跑一发基线)。
 set -u
 SC=/media/boxuan/Data2/projects/sando_py/sando-core
-POOL=$SC/metaurban/out/m1b_pool
+POOL=$SC/metaurban/out/m1b_pool${POOL_TAG:-}
 EXAM=$SC/metaurban/out/crosser_exam; mkdir -p "$EXAM"
 SEED=${1:?seed}; N=${2:?n crossers}; ARM=${3:?arm}; EXTRA=${4:-}
 

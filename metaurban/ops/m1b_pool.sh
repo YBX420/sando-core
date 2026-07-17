@@ -6,7 +6,7 @@
 # 用法: ops/m1b_pool.sh <arm>   arm ∈ base|k10|k05|orabase|oraeta
 set -u
 SC=/media/boxuan/Data2/projects/sando_py/sando-core
-POOL=$SC/metaurban/out/m1b_pool; mkdir -p "$POOL"
+POOL=$SC/metaurban/out/m1b_pool${POOL_TAG:-}; mkdir -p "$POOL"   # POOL_TAG=_sight30 etc: face-versioned ledgers, old faces never overwritten
 ARM=${1:?arm required: base|k10|k05|orabase|oraeta}
 
 case "$ARM" in
