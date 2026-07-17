@@ -35,3 +35,6 @@ ST_SPEED=1:每方向候选→承诺窗 tau 内占位盒(影响帽=承诺尺度,g
 ① **承诺机制是唯一解锁 ST 价值的钥匙**(本战役的核心实证)——commit window=tau+lead、事件触发修线、沟身份迟滞;② 分段证书+DP 核心+get_bsegs 全部现成=M3 的判卷器与提案器直接复用;③ s5 口袋病待治(σ带×静态 squeeze:候选药=hold 连续 N 拍收缩 K 的自愈阀);④ 考场就绪(crosser_exam.sh 任意 N);⑤ v4 臂必须 decide+executor 成对提交(评审 M3 条目的绑定护栏)。
 
 相关 [[sando-core-m1-2026-07-17]] [[sando-core-raceline-2026-07-16]] [[sando-core-sweep-kf-audit-2026-07-16]]
+
+## 全池平局存证(收官补记)
+st 臂 seeds 0-19:**19/20 与基线逐字节相同;s17 一次真开火**——11.9s vs 9.5s(慢 2.4s)换 min_clr 0.74→1.51、静态净空 0.74→2.69(静态 squeeze 前等一步再走,替代贴挤)。中性判决维持,ST_SPEED 留树默认关;s17=承诺机制价值的孤例预告。成片:out/drone_3d_exam_n3_s7.mp4(渲染=headless 12.2s 逐字)。
