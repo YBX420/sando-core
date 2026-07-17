@@ -523,6 +523,15 @@ def cert_clear_warp_margin(ego, cyl, s, tau=TAU, delta=None):
     return True, m_min
 
 
+_ST_ON = os.environ.get("ST_SPEED", "0") == "1"   # M2-4 (2026-07-17): ST-graph speed stage in the
+#   tournament -- per direction candidate, project the cyl movers into (param-station, time)
+#   forbidden boxes over the commitment window tau, DP the fastest schedule (gear set = tournament
+#   grid + stop, ONE-NOTCH transitions = SPEED_SLEW-legal by construction), certify it with the
+#   piecewise-warp composer (st_cert, Route B). DP PROPOSES, the certificate JUDGES; an uncertified
+#   or not-strictly-better schedule falls back to the constant-gear _best_s -- worst case = today.
+_ST_MODS = [None]                                  # lazy (st_speed, st_cert) | False = loudly disabled
+
+
 def maneuver_decide_v2(ego, p_d, v_d, a_d, goal, ztop, cyl, state,
                        cruise_z=CRUISE_Z, horizon=HORIZON, straight_clip=None,
                        tau=TAU, delta=None, speeds=None,  # default (1.0,0.6,0.3); 0.3 ABSORBS evades (without it evade 40->106)
@@ -636,6 +645,68 @@ def maneuver_decide_v2(ego, p_d, v_d, a_d, goal, ztop, cyl, state,
             if _cert_at(s, strict):
                 return s
         return 0.0
+
+    def _st_stage(v0_gear):
+        """M2-4 ST-graph speed schedule for the CURRENTLY-held candidate spline. Boxes only within
+        the commitment window tau (the review's influence cap: conflicts beyond the commit scale
+        must not steer the per-tick recommit -- gap-law v1 lesson). Returns (s_rank, head_gear,
+        pieces) or None. The DP proposes; certify_profile (piecewise-warp Bernstein composer)
+        judges; caller falls back to the constant-gear path when this returns None."""
+        if _ST_MODS[0] is False:
+            return None
+        if _ST_MODS[0] is None:
+            try:
+                import st_speed as _STS
+                import st_cert as _STC
+                if getattr(ego, "get_bsegs", None) is None:
+                    raise RuntimeError("EGOPlanner lacks get_bsegs (stale bridge?)")
+                _ST_MODS[0] = (_STS, _STC)
+            except Exception as e:   # LOUD disable, never silent (2026-07-16 law)
+                print(f"[st] ST_SPEED DISABLED: {type(e).__name__}: {e}", flush=True)
+                _ST_MODS[0] = False
+                return None
+        _STS, _STC = _ST_MODS[0]
+        dur = ego.duration()
+        if dur <= 1e-3:
+            return None
+        dt_dp = 0.15
+        t_rows = np.arange(0.0, tau + 1e-9, dt_dp)
+        if len(t_rows) < 3:
+            return None
+        du = dt_dp / 8.0
+        u_hi = min(dur - 1e-3, tau)                      # max param reachable at gear 1.0 in-window
+        us = np.arange(0.0, u_hi + 1e-9, du)
+        if len(us) < 8:
+            return None
+        pts = np.asarray([ego.eval(float(u))[0][:2] for u in us], float)
+        blocked = np.zeros((len(t_rows), len(us)), bool)
+        for ent in cyl:
+            c0e = np.asarray(ent[0], float); vve = np.asarray(ent[1], float); Re = float(ent[3])
+            for j, tj in enumerate(t_rows):
+                cc = c0e[:2] + vve[:2] * tj
+                blocked[j] |= (np.hypot(pts[:, 0] - cc[0], pts[:, 1] - cc[1]) < Re)
+        g_set = tuple(sorted(set(tuple(speeds) + (0.0,)), reverse=True))
+        r = _STS.dp_profile(blocked, us, t_rows, v0=float(v0_gear), v_max=1.0, a_max=0.0,
+                            gears=g_set)                 # a_max=0 => one-notch-per-step ONLY
+        if r is None or len(r["gear_seq"]) < 2:
+            return None
+        pieces = [(dt_dp, float(g)) for g in r["gear_seq"][1:]]
+        total = sum(p[0] for p in pieces)
+        if total < tau - 1e-6:                           # goal hit early: pad to tile [0, tau]
+            pieces.append((tau - total, pieces[-1][1]))
+        for pad_gear in (None, 0.0):                     # retry once with a hover pad if we overrun
+            if pad_gear is not None:
+                pieces[-1] = (pieces[-1][0], pad_gear)
+            try:
+                okc, _m = _STC.certify_profile(ego, cyl, pieces, tau, d)
+                break
+            except ValueError:
+                okc = False
+                continue
+        if not okc:
+            return None
+        s_rank = float(r["s_end"]) / max(u_hi, 1e-6)
+        return (s_rank, float(pieces[0][1]), pieces)
 
     def _progress(s):
         rr = ego.eval(min(s * tau, max(ego.duration() - 1e-3, 0.0)))
@@ -764,6 +835,7 @@ def maneuver_decide_v2(ego, p_d, v_d, a_d, goal, ztop, cyl, state,
     # candidates only.)
     _tie_eps = float(os.environ.get("TIE_KEEP", "0"))
     _inc0 = state.get("kind")
+    _st_by = {}                             # dk -> (s_rank, head_gear, pieces) when the ST stage won
     last_replanned = None
     for dk in DIRS:
         gs = _gsub(dk)
@@ -777,6 +849,13 @@ def maneuver_decide_v2(ego, p_d, v_d, a_d, goal, ztop, cyl, state,
         s_ok = _best_s()
         if s_ok <= 0.0:
             continue
+        if _ST_ON:
+            # ST stage (M2-4): a certified piecewise schedule replaces the constant gear ONLY when
+            # STRICTLY better (window progress rank > constant gear + 0.02); ties keep the tree.
+            _str = _st_stage(float(state.get("s_prev") or state.get("s", 1.0)))
+            if _str is not None and _str[0] > s_ok + 0.02:
+                _st_by[dk] = _str
+                s_ok = float(_str[0])       # rank by schedule progress (window-normalized)
         sc = _progress(s_ok)
         # LEXICOGRAPHIC rank (speed first): a full-speed detour beats ANY slowdown -- pure
         # window-progress scoring is myopic (slow-and-straight outscores fast-but-sideways over
@@ -817,15 +896,30 @@ def maneuver_decide_v2(ego, p_d, v_d, a_d, goal, ztop, cyl, state,
         return "evade", 0.0
     dk, s_ok = best[0], best[1]
     gs = _gsub(dk)
+    _st_win = _st_by.get(dk) if _ST_ON else None
     if last_replanned != dk:
         ego.replan(p_d, v_d, a_d, gs)                       # restore the WINNER's spline (loop clobbered ego)
-        # SOUNDNESS (GapWeave audit 2026-07-08): the restored spline is a FRESH replan, not the one
-        # that was certified in the loop -- poly-init determinism made them coincide historically,
-        # but warm-start / any nondeterminism makes flying it UNCERTIFIED. Re-certify; on failure
-        # fall through to evade (never fly an unrecertified restore).
-        if not _cert_at(s_ok):
+        # SOUNDNESS (GapWeave audit 2026-07-08 + M2-4): the restored spline is a FRESH replan, not
+        # the one certified in the loop. ST schedule: RE-propose + RE-judge on the restored spline
+        # (never fly a schedule certified on a clobbered spline); on failure fall to the plain
+        # constant-gear path; still uncertified -> evade. Plain path: original re-certify unchanged.
+        if _st_win is not None:
+            _st_win = _st_stage(float(state.get("s_prev") or state.get("s", 1.0)))
+            if _st_win is None:
+                s_plain = _best_s()
+                if s_plain <= 0.0:
+                    state.update(kind=None, gsub=None, s=1.0, age=0)
+                    return "evade", 0.0
+                state.update(kind=dk, gsub=gs, s=s_plain, age=0)
+                return dk, s_plain
+        elif not _cert_at(s_ok):
             state.update(kind=None, gsub=None, s=1.0, age=0)
             return "evade", 0.0
+    if _st_win is not None:
+        # fly the schedule HEAD this tick (receding horizon: next tick re-decides); whole schedule
+        # carries the piecewise-warp certificate over [0, tau]
+        state.update(kind=dk, gsub=gs, s=float(_st_win[1]), age=0)
+        return dk, float(_st_win[1])
     state.update(kind=dk, gsub=gs, s=s_ok, age=0)
     return dk, s_ok
 
