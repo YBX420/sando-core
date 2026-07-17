@@ -53,6 +53,10 @@ try:    # TIME-AWARE moving obstacles (EGO-Swarm-style solver term, 2026-07); ab
     _set_moving = _sig("ego_set_moving_obstacles", None, C.c_void_p, _d, C.c_int, C.c_double)
 except AttributeError:
     _set_moving = None
+try:    # READONLY Bernstein-segment dump (M2-3 piecewise-warp cert, 2026-07-17); absent in a stale .so
+    _get_bsegs = _sig("ego_get_bsegs", C.c_int, C.c_void_p, _d, _d, _d, C.c_int)
+except AttributeError:
+    _get_bsegs = None
 _destroy = _sig("ego_destroy", None, C.c_void_p)
 
 
@@ -94,6 +98,21 @@ class EGOPlanner:
         r = np.ascontiguousarray(np.asarray(rows, np.float64).reshape(-1, 8))
         n = r.shape[0]; rp = r.ctypes.data_as(_d) if n else _d()
         _set_moving(self._h, rp, int(n), float(lam))
+
+    def get_bsegs(self):
+        """Committed spline as exact Bernstein segments: (cp (n,4,3), t0 (n,), dur (n,)) in the
+        spline's param clock. Raises LOUDLY on a stale .so (2026-07-16 law: never silently degrade) --
+        the piecewise-warp certificate cannot exist without it."""
+        if _get_bsegs is None:
+            raise RuntimeError("ego_capi.so is stale: rebuild it (missing ego_get_bsegs; "
+                               "the piecewise-warp certificate needs the committed spline's segments)")
+        for cap in (64, 512):
+            cp = np.zeros(cap * 12); t0 = np.zeros(cap); du = np.zeros(cap)
+            n = int(_get_bsegs(self._h, cp.ctypes.data_as(_d), t0.ctypes.data_as(_d),
+                               du.ctypes.data_as(_d), cap))
+            if n >= 0:
+                return cp[:n * 12].reshape(n, 4, 3), t0[:n], du[:n]
+        raise RuntimeError(f"ego_get_bsegs: committed spline has >{cap} segments (?)")
 
     def replan(self, start, vel, acc, goal, goal_vel=(0, 0, 0), random_poly=False):
         _a, sp = _p(start); _b, sv = _p(vel); _c, sa = _p(acc); _d2, gp = _p(goal); _e, gv = _p(goal_vel)

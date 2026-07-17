@@ -166,6 +166,25 @@ int ego_certify_above(void* h, double z_clear, double t_hi, double v_eff_z, doub
   return v.certified ? 1 : 0;
 }
 
+// READONLY dump of the committed spline's Bernstein segments (M2-3 Route B, 2026-07-17): the piecewise
+// speed-warp certificate retimes these EXACT control points in python (same spatial curve, new global
+// t0/dur per flown-speed piece) and feeds cert_capi's cert_horizontal_bseg, whose obstacle poly and
+// v_eff tube both live on each segment's own GLOBAL t0 -- no per-call clock reset. ADDITIVE export,
+// certify core untouched. out_cp: n_seg*12 doubles (4 Bezier pts x 3), out_t0/out_dur: n_seg (param u
+// clock, u in [0, duration]). Returns n_seg, or -needed when max_seg is too small (caller re-sizes).
+int ego_get_bsegs(void* h, double* out_cp, double* out_t0, double* out_dur, int max_seg) {
+  auto* m = (EGOPlannerManager*)h;
+  auto segs = build_segs(m);
+  const int n = (int)segs.size();
+  if (n > max_seg) return -n;
+  for (int i = 0; i < n; ++i) {
+    for (int k = 0; k < 4; ++k)
+      for (int c = 0; c < 3; ++c) out_cp[i * 12 + k * 3 + c] = segs[i].bern[k](c);
+    out_t0[i] = segs[i].t0; out_dur[i] = segs[i].dur;
+  }
+  return n;
+}
+
 // THREE-VALUED verdicts (NEW symbols; the two-valued ego_certify_* above keep their exact old ABI).
 // Return: 1 = CERTIFIED (proof holds over the whole window), -1 = REFUTED (the deficit is provably positive
 // on a sub-interval => the keep-out is GENUINELY violated, "truly blocked"), 0 = UNKNOWN (hull > 0 but no
