@@ -70,8 +70,13 @@ ap.add_argument("--port", type=int, default=8089, help="port for --serve")
 ap.add_argument("--px4", action="store_true", help="fly the REAL PX4 SITL flight stack via MAVSDK offboard (needs PX4 SITL running) instead of the lightweight quadrotor.py")
 ap.add_argument("--ego", action="store_true", help="use the standalone EGO-Planner core (ESDF-free, depth-FOV point cloud) instead of the SANDO C++ core")
 ap.add_argument("--native", action="store_true", help="use the NATIVE MIT-ACL SANDO baseline (de-ROS'd: heat-A* + DecompUtil SFC + GUROBI), fed the depth-FOV cloud, instead of our MINCO core")
-ap.add_argument("--fov_range", type=float, default=8.0, help="depth-camera perception range (m) when --ego (D435i ~ a few m); only obstacles in this forward cone are seen")
+ap.add_argument("--fov_range", type=float, default=8.0, help="DENSE-DEPTH range (m) when --ego (D435i physics ~8m): static occupancy imaging only")
 ap.add_argument("--fov_deg", type=float, default=45.0, help="depth-camera half-FOV (deg) for the forward perception cone when --ego")
+ap.add_argument("--mover_range", type=float, default=30.0, help="mover RECOGNITION range (m), 塔菲大人 2026-07-17: "
+                "a real drone recognizes+ranges PEOPLE far beyond its dense-depth range (camera/lidar detection at "
+                "20-40m is nuScenes-verified on this very stack); applies to BOTH arms (ours' tracker feed and "
+                "native's fov_cloud movers = same eyesight, A/B fair). Distance-dependent noise/miss still grow with "
+                "range in the realistic front-end. Old myopic face reproducible with --mover_range 8")
 ap.add_argument("--d435i", action="store_true", help="use a REAL Intel RealSense D435i depth camera as the perception INPUT: mount a D435i-spec DepthCamera (FOV 87x58, range ~0.3-8m, axial noise) on the drone nose, render the depth image, deproject to a world point cloud, and feed THAT to EGO instead of the GT-omniscient fov_cloud. Occlusion + range + noise = sim2real-faithful perception. Same point-cloud interface accepts a real D435i via pyrealsense2. Needs --ego")
 ap.add_argument("--seam", action="store_true", help="enable seam C2-from-exec-state (A4): re-anchor each MINCO solve at the drone's real execution state so 'what flies == what is certified' (our MINCO core only)")
 ap.add_argument("--ego_safe", action="store_true", help="wrap EGO with MINCO's per-class certified MOVER safety: certify EGO's committed B-spline (S3 continuous-time deficit) against each detected mover with per-class d_safe (human0.8/vehicle0.6/animal0.7); uncertified commit -> RTA HOLD. Static stays EGO's own cloud avoidance. Needs --ego")
@@ -830,7 +835,7 @@ def _percept_static(p_d, heading):
 
 
 def _in_cone(c3, p_d, heading):
-    R = float(args.fov_range); cmax = float(np.cos(np.radians(args.fov_deg)))
+    R = float(args.mover_range); cmax = float(np.cos(np.radians(args.fov_deg)))
     fwd = np.array([np.cos(heading), np.sin(heading)])
     dd = np.asarray(c3, float)[:2] - p_d[:2]; r = float(np.linalg.norm(dd))
     return r <= R and (float(dd @ fwd) / max(r, 1e-6)) >= cmax
@@ -1591,7 +1596,7 @@ if _PERCEPT_REAL:
     if "PERCEPT_FOV_DEG" not in os.environ:                 # default the cone to THIS harness's sensor args
         _pcfg.fov_deg = float(args.fov_deg)
     if "PERCEPT_RANGE" not in os.environ:
-        _pcfg.fov_range = float(args.fov_range)
+        _pcfg.fov_range = float(args.mover_range)   # mover RECOGNITION range (2026-07-17), not dense-depth
     _PFE = PerceptionFrontEnd(_pcfg, seed=int(args.seed) * 13 + 5)
     print(f"[percept] REALISTIC front-end on: cone {_pcfg.fov_deg:.0f}deg/{_pcfg.fov_range:.0f}m, "
           f"occlusion={_pcfg.occlusion}, p_miss0={_pcfg.p_miss0}", flush=True)
@@ -2166,8 +2171,9 @@ def _voxel_box(pos, size, t_sim=0.0, vel=(0, 0)):
 
 def fov_cloud(p_drone, heading, t_sim):
     """The drone's DEPTH-camera FOV point cloud (NOT GT omniscience): static voxels + mover boxes within
-    the forward cone (+-fov_deg) and range fov_range of the heading. This is what --ego perceives."""
-    R = float(args.fov_range); cmax = float(np.cos(np.radians(args.fov_deg)))
+    the forward cone (+-fov_deg). Movers use --mover_range (recognition, 2026-07-17), statics keep the
+    dense-depth --fov_range -- BOTH arms read this same function, so the eyesight stays A/B fair."""
+    R = float(args.mover_range); cmax = float(np.cos(np.radians(args.fov_deg)))
     fwd = np.array([np.cos(heading), np.sin(heading)])
     chunks = []
     # STATIC: local KNOWN map when EGO_STATIC_MAP=1 (native gets the same realistic static both ours does), else cone.
