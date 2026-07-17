@@ -525,6 +525,17 @@ _cow_frac = 0.5                                      # the single cow crosses th
 c = START[:2] + axis * (np.linalg.norm(GOAL[:2] - START[:2]) * _cow_frac)
 _cow = Animal("cow", c + left * 6.0, -left * 1.0); _cow.id = 900
 animals.append(_cow)
+# M2-1 (2026-07-17): MOVING-CROWD EXAM -- EGO_ADV_N=K spawns K timed crossers spread along the route
+# (fractions linspace(0.25,0.75), alternating sides), each timed to MEET the drone at its own crossing
+# point using EGO_ADV_CROSS_VCRU (pass the BASELINE arm's measured average speed -- ops/crosser_exam.sh
+# computes it from the pool log; the old default 3.0 made every crosser miss by 8m+, the 07-16 lesson).
+# Default EGO_ADV_N unset/0 = no extra objects, placement branches unchanged = byte-identical.
+_ADV_N = int(os.environ.get("EGO_ADV_N", "0"))
+_adv_cows = [_cow]
+for _k in range(1, _ADV_N):
+    _ac = Animal("cow", c + left * (6.0 + 2.0 * _k), -left * 1.0)
+    _ac.id = 900 + _k
+    animals.append(_ac); _adv_cows.append(_ac)
 
 # ---- 3D path overlay (lives in the real world, so BOTH cameras render it) -----------------------
 path_root = NodePath("sando_path"); path_root.reparentTo(eng.render)
@@ -2527,7 +2538,20 @@ while not quit_now:
         drone.set_position([float(START[0]), float(START[1]), CRUISE_Z]); drone.set_heading_theta(hdg0)
         lap_start = START
     _mid = 0.5 * (START[:2] + GOAL[:2])
-    if os.environ.get("EGO_ADV_CROSSER") == "1":
+    if _ADV_N >= 1:
+        # M2-1 MOVING-CROWD EXAM: N timed crossers at route fractions linspace(0.25,0.75), alternating
+        # sides, EACH timed to reach its own crossing point exactly when the drone does at the measured
+        # cruise speed EGO_ADV_CROSS_VCRU. Every crosser is a REAL encounter, not an 8m+ flyby.
+        _vcru = float(os.environ.get("EGO_ADV_CROSS_VCRU", 3.0))
+        _vx = float(os.environ.get("EGO_ADV_CROSS_SPEED", 2.5))
+        _Lrt = float(np.linalg.norm(GOAL[:2] - START[:2]))
+        _frs = np.linspace(0.25, 0.75, _ADV_N) if _ADV_N > 1 else [0.5]
+        for _k, (_ac, _f) in enumerate(zip(_adv_cows, _frs)):
+            _pt = START[:2] + axis * (_Lrt * float(_f))
+            _sd = 1.0 if _k % 2 == 0 else -1.0
+            _tk = _Lrt * float(_f) / max(_vcru, 0.5)
+            _ac.place(_pt + left * _sd * (_vx * _tk), -left * _sd * _vx)
+    elif os.environ.get("EGO_ADV_CROSSER") == "1":
         # ADVERSARIAL side-crosser: a fast mover timed to reach the drone's path midpoint EXACTLY as the drone does,
         # entering from ~90 deg (OUTSIDE the +-fov_deg forward cone) so it is detected only when already close -- the
         # "see-too-late" stress that gives the FOV failure a non-zero collision denominator (default scene = 0 collisions).
