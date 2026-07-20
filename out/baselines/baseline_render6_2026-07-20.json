@@ -1,0 +1,25 @@
+{
+  "provenance": {
+    "date": "2026-07-20",
+    "ruling": "塔菲大人 07-20 晚间裁决包: A案(verbatim executor)定案 + k10(ETA_FEED=2,ETA_K=1.0)转默认 + 本表转正为渲染面基线",
+    "config": "THIN=1, new defaults (ETA_FEED=2 default), --maneuver --clear_spawn --headless --t_max 30, body-clearance convention (audit #4), verbatim executor (audit #1)",
+    "commit_base": "a93ab2a + k10-default promotion",
+    "convention_note": "min_clr = BODY clearance (drone surface to obstacle surface), measured at end-of-tick against end-of-tick movers. NOT comparable to pre-2026-07-20 centre-based ledgers (delta ~= -0.25m +- retiming)."
+  },
+  "seeds": {
+    "3":  {"t_goal": 8.8,  "min_clr": 0.550, "collided": false, "reached": true, "switches": 14, "spchurn": 53.5, "jerk": 49.79, "hold": 1},
+    "5":  {"t_goal": 9.8,  "min_clr": 0.853, "collided": false, "reached": true, "switches": 13, "spchurn": 43.3, "jerk": 31.31, "hold": 0},
+    "7":  {"t_goal": 7.5,  "min_clr": 2.041, "collided": false, "reached": true, "switches": 2,  "spchurn": 20.8, "jerk": 28.89, "hold": 0},
+    "12": {"t_goal": 11.6, "min_clr": 0.695, "collided": false, "reached": true, "switches": 20, "spchurn": 72.0, "jerk": 59.53, "hold": 6},
+    "19": {"t_goal": 7.5,  "min_clr": 2.463, "collided": false, "reached": true, "switches": 5,  "spchurn": 35.0, "jerk": 37.46, "hold": 0},
+    "23": {"t_goal": 11.5, "min_clr": 0.654, "collided": false, "reached": true, "switches": 18, "spchurn": 62.7, "jerk": 37.78, "hold": 6}
+  },
+  "mean_t_goal": 9.45,
+  "clean_arrival": "6/6 (reached, zero collision, zero uncertified emergency)",
+  "ladder_context": {
+    "old_smoother_pre_audit_mean": 10.37,
+    "verbatim_only_mean": 9.78,
+    "verbatim_plus_k10_mean": 9.45,
+    "per_seed_note": "k10 rescues the two verbatim-regression seeds (s3 10.5->8.8, s5 14.2->9.8) and pushes s7/s19 to 7.5 (oracle floor 7.4); it taxes s23 (7.5->11.5) and s12 (10.5->11.6) with extra detour churn. Ruling basis for k10 remains the 20-seed m1b pool (07-17), not this 6-seed view."
+  }
+}
