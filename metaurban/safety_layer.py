@@ -1401,7 +1401,11 @@ def make_receipt(kind, s, certified, ego, cyl, window, delta, gates, track_ids=N
     for j, ent in enumerate(cyl):
         (c0, vv, aa, R, zc, veff) = ent[:6]
         tid = (track_ids[j] if track_ids is not None and j < len(track_ids) else j)
-        snap.append((tid, round(float(c0[0]), 2), round(float(c0[1]), 2), round(float(R), 2)))
+        cap = bool(len(ent) > 6 and ent[6] is not None and isinstance(ent[6], tuple)
+                   and len(ent[6]) > 0 and isinstance(ent[6][0], str) and ent[6][0] == "cap")
+        snap.append((tid, round(float(c0[0]), 2), round(float(c0[1]), 2),
+                     round(float(vv[0]), 3), round(float(vv[1]), 3),
+                     round(float(R), 2), round(float(veff), 3), cap))
     return dict(cert_id=_RECEIPT_SEQ[0], kind=kind, s=float(s), certified=bool(certified),
                 plan_hash=ph, schedule=(list(schedule) if schedule else None),
                 obstacle_snapshot=hashlib.sha256(repr(snap).encode()).hexdigest()[:16],
