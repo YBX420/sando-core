@@ -120,12 +120,19 @@ def attribute(*, receipt, exec_src, contact_t, valid_from, valid_until, m_xy_at_
     aux = []
     certified = bool(receipt and receipt.get("certified"))
     in_window = certified and (valid_from - 1e-9 <= contact_t <= valid_until + 1e-9)
+    exec_ok = (exec_src == "plan") or (exec_src == "hold"
+                                       and (receipt or {}).get("kind") == "hold_cert")
+    #   ^ a CERTIFIED hover (hold_cert receipt, 07-20 #5c) is a plan of its own: holding position
+    #   IS the certified schedule, so a hold tick with that receipt is not an override.
     if not certified:
         aux.append("no_certificate")
     elif not in_window:
         aux.append("outside_validity")
-    if exec_src != "plan":
+    if not exec_ok:
         aux.append(f"exec_override:{exec_src}")
+    if receipt is not None and receipt.get("exec_verified") is False:
+        aux.append("exec_envelope_violation")   # flew the plan but OUTSIDE the certified tracking
+        #   envelope (07-20 #5e) -- kept as evidence; a D verdict with this tag names the broken link
     row = snapshot_row(receipt, m_xy_at_t0) if certified else None
     if certified and row is None:
         aux.append("not_in_snapshot")
@@ -135,7 +142,7 @@ def attribute(*, receipt, exec_src, contact_t, valid_from, valid_until, m_xy_at_
         exc, rho, dist = tube_excess(row, tau_c, m_true_xy, delta)
         if exc is not None and exc > 0:
             aux.append("left_tube")
-    if not certified or not in_window or exec_src != "plan":
+    if not certified or not in_window or not exec_ok:
         primary = "U"
     elif row is None:
         primary = "P"

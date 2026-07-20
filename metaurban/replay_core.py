@@ -130,9 +130,13 @@ def load_calib(eps=None):
                 out[cls] = (max(0.0, lv["q_conformal"]), lv["v_eff"])
         if allv:
             out["_all"] = (max(0.0, allv["q_conformal"]), allv["v_eff"])
+    else:
+        print(f"[calib] MISSING {path} -> FAIL-CLOSED (all classes uncertifiable)", flush=True)
     for cls in ("pedestrian", "vehicle", "animal"):
-        out.setdefault(cls, (0.15, 0.6))
-    out.setdefault("_all", (0.15, 0.6))
+        if cls not in out:
+            print(f"[calib] class '{cls}' UNCALIBRATED at eps={eps} -> FAIL-CLOSED", flush=True)
+            out[cls] = (1e6, 0.0)
+    out.setdefault("_all", (1e6, 0.0))
     return out
 
 
@@ -857,6 +861,17 @@ def run_replay(movers, ep, mode="ours", calib=None, predict=True, max_vel=3.0, m
             receipt["valid_until"] = round(t + float(receipt.get("window", TAU)), 3)
             receipt["executed_segment_hash"] = CA.executed_hash(p_prev, p_d, exec_src)
             receipt["exec_src"] = exec_src
+            if exec_src == "plan" and receipt.get("certified"):
+                # 07-20 #5e: the EXECUTED schedule must match the CERTIFIED one -- verify the
+                # flown endpoint sits inside the certified tracking envelope (teleport: exact;
+                # dynamics/PX4: within the calibrated DYN_TRACK allowance the cert carried).
+                _dev = float(np.linalg.norm(np.asarray(p_d, float) - np.asarray(p_ref, float)))
+                _tol = (float(os.environ.get("DYN_TRACK", "0.473"))
+                        if (dynamics or flier is not None) else 1e-6)
+                receipt["exec_verified"] = bool(_dev <= _tol)
+                if not receipt["exec_verified"]:
+                    print(f"[receipt] EXEC-ENVELOPE VIOLATION tick={tick} dev={_dev:.3f} > "
+                          f"tol={_tol} (certified plan flown outside its envelope)", flush=True)
         for (_ci, _cl, _s_hit, _m0, _m1) in _contacts:
             _tc = t + _s_hit * DT
             _trk = trackers.get(_ci)

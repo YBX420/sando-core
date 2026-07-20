@@ -2121,6 +2121,14 @@ def ego_maneuver_replan(p_d, v_d, a_d, cur_wp, t_sim):
             kind = kind[:-1]
         if kind == "evade":
             kind = "hold"                       # renderer semantics: never blind-flee into buildings
+            # 07-20 #5c: a HOLD tick either GETS a certificate or explicitly stays U. Try to
+            # certify the hover itself (stationary point vs every mover tube over the window --
+            # the s=0 pearl law in flight form). Flight is identical either way; only the
+            # exposure accounting stops overstating. Uncertifiable hover keeps the evade receipt.
+            if _SL.hover_clear(p_d, _cyl, _tau_now(), delta=REPLAN_DT):
+                _MAN_V2["receipt"] = _SL.make_receipt("hold_cert", 0.0, True, ego, _cyl,
+                                                      _tau_now(), REPLAN_DT,
+                                                      gates=dict(hover=True))
         dur = ego.duration()
         pts = [ego.eval(u)[0] for u in np.linspace(0, dur, 24)] if (kind != "hold" and dur > 1e-3) else None
         if KFDBG and (kind == "hold" or s_v2 < 0.999):

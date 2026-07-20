@@ -39,9 +39,11 @@ def _calib_eps(eps):
 
 
 def load_calib(eps=None):
+    """class -> (q_conformal, v_eff) at this eps from out/conformal/calib.json (the SAME file both
+    paths read). FAIL-CLOSED (07-20 #5d): a missing file or an uncalibrated class gets q=1e6 and
+    a LOUD line -- the old silent hand fallback (0.15, 0.6) let a deleted calibration keep flying
+    on optimistic numbers."""
     eps = _calib_eps(eps)
-    """class -> (q_conformal, v_eff) at this eps from out/conformal/calib.json (the SAME file both paths read).
-    Falls back to a conservative hand value if missing."""
     path = os.path.join(_OUTDIR, "calib.json")
     out = {}
     if os.path.exists(path):
@@ -53,9 +55,13 @@ def load_calib(eps=None):
                 out[cls] = (max(0.0, lv["q_conformal"]), lv["v_eff"])
         if allv:
             out["_all"] = (max(0.0, allv["q_conformal"]), allv["v_eff"])
+    else:
+        print(f"[calib] MISSING {path} -> FAIL-CLOSED (all classes uncertifiable)", flush=True)
     for cls in ("pedestrian", "vehicle", "animal"):
-        out.setdefault(cls, (0.15, 0.6))
-    out.setdefault("_all", (0.15, 0.6))
+        if cls not in out:
+            print(f"[calib] class '{cls}' UNCALIBRATED at eps={eps} -> FAIL-CLOSED", flush=True)
+            out[cls] = (1e6, 0.0)
+    out.setdefault("_all", (1e6, 0.0))
     # MAPPED STATICS (online-mapping perception): position uncertainty only, NO growing tube --
     # a remembered tree does not move; giving it the mover v_eff seals every corridor it borders.
     out.setdefault("static", (0.15, 0.0))
@@ -191,11 +197,63 @@ def _cap_behind(ent, ego, tau, d, warp=1.0):
     return ok
 
 
+def hover_clear(p, cyl, tau, delta=None, t_lo=0.0):
+    """Certify a STATIONARY point p over the REAL-TIME window [t_lo, tau] against every mover
+    keep-out (07-20 deterministic-chain conditions #5b/#5c). SOUND sampling: step H with the
+    Lipschitz bound |d/dt(dist - rho)| <= |v| + veff, requiring margin > H*L/2 at every sample.
+    Above-tube (p_z >= zc) passes a mover outright. Capsule rows check every pearl velocity
+    (s=0 frozen pearl included); plain rows check the strict pair (predicted AND frozen);
+    ellipse rows use the CIRCUMSCRIBED circle R_warp = kappa*r_geom+q (sound superset)."""
+    d = tau if delta is None else delta
+    p = np.asarray(p, float)
+    H = 0.05
+    for ent in cyl:
+        (c0, vv, aa, R, zc, veff) = ent[:6]
+        if p[2] >= zc:
+            continue
+        cap = _cap_of(ent)
+        if cap is None and len(ent) > 6 and ent[6] is not None and isinstance(ent[6], tuple) \
+                and len(ent[6]) > 0 and not isinstance(ent[6][0], str):
+            R_eff = float(ent[6][3])            # ellipse row: circumscribed circle is a sound superset
+        else:
+            R_eff = float(R)
+        vv = np.asarray(vv, float)
+        vels = ([vv * sg for sg in _cap_grid(cap)] if cap is not None else [vv, np.zeros(3)])
+        c0 = np.asarray(c0, float)
+        for v_p in vels:
+            L = float(np.hypot(v_p[0], v_p[1])) + float(veff)
+            need = 0.5 * H * L
+            n = max(2, int(np.ceil((tau - t_lo) / H)) + 1)
+            for tt in np.linspace(t_lo, tau, n):
+                c = c0[:2] + v_p[:2] * tt
+                rho = R_eff + float(veff) * (tt + d)
+                if float(np.hypot(p[0] - c[0], p[1] - c[1])) - rho <= need:
+                    return False
+    return True
+
+
+def _tail_covered(ego, cyl, tau, d, warp=1.0):
+    """WINDOW COMPLETION (07-20 #5b): the C++ cert silently clips t_hi to the spline end, so a
+    short committed spline (goal arrival inside the trust window) was certified only over
+    [0, dur] -- the drone then HOVERS at the terminal point with NO covering certificate. Require
+    the terminal hover to certify over the remainder [dur/warp, tau] (real time)."""
+    dur = ego.duration()
+    t_cov = dur / warp
+    if t_cov >= tau - 1e-6:
+        return True
+    r_end = ego.eval(max(dur - 1e-3, 0.0))
+    if r_end is None:
+        return False
+    return hover_clear(np.asarray(r_end[0], float), cyl, tau, delta=d, t_lo=t_cov)
+
+
 def cert_clear(ego, cyl, tau=TAU, delta=None):
     """The cylinder disjunction on ego's CURRENTLY-committed B-spline: per mover, (horiz-predicted AND
     horiz-current) OR above. AND across movers. A mover carrying the v4 ellipse field is judged in the
     whitened motion frame (cross-track semi-axis = along/kappa) -- same disjunction shape."""
     d = tau if delta is None else delta
+    if not _tail_covered(ego, cyl, tau, d):
+        return False
     for ent in cyl:
         (c0, vv, aa, R, zc, veff) = ent[:6]
         cap = _cap_of(ent)
@@ -428,6 +486,8 @@ def cert_clear_warp(ego, cyl, s, tau=TAU, delta=None):
     yield. Statics (vel=0, veff=0) are warp-invariant -- slowing never fixes a static conflict."""
     d = (tau if delta is None else delta)
     s = float(s)
+    if not _tail_covered(ego, cyl, tau, d, warp=s):
+        return False
     for ent in cyl:
         (c0, vv, aa, R, zc, veff) = ent[:6]
         cap = _cap_of(ent)
@@ -1228,7 +1288,15 @@ def maneuver_decide_v2(ego, p_d, v_d, a_d, goal, ztop, cyl, state,
     gs = _gsub(dk)
     _st_win = _st_by.get(dk) if (_ST_ON and not _STC_ON) else None
     if last_replanned != dk:
-        ego.replan(p_d, v_d, a_d, gs)                       # restore the WINNER's spline (loop clobbered ego)
+        if not (ego.replan(p_d, v_d, a_d, gs) and ego.duration() > 1e-3 and _ok_plan()):
+            # RESTORE FAILURE (07-20 deterministic-chain condition #5a): a failed replan leaves
+            # ego holding SOME OTHER spline -- returning the winner label would bind the receipt
+            # to a plan that is not the one in hand. Fail LOUD to evade; extra_gate re-runs too
+            # (the loop gated the original candidate, the restored spline must re-pass ALL gates).
+            print("[v2] winner-restore replan/gate FAILED -> evade (stale-spline hole closed)",
+                  flush=True)
+            state.update(kind=None, gsub=None, s=1.0, age=0)
+            return "evade", 0.0
         # SOUNDNESS (GapWeave audit 2026-07-08 + M2-4): the restored spline is a FRESH replan, not
         # the one certified in the loop. ST schedule: RE-propose + RE-judge on the restored spline
         # (never fly a schedule certified on a clobbered spline); on failure fall to the plain
