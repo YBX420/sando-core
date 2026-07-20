@@ -47,4 +47,11 @@ min_clr 自 d32b63b 起=**机体净空**(旧=中心净空,差 0.25+时序);渲�
 - **阶梯 v2**(74e72c4,四硬条件全落):RUNG-2 降级为管宽等价诊断;strata=名族+manifest 世界组成预注册(**全 49 场景只有 6 个含静态物**,纯抽签 ~9% 饿死 static 拟合,rng17 踩中;数据窥探强塞已删);cal/test 统一 2 episode/场景;有限样本措辞修正。**修正版 RUNG-3:ε=0.10 λ=1.522(k=19/20 带一格尾松弛)ped q̃@0.3=0.838=比污染版 production 仅 +21%(旧 λ=4.3 是窥探切分的假吓);ε=0.05 max-rank λ=2.822 实证需 ≥39 cal 场景(荐 ≥59,camera-ready 档);全 episode 敏感性 λ=1.755**;interim artifact=out/conformal/calib_v6_scn010_interim.json(切分全注册,INTERIM 待新场景+估计器冻结)
 **下一步(按裁决序)**:attribution 落账(U/P/Q/D+domain 标签+漏检子码[锥外/遮挡/随机miss/关联失败/TTL串杀/太年轻]+object_scope+全接触物列表;P 判据=肇事物 spatial 匹配"最后一张因果有效 receipt 的 tracks 行",反应窗由感知/计算延迟+最小制动导出,不手填);渲染面 receipt;新场景收割开工
 
+## 工序 1-4 已落地(07-20 深夜二批,b8e28b2+7eed9d7,塔菲大人最终工序)
+- **collision_attribution.py 共享模块**:replay+renderer 同一套 U→P→Q→D(U=无证书绑定实际执行/窗外/执行覆盖;P=不在 snapshot+子码;Q=真轨迹出管=ε 类;D=管内仍撞=确定性违约零容忍);辅助原因永不丢;domain 按 episode 冻结只注不改判;tube 检验=CV 点律+胶囊段律双模
+- **receipt 补齐**:executed_segment_hash+exec_src(执行器真飞的东西:plan vs evade/brake/escape 覆盖);snapshot 行升级 (tid,x,y,vx,vy,R,veff,cap);渲染面 maneuver 臂 receipt 已接(决策时 fed 快照配对+静态碰撞=认证拍 D/无证拍 U)
+- **验证链**:四类合成单测全对+中拍穿越(端点全清 s=0.5 抓到 −0.55);**强制碰撞探针 scenarios/diag/forensic_cross.json 端到端全对**(tick0=P/snapshot_gap:FE ready 门,证书真没看见新生 track;tick1=U/no_certificate+exec_override:evade;全 collider/track 态/cert_id 链/扫掠时刻齐);200k fuzz 新旧扫掠 0 失配;12 键 flags+clr 与 2f978ff 逐位同;渲染面 seed7 7.5s/2.041 逐字复现(全透明)
+- **⚠️ n3 验尸结果=历史碰撞不复现**(ETA_FEED=0 钉回历史面,stc 臂 11.5s 0撞 clr1.55):旧碰撞是 flown≠certified 时代执行器的产物,三刀裁决修复(verbatim/扫掠/口径)之间行为合法变化;"认证 HOLD 被碾→U"模式在代数里就位待真实案例;渲染面碰撞路径=冒烟级验证(共享代数已由 replay 探针背书)
+- **遗留(工序 5-6)**:确定性证明链五件(winner restore 重跑全 gate/窗口完整覆盖禁静默裁短/HOLD-evade-recovery 要么有证要么明示 U/标定缺失 fail-closed/executed hash==certified hash 强校验);然后估计器刀(coast 漂移/锥缘串杀/σ margin),**估计器冻结前不产终版标定**;P 子码细分(锥外/遮挡/随机miss/关联失败/TTL串杀)需感知面事件挂钩
+
 相关 [[sando-core-m3-2026-07-20]] [[sando-core-raceline-2026-07-16]]
