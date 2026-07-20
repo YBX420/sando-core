@@ -52,6 +52,7 @@ min_clr 自 d32b63b 起=**机体净空**(旧=中心净空,差 0.25+时序);渲�
 - **receipt 补齐**:executed_segment_hash+exec_src(执行器真飞的东西:plan vs evade/brake/escape 覆盖);snapshot 行升级 (tid,x,y,vx,vy,R,veff,cap);渲染面 maneuver 臂 receipt 已接(决策时 fed 快照配对+静态碰撞=认证拍 D/无证拍 U)
 - **验证链**:四类合成单测全对+中拍穿越(端点全清 s=0.5 抓到 −0.55);**强制碰撞探针 scenarios/diag/forensic_cross.json 端到端全对**(tick0=P/snapshot_gap:FE ready 门,证书真没看见新生 track;tick1=U/no_certificate+exec_override:evade;全 collider/track 态/cert_id 链/扫掠时刻齐);200k fuzz 新旧扫掠 0 失配;12 键 flags+clr 与 2f978ff 逐位同;渲染面 seed7 7.5s/2.041 逐字复现(全透明)
 - **⚠️ n3 验尸结果=历史碰撞不复现**(ETA_FEED=0 钉回历史面,stc 臂 11.5s 0撞 clr1.55):旧碰撞是 flown≠certified 时代执行器的产物,三刀裁决修复(verbatim/扫掠/口径)之间行为合法变化;"认证 HOLD 被碾→U"模式在代数里就位待真实案例;渲染面碰撞路径=冒烟级验证(共享代数已由 replay 探针背书)
-- **遗留(工序 5-6)**:确定性证明链五件(winner restore 重跑全 gate/窗口完整覆盖禁静默裁短/HOLD-evade-recovery 要么有证要么明示 U/标定缺失 fail-closed/executed hash==certified hash 强校验);然后估计器刀(coast 漂移/锥缘串杀/σ margin),**估计器冻结前不产终版标定**;P 子码细分(锥外/遮挡/随机miss/关联失败/TTL串杀)需感知面事件挂钩
+- **工序 5 已落地(同夜三批,commit 后续)**:5a winner-restore 重跑 replan+duration+extra_gate 全 gate(失败大声转 evade);5b 窗口补全=cert_clear/warp 终点悬停对余窗 [dur/warp,τ] 认证(hover_clear:Lipschitz 声采样+胶囊珠+冻结分量+椭圆外接圆超集;C++ 静默裁短洞关闭);5c HOLD 有证或明示 U(渲染 evade→hold 拍试 hover_clear,过则发 hold_cert 收据=s=0 珠飞行形态,attribute 认 hold+hold_cert 为匹配计划);5d v1 loader 静默手值兜底(0.15,0.6)改大声 1e6 fail-closed;5e executed==certified 逐拍验证(exec_verified,teleport 精确/dynamics 按 DYN_TRACK,违反大声+碰撞挂 exec_envelope_violation 证据)。**验证:12 键与金 b8e28b2 逐字节同(冻结面纯保险)、探针判决不变、s12 逐字复现、hover_clear 五态单测全对**。MINCO recovery=停车场不动
+- **遗留(工序 6)**:估计器刀(coast 漂移/锥缘串杀/σ margin),**估计器冻结前不产终版标定**;P 子码细分(锥外/遮挡/随机miss/关联失败/TTL串杀)需感知面事件挂钩;渲染面 exec_verified(执行器子步链验证)待接
 
 相关 [[sando-core-m3-2026-07-20]] [[sando-core-raceline-2026-07-16]]
