@@ -28,6 +28,7 @@
 #include <array>
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <vector>
 
 namespace sando {
@@ -313,6 +314,32 @@ inline double g_seg_worst_deficit(const std::vector<Iv>& b, int depth, int maxde
                   g_seg_worst_deficit(R, depth + 1, maxdepth, refuted));
 }
 
+// FAIL-CLOSED input guard for the generic piecewise-Bernstein entries (2026-07-20 audit finding #7).
+// Two silent-lie modes it closes, LOUDLY (never a quiet fallback):
+//   - a NaN/Inf coefficient poisons every downstream comparison (NaN compares false, so the deficit
+//     hull stays at -inf and the trajectory FALSE-CERTIFIES);
+//   - segment degree > 30 overflows the 64-bit long binomials in g_square (binom(2n,k) at 2n>=62),
+//     producing garbage coefficients with no error. Internal EGO cubic / MINCO quintic are far below.
+inline bool g_segs_guard(const std::vector<BSeg>& segs, const char* who) {
+  for (const auto& sg : segs) {
+    const int n = static_cast<int>(sg.bern.size()) - 1;
+    if (n > 30) {
+      std::fprintf(stderr, "[bcert] %s: segment degree %d > 30 (long-binomial overflow) -> FAIL-CLOSED\n", who, n);
+      return false;
+    }
+    if (!std::isfinite(sg.t0) || !std::isfinite(sg.dur)) {
+      std::fprintf(stderr, "[bcert] %s: non-finite segment timing -> FAIL-CLOSED\n", who);
+      return false;
+    }
+    for (const auto& p : sg.bern)
+      if (!p.allFinite()) {
+        std::fprintf(stderr, "[bcert] %s: non-finite control point -> FAIL-CLOSED\n", who);
+        return false;
+      }
+  }
+  return true;
+}
+
 // Whole committed PIECEWISE-BERNSTEIN trajectory (any degree per segment) vs ONE sphere obstacle whose
 // centre is c(t)=c0+vel*t+0.5*acc*t^2.  R = total inflated radius (incl. r_body+d_safe+q_conformal).
 // CERTIFIED => ||p(t)-c(t)|| >= R for ALL continuous t in [0, t_hi].
@@ -333,6 +360,13 @@ inline Verdict certify_segments_vs_sphere(const std::vector<BSeg>& segs, const E
                                           double R, double t_hi_in = std::numeric_limits<double>::infinity(),
                                           int maxdepth = 16, double v_eff = 0.0, double delta = 0.0,
                                           int n_axes = 3, bool* refuted = nullptr) {
+  if (!g_segs_guard(segs, "certify_segments_vs_sphere"))
+    return Verdict{false, -std::numeric_limits<double>::infinity()};
+  if (!c0.allFinite() || !vel.allFinite() || !acc.allFinite()
+      || !std::isfinite(R) || !std::isfinite(v_eff) || !std::isfinite(delta)) {
+    std::fprintf(stderr, "[bcert] certify_segments_vs_sphere: non-finite obstacle/radius -> FAIL-CLOSED\n");
+    return Verdict{false, -std::numeric_limits<double>::infinity()};
+  }
   // rho^2(t) = A t^2 + Bp t + Cp, all carried as outward-rounded intervals for soundness.
   const Iv r0_iv = iv_pt(R), v_iv = iv_pt(v_eff), d_iv = iv_pt(delta), two = iv_pt(2.0);
   const Iv A_iv  = iv_mul(v_iv, v_iv);                                   // v_eff^2
@@ -409,6 +443,12 @@ inline Verdict certify_segments_above_plane(const std::vector<BSeg>& segs, doubl
                                             int maxdepth = 16, double v_eff_z = 0.0,
                                             double delta = 0.0, double bez_pad = 0.0,
                                             bool* refuted = nullptr) {
+  if (!g_segs_guard(segs, "certify_segments_above_plane"))
+    return Verdict{false, -std::numeric_limits<double>::infinity()};
+  if (!std::isfinite(z_clear) || !std::isfinite(v_eff_z) || !std::isfinite(delta) || !std::isfinite(bez_pad)) {
+    std::fprintf(stderr, "[bcert] certify_segments_above_plane: non-finite plane params -> FAIL-CLOSED\n");
+    return Verdict{false, -std::numeric_limits<double>::infinity()};
+  }
   double t_end = 0.0;
   for (const auto& sg : segs) t_end = std::max(t_end, sg.t0 + sg.dur);
   const double t_hi = std::min(t_hi_in, t_end);
