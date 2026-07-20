@@ -38,4 +38,13 @@ min_clr 自 d32b63b 起=**机体净空**(旧=中心净空,差 0.25+时序);渲�
 - phase-2 三选项待拍板:①收场景(产线现成,最干净)②主张降到 ε=0.10 ③场景级 jackknife+/CV+ 吃满 49 个单元(理论保证打折到 1−2ε)
 - 漏检事件代数草案已提交塔菲大人(E1 认证覆盖违约=ε 赔/E2 无证暴露=RTA 账/E3 感知盲=漏检锥外遮挡/E4 仅限声明分布漂移;判决序 E2→E3→E1;**"物理包络"不是合法类别,必归 E1 或 E3,n3 案=第一个重验尸对象**);批准后落地=账本 per-collision attribution 字段
 
+## 深夜裁决落地(07-20 深夜,塔菲大人细则,2f978ff..74e72c4)
+**phase-2=①+②批准,③降附录敏感性;事件代数改判 U/P/Q/D + 正交 domain 标签(ID|OOD|UNKNOWN 按 episode 冻结)**:U(无有效证书绑定执行)=RTA 账/P(证书有效但肇事物不在 snapshot)=感知账/Q(在 snapshot 内但真轨迹出管)=ε 赔/**D(在管内仍撞=确定性证明链违约,零容忍,防代码 bug 混进 ε)**。正式定理形态:P(Q)≤ε;C_cert,represented⊆Q∪D;**须验证 P(D)=0 后才能推 P(C_cert,represented)≤ε**。论文措辞禁"distribution-free",写"model-free、场景可交换性下成立"。
+**已落地(先决件,attribution 之前)**:
+- **certificate receipt v1**(2f978ff):make_receipt 每决策拍一张(plan_hash=持有样条+档/schedule、障碍 snapshot 行 (tid,x,y,R)+sha、calib 文件 sha+eps、window/delta、gate 标签);公开 maneuver_decide_v2=receipt 壳(不变量:非 evade 返回=已认证),SPEED_SLEW 壳改名 _decide_v2_slew 垫底(**SPEED_SLEW=1 就是现成 B 案机制,默认关**);replay certified_ticks 改 receipt 驱动(kind 字符串只做显示;v0/v1/v3 遗留路径保留 kind 记账明示二等;V2_ESC 逃生沿用 evade receipt=保守记无证);CRET 自发 receipt。**验证:DECIDE=v2 臂 41/41 拍带据(40 认证+1 evade)、轨迹逐字节不变;⚠️ 字节回归面默认 DECIDE=v1(冻结锦标赛),receipt 在回归面只覆盖 sub-cadence**
+- **swept-contact**(同 commit):_swept_clearance=[t,t+DT] 双弦最小机体净空(xy 二次极小+柱顶 z 穿越+端点);12 键 reach/coll 零翻转、新金哈希 73ab731(2f978ff.json)
+- **基线 artifact 修订**:钉死 d87aa83+calib sha b8671ed818c67764+manifest(metaurban efbc6ad);zero_evade 替换错误措辞,增列 uncertified_exposure_ticks(s3:1/s12:6/s23:6=U 类暴露)
+- **阶梯 v2**(74e72c4,四硬条件全落):RUNG-2 降级为管宽等价诊断;strata=名族+manifest 世界组成预注册(**全 49 场景只有 6 个含静态物**,纯抽签 ~9% 饿死 static 拟合,rng17 踩中;数据窥探强塞已删);cal/test 统一 2 episode/场景;有限样本措辞修正。**修正版 RUNG-3:ε=0.10 λ=1.522(k=19/20 带一格尾松弛)ped q̃@0.3=0.838=比污染版 production 仅 +21%(旧 λ=4.3 是窥探切分的假吓);ε=0.05 max-rank λ=2.822 实证需 ≥39 cal 场景(荐 ≥59,camera-ready 档);全 episode 敏感性 λ=1.755**;interim artifact=out/conformal/calib_v6_scn010_interim.json(切分全注册,INTERIM 待新场景+估计器冻结)
+**下一步(按裁决序)**:attribution 落账(U/P/Q/D+domain 标签+漏检子码[锥外/遮挡/随机miss/关联失败/TTL串杀/太年轻]+object_scope+全接触物列表;P 判据=肇事物 spatial 匹配"最后一张因果有效 receipt 的 tracks 行",反应窗由感知/计算延迟+最小制动导出,不手填);渲染面 receipt;新场景收割开工
+
 相关 [[sando-core-m3-2026-07-20]] [[sando-core-raceline-2026-07-16]]
