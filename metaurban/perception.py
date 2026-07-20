@@ -36,7 +36,8 @@ class PerceptCfg:
     """All dials in one bag; from_env() reads PERCEPT_* overrides."""
 
     def __init__(self, fov_deg=45.0, fov_range=10.0, sigma0=0.05, sigma_k=0.01,
-                 p_miss0=0.05, p_miss_k=0.15, occlusion=True, gate_m=1.2, ttl_ticks=8, dt=0.1,
+                 p_miss0=0.05, p_miss_k=0.15, occlusion=True, gate_m=1.2,
+                 confirmed_ttl_s=1.6, tentative_ttl_s=0.3, dt=0.1,
                  fp_rate=0.0, cls_err=0.0, size_err=0.05):
         self.fov_deg = min(float(fov_deg), 180.0)   # cone HALF-angle; >180 would make cos_lim>cos(180)
         #   and the dot-product gate reject EVERYTHING (fov=360 = accidental total blindness, 2026-07-08)
@@ -47,8 +48,15 @@ class PerceptCfg:
         self.p_miss_k = float(p_miss_k)        # + p_miss_k * (d/range)^2
         self.occlusion = bool(int(occlusion))  # hard 2-D ray occlusion by other cylinders
         self.gate_m = float(gate_m)            # association gate (m) around predicted track position
-        self.ttl_ticks = int(ttl_ticks)        # coast this many missed ticks, then kill the track
+        # TTL in SECONDS (A+ closure, 07-20 ruling): replay ticks are 0.30 s and renderer ticks
+        # 0.10 s, so a tick-count TTL meant 4.8 s of memory on one face and 1.6 s on the other --
+        # the two evaluation faces must express the SAME physical memory time. CONFIRMED tracks
+        # (n>=4) outlive the diagnosed 7-8-tick cone-edge miss streak (病③); TENTATIVE tracks get
+        # an EXPLICIT short leash (no 0-means-inherit sentinel).
+        self.confirmed_ttl_s = float(confirmed_ttl_s)
+        self.tentative_ttl_s = float(tentative_ttl_s)
         self.dt = float(dt)
+        self.ttl_ticks = max(1, int(round(self.confirmed_ttl_s / self.dt)))   # legacy READERS only
         self.fp_rate = float(fp_rate)          # Poisson clutter detections per tick, uniform in the cone (0=off)
         self.cls_err = float(cls_err)          # P(class label flips to another class) per detection (0=off)
         self.size_err = float(size_err)        # multiplicative log-normal-ish error on estimated r/h (0.05=5%)
@@ -60,17 +68,21 @@ class PerceptCfg:
     @classmethod
     def from_env(cls, dt=0.1):
         e = os.environ.get
+        ttl_s = float(e("PERCEPT_TTL_S", 1.6))
+        yttl_s = float(e("PERCEPT_YTTL_S", 0.3))
+        if "PERCEPT_TTL" in os.environ:        # legacy TICK dial: honour loudly, converted at THIS face's dt
+            ttl_s = int(os.environ["PERCEPT_TTL"]) * float(dt)
+            print(f"[percept] LEGACY PERCEPT_TTL={os.environ['PERCEPT_TTL']} ticks -> "
+                  f"{ttl_s:.2f}s at dt={dt} (switch to PERCEPT_TTL_S)", flush=True)
+        if "YOUNG_TTL" in os.environ and int(os.environ["YOUNG_TTL"]) > 0:
+            yttl_s = int(os.environ["YOUNG_TTL"]) * float(dt)
+            print(f"[percept] LEGACY YOUNG_TTL={os.environ['YOUNG_TTL']} ticks -> "
+                  f"{yttl_s:.2f}s at dt={dt} (switch to PERCEPT_YTTL_S)", flush=True)
         return cls(fov_deg=e("PERCEPT_FOV_DEG", 45.0), fov_range=e("PERCEPT_RANGE", 10.0),
                    sigma0=e("PERCEPT_SIGMA0", 0.05), sigma_k=e("PERCEPT_SIGMA_K", 0.01),
                    p_miss0=e("PERCEPT_PMISS0", 0.05), p_miss_k=e("PERCEPT_PMISS_K", 0.15),
                    occlusion=e("PERCEPT_OCCLUSION", 1), gate_m=e("PERCEPT_GATE", 1.2),
-                   ttl_ticks=e("PERCEPT_TTL", 16), dt=dt,
-                   #   ^ KF 病③ knife (07-20 work order #6): the diagnosed cone-edge miss streak
-                   #   runs 7-8 ticks -- TTL=8 sat exactly on it, so a CONFIRMED track died at the
-                   #   streak's tail and was reborn into the young penalties + the two-point init
-                   #   (病① all over again). 16 ticks (1.6 s) outlives the streak; the coast is
-                   #   honest post-病② (CV state + growing sigma prices the memory keep-out), and
-                   #   TENTATIVE tracks keep the YOUNG_TTL short leash (confirmation law untouched).
+                   confirmed_ttl_s=ttl_s, tentative_ttl_s=yttl_s, dt=dt,
                    fp_rate=e("PERCEPT_FP_RATE", 0.0), cls_err=e("PERCEPT_CLS_ERR", 0.0),
                    size_err=e("PERCEPT_SIZE_ERR", 0.05))
 
@@ -103,6 +115,8 @@ class Track:
         self.cls = det["cls"]; self.r = det["r"]; self.h = det["h"]
         self.xy = np.asarray(det["xy"], float)
         self.miss = 0
+        self.miss_s = 0.0                              # SECONDS since last detection (TTL law unit)
+        self._dt = float(cfg.dt)
         self.trk.update([det["xy"][0], det["xy"][1], 1.5])
 
     def predicted_xy(self, dt=None):
@@ -115,13 +129,15 @@ class Track:
         self.cls = det["cls"]; self.r = det["r"]; self.h = det["h"]
         self.xy = np.asarray(det["xy"], float)
         self.miss = 0
+        self.miss_s = 0.0
         self.trk.update([det["xy"][0], det["xy"][1], 1.5], dt)
 
     def coast(self, dt=None):
+        step = float(dt) if dt is not None else self._dt
         if self.cls == "static":                       # mapped static: frozen, no covariance growth
-            self.miss += 1
+            self.miss += 1; self.miss_s += step
             return
-        self.trk.coast(dt); self.miss += 1
+        self.trk.coast(dt); self.miss += 1; self.miss_s += step
         c0, _, _ = self.trk.state()
         self.xy = np.asarray(c0[:2], float)
 
@@ -278,17 +294,17 @@ class PerceptionFrontEnd:
         for tr in self.tracks:
             if tr.cls == "static" and tr.miss > 0:
                 tr.miss = min(tr.miss, self.cfg.ttl_ticks)   # never expire; freeze instead of coast
+                tr.miss_s = min(getattr(tr, "miss_s", 0.0), self.cfg.confirmed_ttl_s)
                 c0, _v, _a = tr.trk.state()
                 tr.xy = np.asarray(c0[:2], float)
-        _yttl = int(os.environ.get("YOUNG_TTL", "0"))
-        def _ttl(tr):
-            # textbook MOT confirmation: a TENTATIVE track (age<4, velocity unconverged) that starts
-            # missing is 90% clutter/ephemeral/re-born-elsewhere -- but its frozen young plate keeps
-            # growing at VCAP for the full ttl (2.4s) = a phantom poison disc the real mover has long
-            # left. Tentative tracks get a short leash; confirmed tracks keep the full ttl.
-            return (_yttl if (_yttl > 0 and tr.trk.n < 4) else self.cfg.ttl_ticks)
+        # TTL law in SECONDS, explicit per confirmation state (A+ closure, 07-20 ruling): a
+        # TENTATIVE track (age<4, velocity unconverged) that starts missing is 90% clutter/
+        # ephemeral -- its frozen young plate growing at VCAP for the confirmed TTL would be a
+        # phantom poison disc. Confirmed tracks outlive the cone-edge miss streak (病③).
         self.tracks = [tr for tr in self.tracks
-                       if tr.cls == "static" or tr.miss <= _ttl(tr)]
+                       if tr.cls == "static"
+                       or getattr(tr, "miss_s", 0.0) <= (self.cfg.tentative_ttl_s if tr.trk.n < 4
+                                                         else self.cfg.confirmed_ttl_s) + 1e-9]
         return self.tracks
 
 
@@ -320,8 +336,10 @@ if __name__ == "__main__":
     assert abs(v[0] - 1.0) < 0.4, f"track velocity off after 40 ticks: {v}"  # two-point sigma_v~0.28 + CA transient
     print(f"[percept] association: 2 walkers -> 2 tracks, v_x={v[0]:.2f} (truth 1.0) OK")
 
-    # miss + TTL: a mover that leaves the cone coasts then dies
-    pf3 = PerceptionFrontEnd(PerceptCfg(p_miss0=0.0, p_miss_k=0.0, occlusion=False, ttl_ticks=5), seed=3)
+    # miss + TTL: a mover that leaves the cone coasts then dies (TTL now in SECONDS: 0.5 s at
+    # dt=0.1 == the old 5-tick law; a CONFIRMED track dies just past confirmed_ttl_s)
+    pf3 = PerceptionFrontEnd(PerceptCfg(p_miss0=0.0, p_miss_k=0.0, occlusion=False,
+                                        confirmed_ttl_s=0.5), seed=3)
     for k in range(10):
         pf3.step((0.0, 0.0), (1.0, 0.0), [((4.0, 0.0), 0.3, 1.8, "pedestrian")])
     assert len(pf3.tracks) == 1
@@ -332,4 +350,16 @@ if __name__ == "__main__":
         pf3.step((0.0, 0.0), (1.0, 0.0), [])
     assert len(pf3.tracks) == 0, "track should be killed after TTL"
     print("[percept] coast/TTL lifecycle OK")
+
+    # tentative short leash (A+ closure): a 2-observation track (n<4) dies at tentative_ttl_s,
+    # long before the confirmed TTL -- explicit field, no 0-means-inherit sentinel.
+    pf4 = PerceptionFrontEnd(PerceptCfg(p_miss0=0.0, p_miss_k=0.0, occlusion=False,
+                                        confirmed_ttl_s=1.6, tentative_ttl_s=0.3), seed=4)
+    for k in range(2):
+        pf4.step((0.0, 0.0), (1.0, 0.0), [((4.0, 0.0), 0.3, 1.8, "pedestrian")])
+    assert len(pf4.tracks) == 1 and pf4.tracks[0].trk.n == 2
+    for k in range(4):
+        pf4.step((0.0, 0.0), (1.0, 0.0), [])                # 0.4 s of misses > 0.3 s leash
+    assert len(pf4.tracks) == 0, "tentative track should die at the short leash"
+    print("[percept] tentative short-leash OK")
     print("[percept] ALL PASS")
