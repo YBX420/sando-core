@@ -64,7 +64,13 @@ class PerceptCfg:
                    sigma0=e("PERCEPT_SIGMA0", 0.05), sigma_k=e("PERCEPT_SIGMA_K", 0.01),
                    p_miss0=e("PERCEPT_PMISS0", 0.05), p_miss_k=e("PERCEPT_PMISS_K", 0.15),
                    occlusion=e("PERCEPT_OCCLUSION", 1), gate_m=e("PERCEPT_GATE", 1.2),
-                   ttl_ticks=e("PERCEPT_TTL", 8), dt=dt,
+                   ttl_ticks=e("PERCEPT_TTL", 16), dt=dt,
+                   #   ^ KF 病③ knife (07-20 work order #6): the diagnosed cone-edge miss streak
+                   #   runs 7-8 ticks -- TTL=8 sat exactly on it, so a CONFIRMED track died at the
+                   #   streak's tail and was reborn into the young penalties + the two-point init
+                   #   (病① all over again). 16 ticks (1.6 s) outlives the streak; the coast is
+                   #   honest post-病② (CV state + growing sigma prices the memory keep-out), and
+                   #   TENTATIVE tracks keep the YOUNG_TTL short leash (confirmation law untouched).
                    fp_rate=e("PERCEPT_FP_RATE", 0.0), cls_err=e("PERCEPT_CLS_ERR", 0.0),
                    size_err=e("PERCEPT_SIZE_ERR", 0.05))
 
