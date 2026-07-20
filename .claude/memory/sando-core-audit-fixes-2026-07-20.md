@@ -68,4 +68,11 @@ min_clr 自 d32b63b 起=**机体净空**(旧=中心净空,差 0.25+时序);渲�
 **pilot12 验收(工序3)**:acc1 当场抓获 **episode-id 偏一真身**(run_replay 开局 _HARV_EP+=1,历史所有 pool 行 ep=manifest+1,池内统计幸存但 manifest 交叉引用一直错;merge 全等校验以"16 幻影零行集"报警)→根修(replay 不得篡改调用者身份)→acc2:24/24 零失败、行数两轮逐字节同 39338、**9 个真实零行集全 gen_pool 家族**(=真"消失场景"人口,现可见计 -inf)、resume 删收据→23 SKIP+1 重跑→merge 依旧全等、新列活。
 **待办(design69 开机前)**:9 个 gen_pool 零行集的 eligibility 诊断(为何全程零合格行——生成器 eligibility 验收范畴);然后工序4=重收旧 69 定 EGO_MEM_K→stack-freeze-m3off tag→工序6=一次性生成预注册新 100 场景(60cal/40test,四家族等权冻结 RNG,动物留 stress suite)→cal 只算分位/test 只开一次。
 
+## 工序 4 完成(07-20 终批二,c3a4702..此后):design69 + EGO_MEM_K 冻结候选
+- **零行诊断实锤**:gen_pool_00 全程离 mover 最近 25.8m、零拍进感知圈=**空相遇场景**(老生成器 stale-timing 遗孤;新 _encounter_ok 验收正为杀此类)。
+- **design69(v3 契约)**:138/138 零失败、98040 行、**44 零行集=32% 舰队空相遇全现形**(老宇宙实际只 2/3 在参与排序)。
+- **mem_k_fit(23k coast 行/49 场景,e/psig 设计面 q90)**:行人 q90=1.62/q95=2.28→**历史 K=2.0 盖 q93 保留**;**★vehicle q90=13.3/q95=18.0**——收敛车 track coast 时 a_held≈0→A+ 白加速度项消失→psig 严重低估("KF 协方差不是概率保证"的测量版);psig 小所以 13.5×psig≈2m 合理。**冻结档:MAN_MEM_K=2.0 默认+MAN_MEM_K_CLS[vehicle]=13.5(EGO_MEM_K_VEH)**,在任何新场景 cal/test 存在之前定死。coast-age 结构(0.3-0.8s q90=2.05 vs 0.8-1.6s q90=0.67)=单 K 是粗包络,taper 留下代。
+- **验证**:6-seed 5 个逐字节不变,s5(车重)18.3→23.5s=堵车辆真洞的代价,6/6 零碰撞;replay 回归面不涉(renderer 独有档)。
+- **待塔菲大人**:①K 表冻结批准(接受 s5 代价 vs 车辆律改形);②stack-freeze-m3off tag;③工序 6 开机(新 100 场景一次性预注册生成)。
+
 相关 [[sando-core-m3-2026-07-20]] [[sando-core-raceline-2026-07-16]]
