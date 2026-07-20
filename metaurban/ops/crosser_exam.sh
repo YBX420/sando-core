@@ -5,7 +5,7 @@
 set -u
 SC=/media/boxuan/Data2/projects/sando_py/sando-core
 POOL=$SC/metaurban/out/m1b_pool${POOL_TAG:-}
-EXAM=$SC/metaurban/out/crosser_exam; mkdir -p "$EXAM"
+EXAM=$SC/metaurban/out/crosser_exam${POOL_TAG:-}; mkdir -p "$EXAM"   # face-versioned exam ledger (M8)
 SEED=${1:?seed}; N=${2:?n crossers}; ARM=${3:?arm}; EXTRA=${4:-}
 
 BASELOG=$POOL/base_s${SEED}.log
@@ -22,7 +22,10 @@ case "$ARM" in
   k10)     ENVS="THIN=1 ETA_FEED=2 ETA_K=1.0" ;;
   st)      ENVS="THIN=1 ST_SPEED=1" ;;
   stk10)   ENVS="THIN=1 ETA_FEED=2 ETA_K=1.0 ST_SPEED=1" ;;
+  stc)     ENVS="THIN=1 ST_COMMIT=1" ;;
+  stck10)  ENVS="THIN=1 ETA_FEED=2 ETA_K=1.0 ST_COMMIT=1" ;;
   orabase) ENVS="ORACLE_THIN=1" ;;
+  orastc)  ENVS="ORACLE_THIN=1 ST_COMMIT=1" ;;
   *) echo "unknown arm $ARM"; exit 1 ;;
 esac
 

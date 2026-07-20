@@ -1731,6 +1731,10 @@ def _man_cloud(p_d, heading, t_sim, movers):
     return np.concatenate([p for p in pts if len(p)], axis=0)
 
 
+EGO_STC = os.environ.get("ST_COMMIT", "0") == "1"   # M3 commitment (2026-07-20): decide+executor
+#   PAIR. Decide side (safety_layer) may adopt a certified multi-tick gear schedule; while the
+#   commitment lives, THIS executor flies the committed gear VERBATIM (no release clamp -- a
+#   clamped gear is a profile the piecewise certificate never judged: flown==certified law).
 MAN_GAPSPEED = os.environ.get("EGO_GAPSPEED", "0") == "1"   # gap-acceptance speed law (塔菲大人 2026-07-14):
 #   *** BOOKED NEGATIVE x3 on seed7, keep OFF *** v1 (3s horizon, free override): 17.3s vs 9.9 -- yielding
 #   to conflicts beyond the commit scale = the hesitation loop at larger scale. v2 (anti-hesitation only,
@@ -1943,13 +1947,16 @@ def ego_maneuver_replan(p_d, v_d, a_d, cur_wp, t_sim):
         B-spline over [0, TAU]. The planned point-path hides the tracking OVERSHOOT (inertia / tilt-to-accelerate);
         gating this predicted-flown tube is how we account for the real drone's dynamics, not just its radius."""
         d = ego.duration()
-        hz = min(d, MAN_STATIC_HZ)                         # static-gate forward-sim lookahead (>= the flown-per-tick dist)
+        # M3 held-spline commitment: mid-commit the drone is u0 DEEP into the committed spline;
+        # gates must sim tracking from there, not from the head (backwards-flying sim = garbage)
+        u0 = float(_MAN_V2.get("stc_u0", 0.0)) if (EGO_STC and _MAN_V2.get("stc")) else 0.0
+        hz = min(d - u0, MAN_STATIC_HZ)                    # static-gate forward-sim lookahead (>= the flown-per-tick dist)
         if args.pointmass:                                # diagnostic: flown == planned
-            return np.array([ego.eval(s)[0] for s in np.linspace(0, hz, 16)])
+            return np.array([ego.eval(u0 + s)[0] for s in np.linspace(0, max(hz, 1e-3), 16)])
         q = copy.deepcopy(quad)                           # current REAL state + params
         n = max(1, int(hz / DT)); pts = [q.p.copy()]
         for k in range(1, n + 1):
-            r = ego.eval(min(k * DT, d - 1e-3))
+            r = ego.eval(min(u0 + k * DT, d - 1e-3))
             if r is None:
                 break
             sp, sv, sa = (np.asarray(x, float) for x in r)
@@ -2090,6 +2097,15 @@ def ego_maneuver_replan(p_d, v_d, a_d, cur_wp, t_sim):
                          np.zeros(3), r_obs + MAN_DSAFE + q_c + MAN_TRACK,
                          2.0 * float(c3[2]) + MAN_REACH_PAD + MAN_DSAFE_V + q_c + MAN_TRACK, veff_c)
                         + tag7)
+        if EGO_STC:
+            # M3 plumbing: the flown gear seeds the commit-DP (never plan from a gear the drone
+            # isn't flying), raw mover identities+states feed the betrayal snapshot (pre-CAP_MEET:
+            # doctored meet-point velocities would betray by construction)
+            _MAN_V2["g_flown"] = float(ego_g_prev)
+            _MAN_V2["stc_held"] = False              # decide sets it on held-spline commit ticks
+            _MAN_V2["stc_mv"] = [(_oid, np.asarray(c3[:2], float),
+                                  np.array([float(vel[0]), float(vel[1])], float))
+                                 for (_oid, c3, vel, r_obs, d_safe) in movers]
         kind, s_v2 = _SL.maneuver_decide_v2(
             ego, p_d, v_d, a_d, np.asarray(cur_wp, float), z_top, _cyl, _MAN_V2,
             cruise_z=CRUISE_Z, horizon=L, straight_clip=EGO_HOR,
@@ -2105,7 +2121,8 @@ def ego_maneuver_replan(p_d, v_d, a_d, cur_wp, t_sim):
         if KFDBG and (kind == "hold" or s_v2 < 0.999):
             print(f"[MANDBG] t={t_sim:6.2f} kind={kind} gear={s_v2:.2f} ncyl={len(_cyl)} "
                   f"p=({p_d[0]:6.2f},{p_d[1]:6.2f}) v={float(np.hypot(v_d[0], v_d[1])):.2f}", flush=True)
-        if MAN_GAPSPEED and kind != "hold" and dur > 1e-3 and s_v2 < 0.999:
+        if MAN_GAPSPEED and kind != "hold" and dur > 1e-3 and s_v2 < 0.999 \
+                and not (EGO_STC and _MAN_V2.get("stc")):   # committed schedule owns its gears
             # ANTI-HESITATION only (v2 booked negative when allowed to slow flight): the law speaks
             # ONLY when v2 already wants to yield, and may only propose FASTER certified speeds --
             # "if the pass-ahead band is reachable, take it; otherwise keep v2's own yield gear."
@@ -2586,6 +2603,10 @@ while not quit_now:
           f"start {np.round(START[:2],1)}", flush=True)
     ego_dur = 0.0; t_ego = 0.0; ego_stuck = 0; ego_traj_pts = None; man_kind = None
     man_switches = 0; man_counts = {}; _prev_mk = None; _MAN_STATE["kind"] = None   # reset hysteresis per lap
+    n_wait_g0 = 0   # M3 accounting: decision ticks stood still = labelled holds + gear-0 waits
+    #   (a committed purposeful wait returns kind!=hold at gear 0 -- without this counter the
+    #   headline hold metric could "improve" by bookkeeping alone; printed on its own [wait] line
+    #   for BOTH arms so lap-done lines stay byte-comparable)
     _sw_lr = 0; _sw_sa = 0; _sw_oth = 0; _sp_hist = []   # thrash instrumentation: classify switches + speed-history cost
     _KF.clear()                                          # fresh mover trackers per lap (no stale cross-lap KF state)
     if _PFE is not None:
@@ -2651,8 +2672,12 @@ while not quit_now:
                 last_rt = time.perf_counter() - t0
                 ego_dur = ego.duration()                   # EGO retains the last good traj even when replan fails
             if ego_ok and ego_dur > 1e-3:
-                ego_stuck = 0; t_ego = 0.0                 # fresh plan -> restart from its head
-                ego_traj_pts = [ego.eval(s)[0] for s in np.linspace(0, ego_dur, 24)]   # the REAL EGO B-spline
+                if EGO_STC and _MAN_V2.get("stc_held"):
+                    ego_stuck = 0                          # M3 held commit: same spline, keep flying
+                    #   DEEPER into it -- t_ego accumulates, matching decide's u0 integrator
+                else:
+                    ego_stuck = 0; t_ego = 0.0             # fresh plan -> restart from its head
+                    ego_traj_pts = [ego.eval(s)[0] for s in np.linspace(0, ego_dur, 24)]   # the REAL EGO B-spline
             else:
                 ego_stuck += 1                             # keep executing the last good plan; only recover if stuck
             fed = feed(None, _cache, t, p_d)
@@ -2703,7 +2728,10 @@ while not quit_now:
                 # CCF yield-behind warp: ego_maneuver_replan returns the fastest certified speed on the COMMITTED side
                 # (1.0 unless it is slowing behind a crosser to HOLD the side instead of switching). Brake fast, release slow.
                 g_raw = float(man_g)
-                if MAN_GAPSPEED and g_raw > 1.001 and g_raw > ego_g_prev:
+                if EGO_STC and _MAN_V2.get("stc"):
+                    ego_speed_g = g_raw          # M3: committed gear flies VERBATIM (flown==certified;
+                    #   the schedule is one-notch-slew legal by DP construction, smooth by design)
+                elif MAN_GAPSPEED and g_raw > 1.001 and g_raw > ego_g_prev:
                     ego_speed_g = g_raw          # certified reachable sprint: no artificial slow-release
                 else:
                     ego_speed_g = g_raw if g_raw < ego_g_prev else min(g_raw, ego_g_prev + EGO_G_RELEASE)
@@ -2881,6 +2909,8 @@ while not quit_now:
                 _pitch, _roll = quad.tilt_deg(); drone_model.setHpr(0.0, _pitch, _roll)   # visible quadrotor tilt
         if args.maneuver and man_kind is not None:
             man_counts[man_kind] = man_counts.get(man_kind, 0) + 1
+            if man_kind == "hold" or float(man_g) < 0.05:
+                n_wait_g0 += 1                              # stood-still tick, whatever the label
             if _prev_mk is not None and man_kind != _prev_mk:
                 man_switches += 1                           # maneuver-kind change = a brake/re-accel (the "flicker")
                 _ar = ("around_l", "around_r")
@@ -3007,6 +3037,8 @@ while not quit_now:
         import json as _json
         _json.dump(_TELEM, open(os.environ["TELEM_OUT"], "w"))
         print(f"[3dv] telemetry -> {os.environ['TELEM_OUT']} ({len(_TELEM)} ticks)", flush=True)
+    if args.maneuver:
+        print(f"[wait] stand_ticks={n_wait_g0}", flush=True)   # holds + gear-0 waits, label-blind
     print(f"[3dv] lap done. reached={reached} t_goal={t_goal:.1f}s collided={mclr < 0} min_clr={mclr:.3f}m  "
           + "  ".join(f"{k}:{v:.2f}" for k, v in sorted(per_all.items()))
           + (f"  seam_bias_max={seam_bias_max:.3f}m" if args.seam else "")

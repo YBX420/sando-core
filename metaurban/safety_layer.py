@@ -531,6 +531,143 @@ _ST_ON = os.environ.get("ST_SPEED", "0") == "1"   # M2-4 (2026-07-17): ST-graph 
 #   or not-strictly-better schedule falls back to the constant-gear _best_s -- worst case = today.
 _ST_MODS = [None]                                  # lazy (st_speed, st_cert) | False = loudly disabled
 
+# ---- M3 commitment mechanism (ST_COMMIT, 2026-07-20) --------------------------------------------
+# The M2 verdict: schedules are structurally NEUTRAL under fly-the-head receding horizon; their
+# value is COMMITMENT. Three planes, kept separate by design (M3 review, 5-lens):
+#   optimize over the commit window ST_CWIN (boxes + dp_commit/greedy adoption test live here);
+#   guarantee per tick: the remaining tail is re-certified over exactly [0, tau] on the FRESH
+#     spline + FRESH perception every tick (same guarantee window as today; no uncertified instant);
+#   persist in state["stc"] (frozen world carrot + gear tail + mover snapshot), any event drops
+#     LOUDLY back to the full pipeline = today's machine.
+# Executor pairing (bound guard): the renderer flies committed gears verbatim (no release clamp).
+_STC_ON = os.environ.get("ST_COMMIT", "0") == "1"
+_STC_WIN = float(os.environ.get("ST_CWIN", "2.4"))        # s: commitment/optimization window
+_STC_DEV = float(os.environ.get("ST_CDEV", "0.6"))        # m: betrayal threshold floor
+_STC_DEV_RATE = float(os.environ.get("ST_CDEV_RATE", "0.4"))  # m/s ramp (KF mature-velocity noise floor)
+_STC_ADOPT_T = float(os.environ.get("ST_CADOPT_T", "0.2"))    # s: arrival margin, both-reached channel
+_STC_ADOPT_S = float(os.environ.get("ST_CADOPT_S", "0.3"))    # param units: progress margin otherwise
+#   (0.3 from the 5-probe calibration 2026-07-20: every PAYING commit had dp-gr >= 1.0 or
+#   dp-reached-vs-greedy-dead; every TAXING one <= 0.10 -- marginal wins are noise, not plans)
+_STC_TIE = os.environ.get("ST_CTIE", "0") == "1"          # tie channel opt-in (probes: tax only)
+_STC_REFRACT = int(os.environ.get("ST_CREFRACT", "3"))    # ticks banned after betray/cert/gate drops
+_STC_DN = int(os.environ.get("ST_CDN", "4"))              # max brake notches per DP row (a_max*dt scale)
+_STC_MIN = float(os.environ.get("ST_CMIN", "1.0"))        # s: shortest adoptable tail (rescue exempt)
+if _STC_ON:
+    print(f"[stc] ST_COMMIT=1 win={_STC_WIN}s dev={_STC_DEV}+{_STC_DEV_RATE}*t "
+          f"adopt(T={_STC_ADOPT_T}s,S={_STC_ADOPT_S}) refract={_STC_REFRACT} dn={_STC_DN}"
+          + (" -- ST_SPEED in-rank stage DISABLED (ST_COMMIT owns the schedule)" if _ST_ON else ""),
+          flush=True)
+
+
+def _st_load(ego):
+    """Lazy (st_speed, st_cert) loader shared by the M2 in-rank stage and the M3 commit stage.
+    False = loudly disabled (2026-07-16 law: fallbacks may be sound but never silent)."""
+    if _ST_MODS[0] is False:
+        return None
+    if _ST_MODS[0] is None:
+        try:
+            import st_speed as _STS
+            import st_cert as _STC
+            if getattr(ego, "get_bsegs", None) is None:
+                raise RuntimeError("EGOPlanner lacks get_bsegs (stale bridge?)")
+            _ST_MODS[0] = (_STS, _STC)
+        except Exception as e:   # LOUD disable, never silent (2026-07-16 law)
+            print(f"[st] ST_SPEED DISABLED: {type(e).__name__}: {e}", flush=True)
+            _ST_MODS[0] = False
+            return None
+    return _ST_MODS[0]
+
+
+def _stc_consume(stc, dtick):
+    """Fly one decision tick off the committed tail. Returns the gear flown THIS tick (the
+    pre-consumption head), trimming exactly dtick off the front. Piece boundaries may split."""
+    tail = stc["tail"]
+    head = float(tail[0][1]) if tail else 0.0
+    left = float(dtick)
+    while tail and left > 1e-9:
+        d0, g0 = tail[0]
+        take = min(float(d0), left)
+        if float(d0) - take <= 1e-9:
+            tail.pop(0)
+        else:
+            tail[0] = (float(d0) - take, float(g0))
+        left -= take
+    return head
+
+
+def _stc_cert_tail(ego, cyl, tail, tau, delta, u_start=0.0):
+    """Certify a COPY of the committed tail against FRESH cyl over exactly [0, tau] -- the per-tick
+    sliding guarantee, same window as every certificate flown today. u_start slides the profile
+    along the HELD spline (commitment never replans: propose and judge share one geometry, so the
+    only drift left is perception jitter -- absorbed by the strict adoption margin). Trims to tau;
+    a short tail is padded first with its own last gear, and (ValueError = pad runs off the
+    spline) retried once with a hover pad (sound: a stop option after the plan end). NEVER
+    mutates tail. Returns (ok, all_full_of_judged_profile) -- af feeds the policy_flip reason."""
+    mods = _ST_MODS[0]
+    if not mods:
+        return False, False
+    _STS, _STC = mods
+    prof = []
+    t_acc = 0.0
+    for (dp_, g_) in tail:
+        if t_acc >= tau - 1e-9:
+            break
+        take = min(float(dp_), tau - t_acc)
+        prof.append((take, float(g_)))
+        t_acc += take
+    if not prof:
+        return False, False
+    if t_acc < tau - 1e-9:
+        prof.append((tau - t_acc, prof[-1][1]))
+    assert sum(p[0] for p in prof) >= tau - 1e-6, prof   # tiling law: never leave (total, tau] unjudged
+    af = all(g_ >= 0.999 for _d, g_ in prof)
+    for pad0 in (None, 0.0):
+        pp = list(prof)
+        if pad0 is not None:
+            pp[-1] = (pp[-1][0], pad0)
+            af = all(g_ >= 0.999 for _d, g_ in pp)
+        try:
+            okc, _m = _STC.certify_profile(ego, cyl, pp, tau, delta, u_start=u_start)
+        except ValueError:
+            okc = False
+            continue
+        return okc, af
+    return False, af
+
+
+def _stc_betrayal(stc, state, cyl, p_d):
+    """Betrayal event (a): any commit-time snapshot mover deviating from its CV prediction by more
+    than the sigma-ramped threshold. ID match first (renderer plumbs state['stc_mv']), greedy NN
+    fallback; UNMATCHED is NOT betrayal (lost/occluded -> the per-tick certificate is the guard).
+    Behavioral heuristic only -- safety lives in the per-tick cert, so loose beats tight here."""
+    cur = state.get("stc_mv")
+    if cur is None:
+        cur = [(None, np.asarray(e[0][:2], float), np.asarray(e[1][:2], float)) for e in cyl]
+    thr = _STC_DEV + _STC_DEV_RATE * float(stc["t_since"])
+    for (oid, c0, v0) in stc["snap"]:
+        pred = c0 + v0 * float(stc["t_since"])
+        best = None
+        if oid is not None:
+            for (o2, c2, _v2) in cur:
+                if o2 == oid:
+                    best = c2
+                    break
+        if best is None:
+            dmin = 1e9
+            for (_o2, c2, _v2) in cur:
+                dd = float(np.hypot(c2[0] - pred[0], c2[1] - pred[1]))
+                if dd < dmin:
+                    dmin, best = dd, c2
+            if best is None or dmin > max(3.0, 3.0 * thr):
+                if not stc.get("lost_warned"):
+                    print("[stc] LOST snapshot mover (no match) -- per-tick cert is the guard", flush=True)
+                    stc["lost_warned"] = True
+                continue
+        dev = float(np.hypot(best[0] - pred[0], best[1] - pred[1]))
+        if dev > thr:
+            return dev, thr, True
+    return 0.0, thr, False
+
 
 def maneuver_decide_v2(ego, p_d, v_d, a_d, goal, ztop, cyl, state,
                        cruise_z=CRUISE_Z, horizon=HORIZON, straight_clip=None,
@@ -652,20 +789,10 @@ def maneuver_decide_v2(ego, p_d, v_d, a_d, goal, ztop, cyl, state,
         must not steer the per-tick recommit -- gap-law v1 lesson). Returns (s_rank, head_gear,
         pieces) or None. The DP proposes; certify_profile (piecewise-warp Bernstein composer)
         judges; caller falls back to the constant-gear path when this returns None."""
-        if _ST_MODS[0] is False:
+        mods = _st_load(ego)
+        if mods is None:
             return None
-        if _ST_MODS[0] is None:
-            try:
-                import st_speed as _STS
-                import st_cert as _STC
-                if getattr(ego, "get_bsegs", None) is None:
-                    raise RuntimeError("EGOPlanner lacks get_bsegs (stale bridge?)")
-                _ST_MODS[0] = (_STS, _STC)
-            except Exception as e:   # LOUD disable, never silent (2026-07-16 law)
-                print(f"[st] ST_SPEED DISABLED: {type(e).__name__}: {e}", flush=True)
-                _ST_MODS[0] = False
-                return None
-        _STS, _STC = _ST_MODS[0]
+        _STS, _STC = mods
         dur = ego.duration()
         if dur <= 1e-3:
             return None
@@ -707,6 +834,125 @@ def maneuver_decide_v2(ego, p_d, v_d, a_d, goal, ztop, cyl, state,
             return None
         s_rank = float(r["s_end"]) / max(u_hi, 1e-6)
         return (s_rank, float(pieces[0][1]), pieces)
+
+    def _stc_grid():
+        """Commitment-window (param-station, time) forbidden grid for the CURRENT ego spline, or
+        None when no mover can matter within ST_CWIN (conservative prefilter = zero-cost skip).
+        Box radius matches the judge: R + veff*(min(t,tau)+delta) -- the max inflation any future
+        sliding tau-window will apply (M3 review C2), so proposals aren't shot on adoption."""
+        mods = _st_load(ego)
+        if mods is None:
+            return None
+        _STS, _STC = mods
+        dur = ego.duration()
+        if dur <= 1e-3:
+            return None
+        dtp = 2.0 * (delta if delta else 0.1)        # DP row = 2 decision ticks, consumption-aligned
+        t_rows = np.arange(0.0, _STC_WIN + 1e-9, dtp)
+        if len(t_rows) < 4:
+            return None
+        du = dtp / 20.0                              # every 0.05-granular gear = integer cells
+        u_hi = min(dur - 1e-3, _STC_WIN)
+        us = np.arange(0.0, u_hi + 1e-9, du)
+        if len(us) < 24:
+            return None
+        surv = []
+        for ent in cyl:
+            c0e = np.asarray(ent[0], float); vve = np.asarray(ent[1], float); Re = float(ent[3])
+            rr = float(np.hypot(c0e[0] - p_d[0], c0e[1] - p_d[1]))
+            if rr - Re - float(np.hypot(vve[0], vve[1])) * _STC_WIN - 3.0 * _STC_WIN - 2.0 > 0.0:
+                continue                             # provably unreachable inside the window
+            surv.append(ent)
+        if not surv:
+            return None
+        pts = np.asarray([ego.eval(float(u))[0][:2] for u in us], float)
+        blocked = np.zeros((len(t_rows), len(us)), bool)
+        for ent in surv:
+            c0e = np.asarray(ent[0], float); vve = np.asarray(ent[1], float)
+            Re = float(ent[3]); ve = float(ent[5]) if len(ent) > 5 else 0.0
+            for j, tj in enumerate(t_rows):
+                cc = c0e[:2] + vve[:2] * tj
+                rj = Re + ve * (min(float(tj), tau) + d)
+                blocked[j] |= (np.hypot(pts[:, 0] - cc[0], pts[:, 1] - cc[1]) < rj)
+        return _STS, us, t_rows, blocked
+
+    def _stc_adopt(dk, gs, s_ok, rescue=False):
+        """M3 adoption post-pass on an already-certified winner (direction never changes here).
+        Channels: 'dp' = plan-ahead strictly beats the myopic greedy sim in commitment rank;
+        'tie' = winner already slowed + boxes cut the corridor + DP not worse (anti-hesitation:
+        same progress, fewer decisions); 'rescue' = tournament all-dead, any moving schedule.
+        Adopted tail must pass the tau-trimmed piecewise certificate + the static/flown gate.
+        Returns (kind, head_gear) or None."""
+        if not _STC_ON or state.get("stc_ban", 0) > 0:
+            return None
+        g8 = _stc_grid()
+        if g8 is None:
+            return None
+        _STS, us, t_rows, blocked = g8
+        if not blocked.any() or bool(blocked[0, 0]):
+            return None                              # nothing to schedule around / standing in a box
+        g_set = tuple(sorted(set(tuple(speeds) + (0.15, 0.0)), reverse=True))
+        v0g = state.get("g_flown")
+        if v0g is None:
+            v0g = float(state.get("s_prev") or state.get("s", 1.0))
+        dp = _STS.dp_commit(blocked, us, t_rows, float(v0g), gears=g_set, max_notch_dn=_STC_DN)
+        if dp is None or len(dp["gear_seq"]) < 2:
+            return None
+        gr = _STS.greedy_profile(blocked, us, t_rows, float(v0g), gears=g_set, max_notch_dn=_STC_DN)
+        chan = None
+        if rescue:
+            if dp["s_end"] > 0.05:
+                chan = "rescue"
+        elif gr is None:
+            chan = "dp"
+        elif dp["reached"] and gr["reached"]:
+            if float(gr["t_arr"]) - float(dp["t_arr"]) >= _STC_ADOPT_T:
+                chan = "dp"
+        elif dp["reached"]:
+            chan = "dp"
+        elif float(dp["s_end"]) - float(gr["s_end"]) >= _STC_ADOPT_S:
+            chan = "dp"
+        if chan is None and _STC_TIE and (not rescue) and s_ok < 0.999 and gr is not None \
+                and float(dp["s_end"]) >= float(gr["s_end"]) - 1e-9:
+            chan = "tie"                             # M4c: equal progress, fewer decisions (opt-in)
+        if chan is None:
+            return None
+        dtp = float(t_rows[1] - t_rows[0])
+        pieces = [(dtp, float(g_)) for g_ in dp["gear_seq"][1:]]
+        if not pieces:
+            return None
+        if not rescue and dtp * len(pieces) < _STC_MIN - 1e-9:
+            return None                              # a sub-second tail is noise, not commitment
+        if not _ok_plan():                           # B1: static/flown gate guards adoption too
+            return None
+        # adopt only with STRICT margin (upgrade-probe pattern): a schedule that barely certifies
+        # today dies tomorrow on perception jitter -- the smoke-run COMMIT->DROP(cert) churn.
+        # Per-tick verification stays at the plain delta (worst case = today's window).
+        okc, af = _stc_cert_tail(ego, cyl, pieces, tau, d + (0.0 if rescue else strict_margin))
+        if not okc:
+            return None
+        raw = state.get("stc_mv")
+        src = raw if raw is not None else [(None, np.asarray(e[0][:2], float),
+                                            np.asarray(e[1][:2], float)) for e in cyl]
+        snap = []
+        for (oid, c2, v2) in src:
+            if float(np.hypot(c2[0] - p_d[0], c2[1] - p_d[1])) < 3.0 * _STC_WIN \
+                    + float(np.hypot(v2[0], v2[1])) * _STC_WIN + 4.0:
+                snap.append((oid, np.asarray(c2, float).copy(), np.asarray(v2, float).copy()))
+        stc = dict(kind=dk, gsub=np.asarray(gs, float).copy(), tail=pieces, t_since=0.0,
+                   goal=np.asarray(goal[:2], float).copy(), snap=snap, af0=af, u0=0.0)
+        head = _stc_consume(stc, delta if delta else 0.1)
+        stc["u0"] = head * (delta if delta else 0.1)   # adoption tick flies the head on the fresh spline
+        state["stc"] = stc
+        state["stc_u0"] = 0.0
+        state.update(kind=dk, gsub=stc["gsub"], s=head, age=0)
+        _ta = (-1.0 if dp["t_arr"] is None else float(dp["t_arr"]))
+        _gt = (-1.0 if (gr is None or gr["t_arr"] is None) else float(gr["t_arr"]))
+        print(f"[stc] COMMIT kind={dk} chan={chan} head={head:.2f} pieces={len(pieces)} v0={v0g:.2f} "
+              f"dp=(r{int(bool(dp['reached']))} t{_ta:.1f} s{dp['s_end']:.2f}) "
+              f"gr=(r{0 if gr is None else int(bool(gr['reached']))} t{_gt:.1f} "
+              f"s{0.0 if gr is None else gr['s_end']:.2f})", flush=True)
+        return dk, head
 
     def _progress(s):
         rr = ego.eval(min(s * tau, max(ego.duration() - 1e-3, 0.0)))
@@ -779,6 +1025,59 @@ def maneuver_decide_v2(ego, p_d, v_d, a_d, goal, ztop, cyl, state,
         if _esc_hot:
             state["esc_fired"] = state.get("esc_fired", 0) + 1
 
+    # ---- M3 commitment fast path: while a commitment lives, verify + fly it and SKIP the
+    # tournament and every upgrade probe (the anti-hesitation payload). Every tick still passes
+    # the full guarantee stack on FRESH data: replan to the frozen carrot, static/flown gate,
+    # tau-trimmed piecewise certificate. Any event -> LOUD drop -> today's full pipeline.
+    if _STC_ON:
+        _ban0 = state.get("stc_ban", 0)
+        if _ban0 > 0:
+            state["stc_ban"] = _ban0 - 1
+        _stc0 = state.get("stc")
+        if _stc0 is not None:
+            _stc0["t_since"] = float(_stc0["t_since"]) + (delta if delta else 0.1)
+            _drop = None
+            _dev = _thr = 0.0
+            if float(np.linalg.norm(_stc0["gsub"][:2] - p_d[:2])) < 1.5:
+                _drop = "carrot"                     # (b) benign completion
+            elif not _stc0["tail"]:
+                _drop = "exhaust"                    # (c) window flown out
+            elif float(np.linalg.norm(np.asarray(goal[:2], float) - _stc0["goal"])) > 0.5:
+                _drop = "goal_switch"                # (g) waypoint advanced under us
+            if _drop is None:
+                _dev, _thr, _betray = _stc_betrayal(_stc0, state, cyl, p_d)
+                if _betray:
+                    _drop = "betray"                 # (a) the world broke the plan's premise
+            if _drop is None:
+                # HELD-SPLINE commitment: never replan mid-commit (a fresh spline re-times every
+                # gear -- the smoke-run COMMIT->DROP(cert) churn). Verify the SAME geometry with
+                # the profile slid to u0; the executor keeps flying deeper into it (paired).
+                _u0n = float(_stc0.get("u0", 0.0))
+                if ego.duration() <= _u0n + 1e-3:
+                    _drop = "spline_out"             # (d) committed spline flown out
+                else:
+                    state["stc_u0"] = _u0n           # renderer flown-path gates read this offset
+                    if not _ok_plan():
+                        _drop = "gate"               # (f) static/flown gate, every tick (B1)
+                    else:
+                        _okc, _af = _stc_cert_tail(ego, cyl, _stc0["tail"], tau, d, u_start=_u0n)
+                        if not _okc:                 # (e) fresh-perception certificate refused
+                            _drop = "policy_flip" if _af != _stc0["af0"] else "cert"
+            if _drop is None:
+                _head = _stc_consume(_stc0, delta if delta else 0.1)
+                _stc0["u0"] = float(_stc0.get("u0", 0.0)) + _head * (delta if delta else 0.1)
+                state["stc_held"] = True             # renderer: keep t_ego accumulating, no reset
+                state.update(kind=_stc0["kind"], gsub=_stc0["gsub"], s=_head, age=0)
+                return _stc0["kind"], _head
+            print(f"[stc] DROP reason={_drop} t_since={_stc0['t_since']:.1f} "
+                  f"tail={len(_stc0['tail'])} dev={_dev:.2f}/thr={_thr:.2f}", flush=True)
+            state["stc"] = None
+            state.pop("stc_u0", None)
+            state["age"] = 0
+            if _drop in ("betray", "cert", "gate", "policy_flip"):
+                state["stc_ban"] = _STC_REFRACT      # refractory: no instant re-commit thrash
+            # fall through: worst case = today's full pipeline on this very tick
+
     _soar = os.environ.get("SOAR", "0") == "1"
     _soar_eager = os.environ.get("SOAR_EAGER", "0") == "1"
     DIRS = (("straight", "around_l", "around_r", "soar", "around_l2", "around_r2", "over", "climb")
@@ -821,6 +1120,9 @@ def maneuver_decide_v2(ego, p_d, v_d, a_d, goal, ztop, cyl, state,
             idx = max(0, speeds.index(inc_s) - 1) if inc_s in speeds else 0
             s_now = _best_s(smax=speeds[idx])               # may rise ONE grid step above last tick
             if s_now > 0.0:
+                _rc = _stc_adopt(inc, gs_inc, s_now)        # M3: commitment may claim the incumbent
+                if _rc is not None:
+                    return _rc
                 state["s"] = s_now
                 return inc, s_now
 
@@ -847,7 +1149,7 @@ def maneuver_decide_v2(ego, p_d, v_d, a_d, goal, ztop, cyl, state,
         if not _ok_plan():
             continue
         s_ok = _best_s()
-        if _ST_ON and s_ok >= 0.0:
+        if _ST_ON and not _STC_ON and s_ok >= 0.0:   # ST_COMMIT owns the schedule stage when on
             # ST stage (M2-4): a certified piecewise schedule replaces the constant gear ONLY when
             # STRICTLY better (window progress rank > constant gear + 0.02); ties keep the tree.
             # s_ok == 0 (every constant gear uncertified = today's HOLD) is ALSO offered to the
@@ -895,11 +1197,20 @@ def maneuver_decide_v2(ego, p_d, v_d, a_d, goal, ztop, cyl, state,
         if dk == "straight" and s_ok >= 0.999:
             break                                           # full-speed straight certified: done
     if best[0] is None:
+        if _STC_ON and state.get("stc_ban", 0) <= 0:
+            # M3 rescue: before declaring evade/HOLD, ask whether a certified wait-THEN-go
+            # schedule on the straight spline moves at all (purposeful waiting beats freezing)
+            gs_r = _gsub("straight")
+            if gs_r is not None and ego.replan(p_d, v_d, a_d, gs_r) and ego.duration() > 1e-3:
+                _rr = _stc_adopt("straight", gs_r, 0.0, rescue=True)
+                if _rr is not None:
+                    print("[stc] RESCUE straight (tournament all-dead)", flush=True)
+                    return _rr
         state.update(kind=None, gsub=None, s=1.0, age=0)
         return "evade", 0.0
     dk, s_ok = best[0], best[1]
     gs = _gsub(dk)
-    _st_win = _st_by.get(dk) if _ST_ON else None
+    _st_win = _st_by.get(dk) if (_ST_ON and not _STC_ON) else None
     if last_replanned != dk:
         ego.replan(p_d, v_d, a_d, gs)                       # restore the WINNER's spline (loop clobbered ego)
         # SOUNDNESS (GapWeave audit 2026-07-08 + M2-4): the restored spline is a FRESH replan, not
@@ -923,6 +1234,9 @@ def maneuver_decide_v2(ego, p_d, v_d, a_d, goal, ztop, cyl, state,
         # carries the piecewise-warp certificate over [0, tau]
         state.update(kind=dk, gsub=gs, s=float(_st_win[1]), age=0)
         return dk, float(_st_win[1])
+    _rw = _stc_adopt(dk, gs, s_ok)                          # M3: commitment may claim the winner
+    if _rw is not None:
+        return _rw
     state.update(kind=dk, gsub=gs, s=s_ok, age=0)
     return dk, s_ok
 
@@ -1031,6 +1345,9 @@ def maneuver_decide_v2(ego, p_d, v_d, a_d, goal, ztop, cyl, state,
     kind, s = _decide_v2_core(ego, p_d, v_d, a_d, goal, ztop, cyl, state, cruise_z=cruise_z,
                               horizon=horizon, straight_clip=straight_clip, tau=tau, delta=delta,
                               speeds=speeds, **kw)
+    if _STC_ON and state.get("stc") is not None:
+        state["s_prev"] = s                    # M3: committed gears fly VERBATIM -- slewing the
+        return kind, s                         # return would fly a profile the certificate never saw
     if os.environ.get("SPEED_SLEW", "0") != "1" or kind == "evade":
         state["s_prev"] = s
         return kind, s

@@ -119,6 +119,167 @@ def _reconstruct(parent, gears, s_grid, t_grid, j_end, i_end, g_end, reached):
                 s_seq=[float(s_grid[i_]) for (i_, _g) in seq])
 
 
+# ---------------------------------------------------------------- M3 commitment core (2026-07-20)
+# dp_commit / greedy_profile: the commitment-window pair. Contracts (M3 design review):
+# - Dynamics aligned to the PRODUCTION machine: brake up to max_notch_dn grid steps per row
+#   (today's "brake fast" freedom, discretized from a_max*dt), release ONE notch per row
+#   (today's release-slow law). greedy is a feasible policy inside dp_commit's own transition
+#   set, so dp >= greedy in commitment rank is a theorem here, not a hope.
+# - Rank is LEXICOGRAPHIC (reached, -t_arr, s_end): s_end alone is blind whenever both profiles
+#   saturate (spline shorter than the window, or both reach the goal inside it).
+# - greedy = faithful sim of the myopic per-tick policy: fastest legal gear whose one-step sweep
+#   is free; DEAD (dead=True, truncated at the last feasible row) when no legal gear survives,
+#   including the standing cell itself being swept -- it never pretends to stand inside a box.
+# - Quantization: caller picks du so EVERY gear advances an integer cell count per row
+#   (du = dt/20 covers the production 0.05-granular grids); non-integer gears are FLOORED with a
+#   loud print (never round progress up).
+# - Double-row sweep adequacy: missing a box that enters AND exits between rows needs mover
+#   speed > 2R/dt (>= ~13 m/s at production inflated radii) -- no MetaUrban mover qualifies; and
+#   the DP only PROPOSES, the Bernstein certificate judges every flown tick.
+
+def _gear_steps(gears, dt, du):
+    """Integer cell advance per row for each gear (descending gear array), loud-floor law."""
+    steps = np.empty(len(gears), int)
+    for k, g in enumerate(gears):
+        c = g * dt / du
+        ci = int(round(c))
+        if abs(c - ci) > 1e-6:
+            ci = int(np.floor(c))
+            print(f"[st] gear {g:.3f} = {c:.3f} cells/row -> FLOOR {ci} (quantization law)", flush=True)
+        steps[k] = ci
+    return steps
+
+
+def _prep_commit(blocked, s_grid, t_grid, v0_gear, gears):
+    s_grid = np.asarray(s_grid, float)
+    nt, ns = blocked.shape
+    dt = float(t_grid[1] - t_grid[0]) if len(t_grid) > 1 else 0.2
+    du = float(s_grid[1] - s_grid[0]) if ns > 1 else 1e9
+    ga = np.asarray(sorted({round(float(g), 6) for g in gears}, reverse=True), float)
+    steps = _gear_steps(ga, dt, du)
+    g0 = int(np.argmin(np.abs(ga - float(v0_gear))))
+    if ga[g0] > float(v0_gear) + 1e-6 and g0 + 1 < len(ga):
+        g0 += 1                                    # seed DOWN: never pretend to fly faster than flown
+    cum = np.zeros((nt, ns + 1), np.int64)
+    np.cumsum(blocked, axis=1, out=cum[:, 1:])
+    return s_grid, nt, ns, ga, steps, g0, cum
+
+
+def commit_rank(r):
+    """Lexicographic commitment rank; None (no profile) ranks below everything."""
+    if r is None:
+        return (-1, 0.0, -1.0)
+    if r.get("reached"):
+        return (1, -float(r["t_arr"]), float(r["s_end"]))
+    return (0, 0.0, float(r["s_end"]))
+
+
+def dp_commit(blocked, s_grid, t_grid, v0_gear, gears=GEARS_DEFAULT, max_notch_dn=4, s_goal=None):
+    """Commitment-window DP: earliest arrival at s_goal, else max progress at the horizon.
+    Vectorized per (gear, gear') transition with per-row prefix sums. Returns a dp_profile-shaped
+    dict (reached / t_arr / s_end / gear_seq / s_seq; gear_seq[0] is the seeded start state, not a
+    flown piece) or None when standing start is blocked."""
+    s_grid, nt, ns, ga, steps, g0, cum = _prep_commit(blocked, s_grid, t_grid, v0_gear, gears)
+    if nt < 2 or ns < 1 or blocked[0, 0]:
+        return None
+    ng = len(ga)
+    if s_goal is None:
+        s_goal = float(s_grid[-1])
+    if s_grid[0] >= s_goal - 1e-9:
+        return dict(reached=True, t_arr=float(t_grid[0]), s_end=float(s_grid[0]),
+                    gear_seq=[float(ga[g0])], s_seq=[float(s_grid[0])])
+    reach = np.zeros((ns, ng), bool)
+    reach[0, g0] = True
+    parent = np.full((nt, ns, ng, 2), -1, np.int32)
+    idx = np.arange(ns)
+    best = (0, g0, 0)                              # farthest-ever (i, g, layer) for the fallback
+    for j in range(nt - 1):
+        nxt = np.zeros_like(reach)
+        for g in range(ng):
+            src = reach[:, g]
+            if not src.any():
+                continue
+            for g2 in range(max(0, g - 1), min(ng, g + max_notch_dn + 1)):
+                k = steps[g2]
+                i2 = np.minimum(idx + k, ns - 1)
+                free = ((cum[j, i2 + 1] - cum[j, idx]) == 0) & ((cum[j + 1, i2 + 1] - cum[j + 1, idx]) == 0)
+                ok = src & free
+                if not ok.any():
+                    continue
+                tmp = np.full(ns, -1, np.int32)
+                tmp[i2[ok]] = idx[ok]              # any certified parent is valid; last-wins
+                new = (tmp >= 0) & ~nxt[:, g2]
+                if new.any():
+                    nxt[new, g2] = True
+                    parent[j + 1, new, g2, 0] = tmp[new]
+                    parent[j + 1, new, g2, 1] = g
+        reach = nxt
+        if not reach.any():
+            break                                  # every survivor gets swept: truncated horizon
+        hit = np.argwhere(reach & (s_grid[:, None] >= s_goal - 1e-9))
+        if len(hit):                               # BFS layer = earliest arrival
+            i_e = int(hit[:, 0].max())
+            g_e = int(hit[hit[:, 0] == i_e][:, 1].min())   # fastest gear at the farthest cell
+            return _rec_commit(parent, ga, s_grid, t_grid, j + 1, i_e, g_e, reached=True)
+        rows = np.argwhere(reach)
+        i_m = int(rows[:, 0].max())
+        if i_m > best[0]:
+            best = (i_m, int(rows[rows[:, 0] == i_m][:, 1].min()), j + 1)
+    if best[2] == 0:
+        return dict(reached=False, t_arr=None, s_end=float(s_grid[0]),
+                    gear_seq=[float(ga[g0])], s_seq=[float(s_grid[0])])
+    return _rec_commit(parent, ga, s_grid, t_grid, best[2], best[0], best[1], reached=False)
+
+
+def _rec_commit(parent, gears, s_grid, t_grid, j_end, i_end, g_end, reached):
+    seq = [(i_end, g_end)]
+    jj, ii, gg = j_end, i_end, g_end
+    while jj > 0:
+        pi, pg = parent[jj, ii, gg]
+        ii, gg = int(pi), int(pg)
+        jj -= 1
+        seq.append((ii, gg))
+    seq.reverse()
+    return dict(reached=reached, t_arr=(float(t_grid[j_end]) if reached else None),
+                s_end=float(s_grid[i_end]),
+                gear_seq=[float(gears[g_]) for (_i, g_) in seq],
+                s_seq=[float(s_grid[i_]) for (i_, _g) in seq])
+
+
+def greedy_profile(blocked, s_grid, t_grid, v0_gear, gears=GEARS_DEFAULT, max_notch_dn=4, s_goal=None):
+    """Faithful sim of the myopic per-tick policy on dp_commit's exact grid and dynamics.
+    Returns dp_profile-shaped dict + dead flag; None when standing start is blocked."""
+    s_grid2, nt, ns, ga, steps, g0, cum = _prep_commit(blocked, s_grid, t_grid, v0_gear, gears)
+    if nt < 2 or ns < 1 or blocked[0, 0]:
+        return None
+    ng = len(ga)
+    if s_goal is None:
+        s_goal = float(s_grid2[-1])
+    i, gi = 0, g0
+    seq = [(i, gi)]
+    for j in range(nt - 1):
+        pick = None
+        for g2 in range(max(0, gi - 1), min(ng, gi + max_notch_dn + 1)):   # fastest-first
+            k = steps[g2]
+            i2 = min(i + k, ns - 1)
+            if (cum[j, i2 + 1] - cum[j, i]) == 0 and (cum[j + 1, i2 + 1] - cum[j + 1, i]) == 0:
+                pick = (g2, i2)
+                break
+        if pick is None:                            # DEAD: even standing here gets swept
+            return dict(reached=False, t_arr=None, s_end=float(s_grid2[i]), dead=True,
+                        gear_seq=[float(ga[g_]) for (_i, g_) in seq],
+                        s_seq=[float(s_grid2[i_]) for (i_, _g) in seq])
+        gi, i = pick
+        seq.append((i, gi))
+        if s_grid2[i] >= s_goal - 1e-9:
+            return dict(reached=True, t_arr=float(t_grid[j + 1]), s_end=float(s_grid2[i]), dead=False,
+                        gear_seq=[float(ga[g_]) for (_i, g_) in seq],
+                        s_seq=[float(s_grid2[i_]) for (i_, _g) in seq])
+    return dict(reached=False, t_arr=None, s_end=float(s_grid2[i]), dead=False,
+                gear_seq=[float(ga[g_]) for (_i, g_) in seq],
+                s_seq=[float(s_grid2[i_]) for (i_, _g) in seq])
+
+
 def pass_decisions(pts, s_seq, t_grid, movers):
     """For each mover: did the profile cross the mover's path-crossing station BEFORE or AFTER the
     mover occupies it? Returns list of 'ahead'|'behind'|'clear' per mover (diagnostic)."""
@@ -170,3 +331,44 @@ if __name__ == "__main__":
     assert abs(r_free["t_arr"] - 40.0 / 8.0) < 0.3, r_free["t_arr"]
     print("[st_speed] self-test PASS: fast=ahead@%.1fs slow=%s@%.1fs free=%.1fs"
           % (r_fast["t_arr"], dec2[0], r_slow["t_arr"], r_free["t_arr"]))
+
+    # ---- M3 commitment core (dp_commit / greedy_profile) ----
+    G_RENDER = (1.0, 0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.15, 0.0)
+    dt_c, T_c = 0.2, 4.0
+    du_c = dt_c / 20.0
+    for g in G_RENDER:                                     # quantization law: every gear integer cells
+        assert abs(g * dt_c / du_c - round(g * dt_c / du_c)) < 1e-9, g
+    tg_c = np.arange(0.0, T_c + 1e-9, dt_c)
+    ug_c = np.arange(0.0, 2.4 + 1e-9, du_c)
+    free_c = np.zeros((len(tg_c), len(ug_c)), bool)
+    d_free = dp_commit(free_c, ug_c, tg_c, 1.0, gears=G_RENDER)
+    g_free = greedy_profile(free_c, ug_c, tg_c, 1.0, gears=G_RENDER)
+    assert d_free["reached"] and g_free["reached"], (d_free, g_free)
+    assert abs(d_free["t_arr"] - 2.4) < dt_c + 1e-9 and abs(g_free["t_arr"] - d_free["t_arr"]) < 1e-9
+    # wait-then-go: a crosser owns stations [0.8, 1.3] during t in [0.2, 1.6); DP times the gap,
+    # greedy rushes the face, waits, then re-accelerates one notch per row -> strictly later
+    box_c = free_c.copy()
+    ti = (tg_c >= 0.2 - 1e-9) & (tg_c < 1.6)
+    si = (ug_c >= 0.8 - 1e-9) & (ug_c <= 1.3 + 1e-9)
+    box_c[np.ix_(ti, si)] = True
+    d_box = dp_commit(box_c, ug_c, tg_c, 1.0, gears=G_RENDER)
+    g_box = greedy_profile(box_c, ug_c, tg_c, 1.0, gears=G_RENDER)
+    assert d_box is not None and d_box["reached"], d_box
+    assert commit_rank(d_box) >= commit_rank(g_box), (d_box["t_arr"], g_box)
+    assert (not g_box["reached"]) or d_box["t_arr"] < g_box["t_arr"] - 1e-9, \
+        (d_box["t_arr"], g_box["t_arr"])
+    # invariant: dp >= greedy in commitment rank on random grids (greedy is a feasible DP policy)
+    rng2 = np.random.RandomState(11)
+    n_dead = 0
+    for _tr in range(200):
+        bb = rng2.rand(len(tg_c), len(ug_c)) < rng2.uniform(0.02, 0.25)
+        bb[0, 0] = False
+        v0r = float(rng2.choice(G_RENDER))
+        dd = dp_commit(bb, ug_c, tg_c, v0r, gears=G_RENDER)
+        gg = greedy_profile(bb, ug_c, tg_c, v0r, gears=G_RENDER)
+        assert commit_rank(dd) >= commit_rank(gg), (_tr, commit_rank(dd), commit_rank(gg))
+        n_dead += int(bool(gg and gg.get("dead")))
+    print("[st_speed] M3 core PASS: free t=%.1fs both; box dp=%.1fs greedy=%s; "
+          "200 random grids dp>=greedy (greedy died %d)"
+          % (d_free["t_arr"], d_box["t_arr"],
+             ("%.1fs" % g_box["t_arr"]) if g_box["reached"] else "DEAD/stuck", n_dead))
