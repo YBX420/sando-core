@@ -1695,7 +1695,9 @@ def _man_cloud(p_d, heading, t_sim, movers):
                     _SWATH_DBG[0] += 1
                     print(f"[SWATH] t={t_sim:5.2f} {_oid} tcpa={tcpa:.2f} |v|={float(np.hypot(vel[0], vel[1])):.2f} "
                           f"leads={np.round(leads,2)}", flush=True)
-        _eta = os.environ.get("ETA_FEED", "0")
+        _eta = os.environ.get("ETA_FEED", "2")   # DEFAULT=2 (k10 promoted 2026-07-20 ruling: sigma-budget
+        #   feed band, ETA_K=1.0 plateau edge; oracle arm hard-zero by construction, so the promotion
+        #   cannot poison the omniscient arm. ETA_FEED=0 reproduces the pre-ruling feed.)
         _qv = PERCLASS_CONF.get(d_safe, (MAN_QCONF, MAN_VEFF))
         for lead in leads:                                        # current + closest-approach predicted footprint
             cx, cy = c3[0] + vel[0] * lead, c3[1] + vel[1] * lead
