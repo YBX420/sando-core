@@ -56,4 +56,11 @@ min_clr 自 d32b63b 起=**机体净空**(旧=中心净空,差 0.25+时序);渲�
 - **工序 6 前两刀已落(3f64cf6)**:**KF 病②=coast 状态传播改按认证假设 CV 走**(部署证书 PRED_MODEL=cv 而估计器 coast 用 CA 积垃圾加速度=内部自相矛盾;协方差保留全 CA 白 jerk 增长=保守超集;KF_COAST=ca 回旧;注入病理单测 v 钉 0.60 vs 旧漂 2.10,九项自测全过含精确合成律);**病③=PERCEPT_TTL 8→16**(确诊丢检串 7-8 拍正卡 TTL=8,confirmed 死在串尾重生进病①;tentative 的 YOUNG_TTL 短绳不动)。**行为:回归 12 键零碰撞+fast_canyon:42 从到不了翻干净抵达(串杀场景类痊愈);6-seed 均值 9.45→9.68,4 胜(s19 6.6s 新纪录/s7 7.3 穿旧全知地板 7.4/s5 −1.0/s23 −1.5)2 税(s3 +3.7/s12 +1.3)。★拆解反转:s3 税全是②的(③单刀=逐字节零差)——旧速度部分建立在 CA 漂移把 coast 幽灵以垃圾速度甩出走廊的不 sound 免费午餐上;诚实 coast 留住幽灵、σ 带(k10)负责任绕行=σ margin 重定阶段的正题**。承诺一瞥(stc s7 n3):两次 drop 全 dev=0.00(估计器噪声死法消失),一段活 1.4s(旧半衰期 0.45s)死于 policy_flip=架构侧——**M3 解冻协议(正式半衰期重测)就绪待跑**
 - **遗留**:σ margin 再定(待塔菲大人:A 接受现状收/B coast 高龄 track 降级冻结小盘/C coast track 单独 ETA 系数);M3 半衰期正式重测(解冻门 ≥1.5s);**估计器未冻结,终版标定继续等**;P 子码细分需感知面事件挂钩;渲染面 exec_verified 待接
 
+## A+ 闭合 + M3 正式判决(07-20 终批,25ee7e4=估计器候选冻结)
+塔菲大人裁决=A+(四接口闭合)/B 不转默认(证书双查 predicted∧frozen,B 等于删一半)/C 名不副实(ETA_K 跳过 coasting,coast 真旋钮=MAN_MEM_K×pos_sigma→终版标定改叫 COAST_MEM_K)/interim ε=.10 永远叫审计产物。
+**A+ 四件全落(25ee7e4)**:①hybrid coast=均值协方差同走 CV 传播,coast Q=白 jerk→a 通道精确积分+白加速度项 q_a=|a_held|²·τ_a(τ_a=2.0>记忆窗)⟹ **σ_v(T)≥|a_held|·T 被删漂移显式进二阶矩=保守性证出**;复检首拍 CV 预测(旧 CA predict 会把陈旧加速度回积一次);合成律逐位保持;KF 自测 11/11。②③TTL 改秒语义两面统一(confirmed 1.6s/tentative 0.3s 显式字段;legacy PERCEPT_TTL/YOUNG_TTL/EGO_MEM_TICKS 大声换算)——**渲染面病③首次真落地**(此前被 EGO_MEM_TICKS=8 压 0.8s)+**撤回:knife-1 的 fast_canyon 救活=replay 面意外 4.8s 记忆的产物**,诚实 1.6s 后回 not-reached(仍零碰撞)。④tentative 显式短绳+自测。
+**s19 验尸(渲染面首例真实碰撞归档)**:A_FLOOR=1.0 的 Singer 热度把 coast keep-out 撑爆→走廊封死→无证 HOLD 冻成活靶→动物碾过,**判决 U[no_certificate, exec_override:hold]**(非 D,定理无恙);dominance 论证本不需要地板→**默认 KF_COAST_AFLOOR=0**(热度归终版标定);顺手修渲染归档兜底选肇事者 bug(按最负类不按最近中心——否则静默漏记)。
+**候选冻结面数字**:回归 12 键零碰撞(fast_canyon:42 诚实 not-reached);6-seed 6/6 干净均值 11.73s(统一 1.6s 记忆在渲染面的实价,s5 hold:65 冻挡丑但净;定价=COAST_MEM_K 归终版标定,不 6 seed 手调)。
+**★M3 正式半衰期套件(6 seed stc,12 commits)**:**median 0.50s,12/12 失败降(gate×7 全 dev=0.00/betray×3 dev 0.82-1.31/cert×2),零自然完成——<1.5s 门,不过**。机制读数:估计器噪声死法确实没了(gate/cert 死全 dev=0),新主死因=滑动窗重证 gate 撞上诚实增长的 coast 管(架构×诚实不确定度的相互作用,不是估计器 bug)。**按裁决:M3 保持关闭;估计器冻结在 25ee7e4;终版标定按 M3-off 策略走**(重产 residual→场景不相交统一 episode→新 ε=.10→收场景→camera-ready ε=.05)。早前 1.4s 一瞥=2 样本茶渣,正式 12 样本说话。
+
 相关 [[sando-core-m3-2026-07-20]] [[sando-core-raceline-2026-07-16]]
