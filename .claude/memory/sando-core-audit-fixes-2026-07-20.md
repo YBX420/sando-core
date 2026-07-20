@@ -63,4 +63,9 @@ min_clr 自 d32b63b 起=**机体净空**(旧=中心净空,差 0.25+时序);渲�
 **候选冻结面数字**:回归 12 键零碰撞(fast_canyon:42 诚实 not-reached);6-seed 6/6 干净均值 11.73s(统一 1.6s 记忆在渲染面的实价,s5 hold:65 冻挡丑但净;定价=COAST_MEM_K 归终版标定,不 6 seed 手调)。
 **★M3 正式半衰期套件(6 seed stc,12 commits)**:**median 0.50s,12/12 失败降(gate×7 全 dev=0.00/betray×3 dev 0.82-1.31/cert×2),零自然完成——<1.5s 门,不过**。机制读数:估计器噪声死法确实没了(gate/cert 死全 dev=0),新主死因=滑动窗重证 gate 撞上诚实增长的 coast 管(架构×诚实不确定度的相互作用,不是估计器 bug)。**按裁决:M3 保持关闭;估计器冻结在 25ee7e4;终版标定按 M3-off 策略走**(重产 residual→场景不相交统一 episode→新 ε=.10→收场景→camera-ready ε=.05)。早前 1.4s 一瞥=2 样本茶渣,正式 12 样本说话。
 
+## 收割前缺口关闭(07-20 末批,c3a4702+793c4ed;tag=estimator-freeze-2026-07-20 已钉 25ee7e4,244M bundle 备份 ~/sando-core-backup-2026-07-20.bundle)
+塔菲大人裁决细则全落:**harvest 契约重建**(harvest_v3+ops/harvest3.sh:一集=一解释器=一原子文件 tmp→sha256→rename→receipt;预注册 jobs.json 永不截断;ep==job index;U64 场景名;单 worker+BLAS=1;版本化 run 目录;resume 需 data+receipt+checksum+job 四配;merge 作业集全等否则拒;**合法零行集留宇宙计 -inf**;receipt 钉全部 env 旋钮+generator commit+schema 版);**残差 schema +psig/coast_s/a_held/mem_m**(EGO_MEM_K 分析前提);**生成器修**(--contested 真门控;pushback 后 retimed movers spawn_t 平移 back/v_nom+重验起飞窗;无安全起点=REJECT;时空 encounter 验收 _encounter_ok;场景 provenance 全录;multistart 同世界=一 cluster);**fail-loud TTL≤τ_A 两面断言**;**肇事者身份闭环**(fed 行带稳定 oid;clearance 返回逐对象列;扫掠按 oid 配对;记录名对象+全接触物各自净空;补修第二个 clearance 调用点)。
+**pilot12 验收(工序3)**:acc1 当场抓获 **episode-id 偏一真身**(run_replay 开局 _HARV_EP+=1,历史所有 pool 行 ep=manifest+1,池内统计幸存但 manifest 交叉引用一直错;merge 全等校验以"16 幻影零行集"报警)→根修(replay 不得篡改调用者身份)→acc2:24/24 零失败、行数两轮逐字节同 39338、**9 个真实零行集全 gen_pool 家族**(=真"消失场景"人口,现可见计 -inf)、resume 删收据→23 SKIP+1 重跑→merge 依旧全等、新列活。
+**待办(design69 开机前)**:9 个 gen_pool 零行集的 eligibility 诊断(为何全程零合格行——生成器 eligibility 验收范畴);然后工序4=重收旧 69 定 EGO_MEM_K→stack-freeze-m3off tag→工序6=一次性生成预注册新 100 场景(60cal/40test,四家族等权冻结 RNG,动物留 stress suite)→cal 只算分位/test 只开一次。
+
 相关 [[sando-core-m3-2026-07-20]] [[sando-core-raceline-2026-07-16]]
