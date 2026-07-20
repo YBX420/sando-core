@@ -241,6 +241,34 @@ def _clearance(p, c_xy, r, h):
     return math.hypot(max(0.0, horiz - r), p[2] - h) - R_DRONE
 
 
+def _swept_clearance(p0, p1, m0, m1, r, h):
+    """Minimum BODY clearance over one tick (07-20 ruling: earliest-contact judgement): drone
+    chord p0->p1 vs mover chord m0->m1, both linear in s in [0,1]. Candidates = both endpoints,
+    the exact minimiser of the relative-xy quadratic, and the cylinder-top z-crossing. Endpoint-
+    only measurement missed within-tick penetrations (0.6 m of mover motion per tick at 6 m/s)
+    and could book the contact against the wrong tick's certification state."""
+    p0 = np.asarray(p0, float); p1 = np.asarray(p1, float)
+    m0 = np.asarray(m0, float)[:2]; m1 = np.asarray(m1, float)[:2]
+    d0 = p0[:2] - m0; dd = (p1[:2] - p0[:2]) - (m1 - m0)
+    cands = [0.0, 1.0]
+    a = float(dd @ dd)
+    if a > 1e-12:
+        s_star = -float(d0 @ dd) / a
+        if 0.0 < s_star < 1.0:
+            cands.append(s_star)
+    z0, z1 = float(p0[2]), float(p1[2])
+    if abs(z1 - z0) > 1e-9:
+        s_h = (h - z0) / (z1 - z0)
+        if 0.0 < s_h < 1.0:
+            cands.append(s_h)
+    best = 1e18
+    for s in cands:
+        cl = _clearance(p0 + (p1 - p0) * s, m0 + (m1 - m0) * s, r, h)
+        if cl < best:
+            best = cl
+    return best
+
+
 def _rot(v2, ang):
     c, s = math.cos(ang), math.sin(ang)
     return np.array([c * v2[0] - s * v2[1], s * v2[0] + c * v2[1]])
@@ -352,6 +380,8 @@ def run_replay(movers, ep, mode="ours", calib=None, predict=True, max_vel=3.0, m
         gxy = goal[:2] - p_d[:2]; dist = float(np.linalg.norm(gxy))
         gdir = gxy / dist if dist > 1e-6 else np.array([1.0, 0.0])
         kind = None
+        receipt = None                 # certificate receipt for THIS tick (07-20 ruling): set by the
+        #   v2 wrapper / CRET; certified-tick accounting keys off it, never off the kind string
         p_ref, v_ref, a_ref = p_d.copy(), np.zeros(3), np.zeros(3)   # the set-point this tick (flown via quad if dynamics)
 
         if mode == "native":
@@ -683,6 +713,7 @@ def run_replay(movers, ep, mode="ours", calib=None, predict=True, max_vel=3.0, m
             elif DECIDE == "v2" and cont_cert:
                 kind, _v2s = SL.maneuver_decide_v2(ego, p_d, v_d, a_d, goal, ztop, cyl, _stick,
                                                    cruise_z=CRUISE_Z, horizon=HORIZON, delta=DELTA)
+                receipt = _stick.get("receipt")
                 if kind in ("around_l2", "around_r2"):
                     kind = kind[:-1]                        # counts/HUD keep the l/r bucket names
                 if os.environ.get("V2_ESC", "0") == "1":
@@ -767,6 +798,7 @@ def run_replay(movers, ep, mode="ours", calib=None, predict=True, max_vel=3.0, m
                                 kind, _v2s = SL.maneuver_decide_v2(
                                     ego, _p_sub, v_ref, a_ref, goal, _zt_j, _cyl_j, _stick,
                                     cruise_z=CRUISE_Z, horizon=HORIZON, delta=_sub)
+                                receipt = _stick.get("receipt")   # sub-cadence re-decide owns the tick
                                 if kind in ("around_l2", "around_r2"):
                                     kind = kind[:-1]
                                 if kind != "evade":
@@ -796,6 +828,9 @@ def run_replay(movers, ep, mode="ours", calib=None, predict=True, max_vel=3.0, m
                                     v_ref = _s * np.asarray(rr[1], float)
                                     a_ref = _s * _s * np.asarray(rr[2], float)
                                     kind = "cret"; _glid = True
+                                    receipt = SL.make_receipt("cret", _s, True, ego, cyl, TAU,
+                                                              DELTA, gates=dict(path="cret",
+                                                                                warp=True))
                                 break
                 if not _glid:
                     # realistic mode flees only what it TRACKS (fleeing an unseen mover would be
@@ -809,6 +844,7 @@ def run_replay(movers, ep, mode="ours", calib=None, predict=True, max_vel=3.0, m
                     p_ref, v_ref, a_ref = pos, vel, np.zeros(3)
             counts[kind] = counts.get(kind, 0) + 1
 
+        p_prev = p_d.copy()            # start-of-tick drone position (swept-contact chord anchor)
         # apply the set-point: real PX4 SITL (flier) > local quadrotor model (dynamics) > teleport (optimistic)
         if flier is not None:                              # real PX4 SITL in the loop (flier streams the set-point)
             pf, vf = flier(p_ref, v_ref, a_ref, DT)
@@ -823,14 +859,28 @@ def run_replay(movers, ep, mode="ours", calib=None, predict=True, max_vel=3.0, m
 
         max_z = max(max_z, float(p_d[2]))
         tick_clr = 1e18
-        t_meas = t + DT                # the drone just flew [t, t+DT]: measure against where the
-        for i in present_idx(t_meas):  # movers ARE at t+DT, not their stale start-of-tick spots
-            cl = _clearance(p_d, pos_l(i, t_meas), movers.m[i]["r"], movers.m[i]["h"])
+        t_meas = t + DT                # SWEPT contact over [t, t+DT]: drone chord p_prev->p_d vs
+        for i in sorted(set(present_idx(t)) | set(present_idx(t_meas))):   # mover chord (07-20 ruling)
+            m0 = pos_l(i, t) if movers.present(i, t) else pos_l(i, t_meas)
+            m1 = pos_l(i, t_meas) if movers.present(i, t_meas) else m0
+            cl = _swept_clearance(p_prev, p_d, m0, m1, movers.m[i]["r"], movers.m[i]["h"])
             tick_clr = min(tick_clr, cl); min_clr = min(min_clr, cl)
         _dcmd = np.asarray(p_ref, float)[:2] - p_d[:2]
         if float(np.hypot(*_dcmd)) > 0.15:
             _hd_cmd[0] = _dcmd.copy()      # look where you are COMMANDED to go (real quads yaw-to-path)
-        if kind in ("straight", "around_l", "around_r", "over", "climb", "cret"):
+        if receipt is not None:
+            # RECEIPT-DRIVEN accounting (07-20 ruling): a tick is certified iff its receipt says
+            # so; the kind string is display only. V2_ESC escape overrides keep the evade receipt
+            # (certified=False) -> escape flight books as uncertified exposure (conservative).
+            receipt["valid_from"] = round(t, 3)
+            receipt["valid_until"] = round(t + float(receipt.get("window", TAU)), 3)
+            if receipt.get("certified"):
+                rta["certified_ticks"] += 1
+                if tick_clr < 1e17 and tick_clr < 0.0:
+                    rta["violations"] += 1           # flew a CERT-PASSED plan into a violation
+        elif kind in ("straight", "around_l", "around_r", "over", "climb", "cret"):
+            # legacy decide paths (v0/v1/v3) have no receipt machinery yet: kind-name accounting
+            # survives THERE ONLY, explicitly second-class
             rta["certified_ticks"] += 1
             if tick_clr < 1e17 and tick_clr < 0.0:
                 rta["violations"] += 1               # flew a CERT-PASSED plan into a violation
@@ -872,6 +922,7 @@ def run_replay(movers, ep, mode="ours", calib=None, predict=True, max_vel=3.0, m
                     _v3 = "err"
             hist.append(dict(tick=tick, t=round(t, 2),
                              clr=round(tick_clr, 3) if tick_clr < 1e17 else None,
+                             receipt=receipt,
                              kind=kind, z=round(float(p_d[2]), 2),
                              p=[round(float(p_d[0]), 2), round(float(p_d[1]), 2)],
                              pref=[round(float(p_ref[0]), 2), round(float(p_ref[1]), 2)],
