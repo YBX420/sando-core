@@ -1058,7 +1058,8 @@ def _kf_movers_realistic(p_d, t_sim, cam_heading):
                       if gt is not None else "gt=NONE")
                 print(f"[KFDBG] t={t_sim:6.2f} trk{tr.id} n={tr.trk.n:3d} miss={tr.miss} {gs} "
                       f"kf=({kc0[0]:7.2f},{kc0[1]:7.2f}) kfv=({kv[0]:6.2f},{kv[1]:6.2f})", flush=True)
-        r_eff = tr.r + (MAN_MEM_K * tr.trk.pos_sigma if tr.miss > 0 else 0.0)
+        r_eff = tr.r + ((MAN_MEM_K_CLS.get(str(tr.cls), MAN_MEM_K) * tr.trk.pos_sigma)
+                        if tr.miss > 0 else 0.0)
         _ELL_TRK[f"trk{tr.id}"] = (int(tr.trk.n), tr.miss > 0, str(tr.cls))   # v5 ellipse eligibility
         _TRK_SIG[f"trk{tr.id}"] = (tr.trk, tr.miss > 0, int(tr.trk.n))
         out.append((f"trk{tr.id}", kc0, (float(kv[0]), float(kv[1]), 0.0), float(r_eff), d_safe))
@@ -1620,6 +1621,13 @@ if "EGO_MEM_TICKS" in os.environ:
 else:
     MAN_MEM_TICKS = max(1, int(round(MAN_MEM_S / REPLAN_DT)))
 MAN_MEM_K = float(os.environ.get("EGO_MEM_K", 2.0))        # keep-out inflation = this many KF position-sigmas (covariance growth)
+#   FROZEN on the design69 face (07-20 final sequence step 4, mem_k_fit over 23k coast rows /
+#   49 scenarios): pedestrian coast e/psig q90=1.62, q95=2.28 -> the historical 2.0 covers ~q93
+#   and stays. VEHICLES are the hole: q90=13.3, q95=18.0 -- a converged vehicle track coasts with
+#   a_held~0, so the A+ white-accel term vanishes and psig badly understates real coast error
+#   (the ruling's 'KF covariance is not a probability guarantee', measured). psig is small there,
+#   so 13.5*psig ~ 2 m of keep-out -- physically sane. Per-class dial, frozen pre-stack-freeze:
+MAN_MEM_K_CLS = {"vehicle": float(os.environ.get("EGO_MEM_K_VEH", "13.5"))}
 from kf_tracker import _COAST_TAU_A as _KF_TAU_A
 assert MAN_MEM_TICKS * REPLAN_DT <= _KF_TAU_A + 1e-9, (
     f"EGO memory {MAN_MEM_TICKS * REPLAN_DT:.2f}s exceeds the coast-dominance horizon "
