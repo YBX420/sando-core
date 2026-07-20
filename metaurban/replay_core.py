@@ -231,10 +231,14 @@ def _ground(p_d, radius=18.0, step=1.0):
 
 
 def _clearance(p, c_xy, r, h):
+    """BODY clearance: drone SURFACE to mover surface. Subtracting R_DRONE matches the renderer's
+    clearance() (which always did) and the planning keep-outs (which always inflated by the body):
+    before the 2026-07-20 audit (#4) 'collided' here meant the drone CENTRE penetrated the mover
+    surface -- an episode with min_clr in (0, 0.25) was booked clean while the body touched."""
     horiz = math.hypot(p[0] - c_xy[0], p[1] - c_xy[1])
     if p[2] <= h:
-        return horiz - r
-    return math.hypot(max(0.0, horiz - r), p[2] - h)
+        return horiz - r - R_DRONE
+    return math.hypot(max(0.0, horiz - r), p[2] - h) - R_DRONE
 
 
 def _rot(v2, ang):
@@ -819,8 +823,9 @@ def run_replay(movers, ep, mode="ours", calib=None, predict=True, max_vel=3.0, m
 
         max_z = max(max_z, float(p_d[2]))
         tick_clr = 1e18
-        for i in present_idx(t):
-            cl = _clearance(p_d, pos_l(i, t), movers.m[i]["r"], movers.m[i]["h"])
+        t_meas = t + DT                # the drone just flew [t, t+DT]: measure against where the
+        for i in present_idx(t_meas):  # movers ARE at t+DT, not their stale start-of-tick spots
+            cl = _clearance(p_d, pos_l(i, t_meas), movers.m[i]["r"], movers.m[i]["h"])
             tick_clr = min(tick_clr, cl); min_clr = min(min_clr, cl)
         _dcmd = np.asarray(p_ref, float)[:2] - p_d[:2]
         if float(np.hypot(*_dcmd)) > 0.15:

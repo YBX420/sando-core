@@ -2942,6 +2942,12 @@ while not quit_now:
             if args.maneuver or args.slip:
                 draw_predictions()                 # <- the LIVE Kalman forecast every mover is routed around
         step_env()
+        if ego is not None:
+            # measurement-only refresh (audit #4): step_env() just advanced the world one tick, but
+            # `fed` was the DECISION-time snapshot -- the stepped drone was being measured against
+            # stale movers. feed(None, ...) is a pure reader; the next tick's decision rebuilds its
+            # own fed at 'replan' time, so flight behaviour is untouched.
+            fed = feed(None, _cache, t, p_d)
         c, per = clearance(p_d, fed); mclr = min(mclr, c)
         for k, val in per.items(): per_all[k] = min(per_all.get(k, np.inf), val)
         if c < -1e-6 and os.environ.get("MAN_COLLDBG") == "1":
