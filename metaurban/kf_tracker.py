@@ -22,6 +22,14 @@ import numpy as np
 # quickly and NIS stays sane because S carries the wide prior. Default = twopoint (byte-identical).
 _KF_INIT_BAYES = os.environ.get("KF_INIT", "twopoint") == "bayes"
 
+# KF 病② knife (07-20 work order #6): with NO measurement, extrapolate the STATE under the
+# CERTIFIED hypothesis (CV -- the deployed cert polynomial is PRED_MODEL=cv), while the
+# covariance keeps the FULL CA white-jerk growth (conservative superset). The legacy CA coast
+# integrated the noisiest state component (a) into v every missed tick: a newborn's garbage
+# accel turned |v| 0.6->2.1 in 0.6 s of occlusion (seed7 diagnosis 2026-07-13), poisoning
+# association gates, feed rings and the young laws. KF_COAST=ca restores the legacy propagator.
+_KF_COAST_CA = os.environ.get("KF_COAST", "cv") == "ca"
+
 
 class _AxisCAKalman:
     """Per-axis constant-acceleration Kalman filter. State x=[p, v, a]; white-jerk process noise."""
@@ -85,7 +93,13 @@ class _AxisCAKalman:
         step = self.dt if dt is None else float(dt)
         self._gap += step
         F, Q = (self.F, self.Q) if step == self.dt else self._mats(step)
-        self.x = F @ self.x; self.P = F @ self.P @ F.T + Q
+        if _KF_COAST_CA:
+            self.x = F @ self.x                       # legacy CA coast (病②: integrates accel into v)
+        else:
+            # CV state extrapolation (exact composition: p += v*dt with v held, so 3x0.1s == 1x0.3s
+            # bit-for-bit); a is HELD, not integrated -- it re-engages on the next real measurement.
+            self.x = np.array([self.x[0] + self.x[1] * step, self.x[1], self.x[2]])
+        self.P = F @ self.P @ F.T + Q
 
     def update_velocity(self, zv, r_vel):
         """DIRECT velocity measurement update, H=[0,1,0] -- the radar port (M1c, timespace plan).
@@ -345,3 +359,18 @@ if __name__ == "__main__":
     # innovation-gate regression: a wildly wrong Doppler (clutter/neighbour) must be REJECTED.
     ok_gate = not trk_s.update_velocity((9.0, -7.0), r_vel=0.2)
     print("[kf] radar innovation-gate PASS" if ok_gate else "[kf] radar innovation-gate FAIL (clutter steered the track)")
+
+    # KF 病② coast-drift regression (07-20 work order #6): inject the diagnosed garbage accel
+    # (young track, a=2.5 after a noisy curvature fit) and coast 0.6 s. Legacy CA coast integrated
+    # it into velocity (|v| 0.6 -> ~2.1); the CV-state coast must HOLD v while P still grows.
+    trk_g = MoverTracker(dt=0.10, meas_noise=0.07)
+    trk_g.update([0.0, 0.0, 1.5]); trk_g.update([0.06, 0.0, 1.5])
+    trk_g.fx.x = np.array([0.06, 0.6, 2.5])                 # the seed7 pathology, verbatim
+    p_var0 = float(trk_g.fx.P[0, 0])
+    for _ in range(6):
+        trk_g.coast()
+    v_after = float(trk_g.fx.x[1])
+    ok_d = abs(v_after - 0.6) < 1e-9 and float(trk_g.fx.P[0, 0]) > p_var0
+    print(f"[kf] coast-drift knife: v 0.60 -> {v_after:.2f} after 0.6s coast "
+          f"(legacy CA would be ~{0.6 + 2.5 * 0.6:.2f}); P grew {p_var0:.4f} -> {float(trk_g.fx.P[0, 0]):.4f}")
+    print("[kf] coast-drift PASS" if ok_d else "[kf] coast-drift FAIL (velocity drifted or P froze)")
