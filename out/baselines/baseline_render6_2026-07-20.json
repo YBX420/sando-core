@@ -1,21 +1,25 @@
 {
   "provenance": {
     "date": "2026-07-20",
-    "ruling": "塔菲大人 07-20 晚间裁决包: A案(verbatim executor)定案 + k10(ETA_FEED=2,ETA_K=1.0)转默认 + 本表转正为渲染面基线",
-    "config": "THIN=1, new defaults (ETA_FEED=2 default), --maneuver --clear_spawn --headless --t_max 30, body-clearance convention (audit #4), verbatim executor (audit #1)",
-    "commit_base": "a93ab2a + k10-default promotion",
-    "convention_note": "min_clr = BODY clearance (drone surface to obstacle surface), measured at end-of-tick against end-of-tick movers. NOT comparable to pre-2026-07-20 centre-based ledgers (delta ~= -0.25m +- retiming)."
+    "ruling": "塔菲大人 07-20 晚间裁决包: A案(verbatim executor)定案 + k10(ETA_FEED=2,ETA_K=1.0)转默认 + 本表转正为渲染面性能回归基线",
+    "commit": "d87aa83",
+    "commit_note": "runs executed at the exact tree content of d87aa83 (a93ab2a + the ETA_FEED default promotion contained in d87aa83)",
+    "calibration": {"pack": "THIN (EGO_PERCLASS=thin, measured-clearance regime, no conformal coverage claim)", "file": "out/conformal/calib_v6_thin.json", "sha256_16": "b8671ed818c67764"},
+    "scenario_manifest": {"generator": "MetaUrban procedural (metaurban repo HEAD efbc6ad)", "seeds": [3, 5, 7, 12, 19, 23], "args": "--maneuver --clear_spawn --headless --t_max 30", "env": {"THIN": "1", "ETA_FEED": "default(2)", "ETA_K": "default(1.0)"}},
+    "convention_note": "min_clr = BODY clearance (drone surface to obstacle surface), measured at end-of-tick against end-of-tick movers (endpoint measurement; the pending swept-contact upgrade will tighten these numbers). NOT comparable to pre-2026-07-20 centre-based ledgers (delta ~= -0.25m +- retiming)."
   },
   "seeds": {
-    "3":  {"t_goal": 8.8,  "min_clr": 0.550, "collided": false, "reached": true, "switches": 14, "spchurn": 53.5, "jerk": 49.79, "hold": 1},
-    "5":  {"t_goal": 9.8,  "min_clr": 0.853, "collided": false, "reached": true, "switches": 13, "spchurn": 43.3, "jerk": 31.31, "hold": 0},
-    "7":  {"t_goal": 7.5,  "min_clr": 2.041, "collided": false, "reached": true, "switches": 2,  "spchurn": 20.8, "jerk": 28.89, "hold": 0},
-    "12": {"t_goal": 11.6, "min_clr": 0.695, "collided": false, "reached": true, "switches": 20, "spchurn": 72.0, "jerk": 59.53, "hold": 6},
-    "19": {"t_goal": 7.5,  "min_clr": 2.463, "collided": false, "reached": true, "switches": 5,  "spchurn": 35.0, "jerk": 37.46, "hold": 0},
-    "23": {"t_goal": 11.5, "min_clr": 0.654, "collided": false, "reached": true, "switches": 18, "spchurn": 62.7, "jerk": 37.78, "hold": 6}
+    "3":  {"t_goal": 8.8,  "min_clr": 0.550, "collided": false, "reached": true, "evade": 0, "uncertified_exposure_ticks": 1, "switches": 14, "spchurn": 53.5, "jerk": 49.79},
+    "5":  {"t_goal": 9.8,  "min_clr": 0.853, "collided": false, "reached": true, "evade": 0, "uncertified_exposure_ticks": 0, "switches": 13, "spchurn": 43.3, "jerk": 31.31},
+    "7":  {"t_goal": 7.5,  "min_clr": 2.041, "collided": false, "reached": true, "evade": 0, "uncertified_exposure_ticks": 0, "switches": 2,  "spchurn": 20.8, "jerk": 28.89},
+    "12": {"t_goal": 11.6, "min_clr": 0.695, "collided": false, "reached": true, "evade": 0, "uncertified_exposure_ticks": 6, "switches": 20, "spchurn": 72.0, "jerk": 59.53},
+    "19": {"t_goal": 7.5,  "min_clr": 2.463, "collided": false, "reached": true, "evade": 0, "uncertified_exposure_ticks": 0, "switches": 5,  "spchurn": 35.0, "jerk": 37.46},
+    "23": {"t_goal": 11.5, "min_clr": 0.654, "collided": false, "reached": true, "evade": 0, "uncertified_exposure_ticks": 6, "switches": 18, "spchurn": 62.7, "jerk": 37.78}
   },
   "mean_t_goal": 9.45,
-  "clean_arrival": "6/6 (reached, zero collision, zero uncertified emergency)",
+  "summary": {"reached": "6/6", "collisions": 0, "zero_evade": true,
+              "uncertified_exposure_ticks_total": 13,
+              "note": "uncertified_exposure_ticks = boxed-HOLD backstop ticks (RTA / U-class exposure under the U-P-Q-D algebra). zero_evade does NOT mean fully-certified flight: s3/s12/s23 carry HOLD exposure."},
   "ladder_context": {
     "old_smoother_pre_audit_mean": 10.37,
     "verbatim_only_mean": 9.78,

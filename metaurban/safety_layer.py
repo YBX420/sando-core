@@ -12,6 +12,7 @@ Cloud-building and execution (3-D static scene + quad dynamics in render vs move
 stay caller-specific -- that is the legitimate scenario/realism difference, not the avoidable code drift.
 """
 import os, json
+import hashlib
 import math
 import numpy as np
 
@@ -1353,9 +1354,64 @@ def v_cap(d_free, a_max, t_react=0.30, margin=1.0):
 _decide_v2_core = maneuver_decide_v2
 
 
-def maneuver_decide_v2(ego, p_d, v_d, a_d, goal, ztop, cyl, state,
-                       cruise_z=CRUISE_Z, horizon=HORIZON, straight_clip=None,
-                       tau=TAU, delta=None, speeds=None, **kw):
+_RECEIPT_SEQ = [0]
+_CALIB_STAMP_C = [None]
+
+
+def _receipt_calib_stamp():
+    """Which calibration law is in force (file sha + eps), stamped once per process."""
+    if _CALIB_STAMP_C[0] is None:
+        if os.environ.get("CAPSULE", "0") == "1":
+            p = os.environ.get("CALIB_FILE_V6") or os.path.join(_OUTDIR, "calib_v6.json")
+        elif os.environ.get("ELLIPSE", "0") == "1":
+            p = os.environ.get("CALIB_FILE_V5") or os.path.join(_OUTDIR, "calib_v5.json")
+        elif os.environ.get("CALIB_V2", "0") == "1":
+            p = os.environ.get("CALIB_FILE") or os.path.join(_OUTDIR, "calib_v2.json")
+        else:
+            p = os.path.join(_OUTDIR, "calib.json")
+        try:
+            sha = hashlib.sha256(open(p, "rb").read()).hexdigest()[:16]
+        except Exception:
+            sha = None
+        _CALIB_STAMP_C[0] = dict(file=os.path.basename(p), sha=sha, eps=_calib_eps(None))
+    return _CALIB_STAMP_C[0]
+
+
+def make_receipt(kind, s, certified, ego, cyl, window, delta, gates, track_ids=None, schedule=None):
+    """One CERTIFICATE RECEIPT per decision tick (07-20 ruling): the ledger's 'certified tick'
+    must trace to a real certificate object, never be inferred from the maneuver kind string.
+    Fields trace the proof chain: WHICH plan (plan_hash = the spline ego is left holding + the
+    gear/schedule), against WHICH world (obstacle snapshot rows: (track_id, x, y, R); ids default
+    to row indices until the perception front-end threads stable ids), under WHICH law
+    (calibration file sha + eps), over WHICH window (the caller stamps valid_from/valid_until =
+    t, t+window when it books the tick)."""
+    _RECEIPT_SEQ[0] += 1
+    ph = None
+    try:
+        cp, u0s, dus = ego.get_bsegs()
+        hh = hashlib.sha256(np.ascontiguousarray(np.asarray(cp, float)).tobytes())
+        hh.update(np.asarray(u0s, float).tobytes()); hh.update(np.asarray(dus, float).tobytes())
+        hh.update(np.float64(float(s)).tobytes())
+        if schedule:
+            hh.update(repr(schedule).encode())
+        ph = hh.hexdigest()[:16]
+    except Exception:
+        pass
+    snap = []
+    for j, ent in enumerate(cyl):
+        (c0, vv, aa, R, zc, veff) = ent[:6]
+        tid = (track_ids[j] if track_ids is not None and j < len(track_ids) else j)
+        snap.append((tid, round(float(c0[0]), 2), round(float(c0[1]), 2), round(float(R), 2)))
+    return dict(cert_id=_RECEIPT_SEQ[0], kind=kind, s=float(s), certified=bool(certified),
+                plan_hash=ph, schedule=(list(schedule) if schedule else None),
+                obstacle_snapshot=hashlib.sha256(repr(snap).encode()).hexdigest()[:16],
+                tracks=snap, calib=_receipt_calib_stamp(),
+                window=float(window), delta=float(delta), gates=dict(gates))
+
+
+def _decide_v2_slew(ego, p_d, v_d, a_d, goal, ztop, cyl, state,
+                    cruise_z=CRUISE_Z, horizon=HORIZON, straight_clip=None,
+                    tau=TAU, delta=None, speeds=None, **kw):
     """SPEED_SLEW=1 wrapper: the winner speed moves at most ONE grid step per tick from the last
     flown gear (incremental vector edit, no jumps -> kills speed churn). A slewed gear is a
     different trajectory-in-time so it must RE-PASS the certificate on the winner plan; if it
@@ -1400,3 +1456,26 @@ def maneuver_decide_v2(ego, p_d, v_d, a_d, goal, ztop, cyl, state,
             s_c = s
     state["s_prev"] = s_c
     return kind, s_c
+
+
+def maneuver_decide_v2(ego, p_d, v_d, a_d, goal, ztop, cyl, state,
+                       cruise_z=CRUISE_Z, horizon=HORIZON, straight_clip=None,
+                       tau=TAU, delta=None, speeds=None, cyl_ids=None, **kw):
+    """Certificate-receipt wrapper (07-20 ruling), the public entry. Invariant of the v2
+    tournament (all return paths, slew wrapper included): a non-'evade' return IS certified on
+    the spline ego is left holding, at the returned gear -- every path either certifies in-loop,
+    re-certifies after winner-restore, or re-certifies its own edit (slew / M3 adoption). The
+    receipt in state['receipt'] is what the ledger keys certified-tick accounting off."""
+    kind, s = _decide_v2_slew(ego, p_d, v_d, a_d, goal, ztop, cyl, state, cruise_z=cruise_z,
+                              horizon=horizon, straight_clip=straight_clip, tau=tau, delta=delta,
+                              speeds=speeds, **kw)
+    certified = (kind != "evade")
+    d = (tau if delta is None else delta)
+    t_c = min(tau, 0.30 + 0.5 * s + 0.05) \
+        if (certified and os.environ.get("TAU_SPEED", "0") == "1") else tau
+    state["receipt"] = make_receipt(kind, s, certified, ego, cyl, t_c, d,
+                                    gates=dict(stc=state.get("stc") is not None,
+                                               warp=bool(certified and 0.0 < s < 0.999),
+                                               slew=os.environ.get("SPEED_SLEW", "0") == "1"),
+                                    track_ids=cyl_ids)
+    return kind, s
