@@ -2726,14 +2726,22 @@ while not quit_now:
             #  work (commit hysteresis)" -- that future is maneuver_decide_v2's speed grid.)
             elif args.maneuver and ego_dur > 1e-3:
                 # CCF yield-behind warp: ego_maneuver_replan returns the fastest certified speed on the COMMITTED side
-                # (1.0 unless it is slowing behind a crosser to HOLD the side instead of switching). Brake fast, release slow.
+                # (1.0 unless it is slowing behind a crosser to HOLD the side instead of switching).
                 g_raw = float(man_g)
                 if EGO_STC and _MAN_V2.get("stc"):
                     ego_speed_g = g_raw          # M3: committed gear flies VERBATIM (flown==certified;
                     #   the schedule is one-notch-slew legal by DP construction, smooth by design)
                 elif MAN_GAPSPEED and g_raw > 1.001 and g_raw > ego_g_prev:
                     ego_speed_g = g_raw          # certified reachable sprint: no artificial slow-release
+                elif EGO_DECIDE == "v2":
+                    # fly the tournament gear VERBATIM (audit finding #1): v2 paces release itself
+                    # (one-grid-step per tick, dwell-gated, each step CERTIFIED at that gear). The
+                    # old EGO_G_RELEASE low-pass on top produced OFF-GRID gears no certificate ever
+                    # covered (cert 1.0, prev 0.3 -> flew 0.45); slower is NOT automatically safer
+                    # against a PREDICTED mover tube -- pass-behind timing shifts under the warp.
+                    ego_speed_g = g_raw
                 else:
+                    # v1 legacy tournament has no certified speed grid -> keep its historical smoother
                     ego_speed_g = g_raw if g_raw < ego_g_prev else min(g_raw, ego_g_prev + EGO_G_RELEASE)
                 ego_g_prev = ego_speed_g
                 if ego_speed_g >= 0.999:
