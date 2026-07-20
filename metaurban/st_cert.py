@@ -92,10 +92,12 @@ def retime(cp, u0s, dus, profile, u_start=0.0):
         t += dt_real; u = u_hi
     if not out_cp:
         raise ValueError("empty profile")
-    # TILING LAW: contiguous, no gaps/overlaps, total duration exact
+    # TILING LAW: contiguous, no gaps/overlaps, total duration exact. A single segment tiles
+    # trivially (empty-diff np.max raised ValueError here -> spurious cert-fail DROP near the
+    # spline end; 2026-07-20 audit finding #10).
     t0a = np.asarray(out_t0); dua = np.asarray(out_dur)
     ends = t0a + dua
-    if np.max(np.abs(t0a[1:] - ends[:-1])) > 1e-6:
+    if len(t0a) > 1 and np.max(np.abs(t0a[1:] - ends[:-1])) > 1e-6:
         raise AssertionError("piecewise-cert tiling violated (gap/overlap between segments)")
     total = float(sum(dt for dt, _s in profile if dt > 1e-9))
     if abs(float(ends[-1]) - total) > 1e-6:
@@ -134,6 +136,14 @@ def certify_profile(ego, cyl, profile, tau, delta, u_start=0.0):
         (c0, vv, aa, R, zc, veff) = ent[:6]
         cap = ent[6] if (len(ent) > 6 and ent[6] is not None and isinstance(ent[6], tuple)
                          and len(ent[6]) >= 2 and ent[6][0] == "cap") else None
+        if cap is None and len(ent) > 6 and ent[6] is not None and isinstance(ent[6], tuple) \
+                and len(ent[6]) > 0 and not isinstance(ent[6][0], str):
+            # ELLIPSE (v5) row: along-track semi-axis kappa*r_geom+q EXCEEDS the row's isotropic
+            # R=r_geom+q, so judging it as a centred circle UNDER-covers the calibrated keep-out
+            # (2026-07-20 audit finding #6). No anisotropic ST certificate exists -> FAIL LOUD,
+            # never silently mis-certify. ELLIPSE=1 + ST_SPEED/ST_COMMIT is a forbidden combo.
+            raise AssertionError("ellipse-tagged mover has no anisotropic piecewise-warp certificate "
+                                 "(ELLIPSE=1 with ST_SPEED/ST_COMMIT is forbidden)")
         if cap is not None:
             hb, mh = True, np.inf
             for s in _cap_grid(int(cap[1])):

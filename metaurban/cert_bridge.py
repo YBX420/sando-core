@@ -97,13 +97,35 @@ def native_bezier_to_bseg(ctrl_pts, durs):
     return ctrl_pts, t0s, durs
 
 
+def _guard(ctrl_pts, t0s, durs, extras, who):
+    """FAIL-CLOSED input contract for the arbitrary-trajectory API (2026-07-20 audit finding #7):
+    non-finite coefficients would FALSE-CERTIFY downstream (NaN compares false -> deficit hull
+    stays -inf), degree > 30 overflows the C++ long binomials. Refuse LOUDLY, never silently."""
+    if ctrl_pts.ndim != 3 or ctrl_pts.shape[2] != 3:
+        print(f"[cert_bridge] {who}: ctrl_pts shape {ctrl_pts.shape} != (n_seg, deg+1, 3) -> FAIL-CLOSED", flush=True)
+        return False
+    if ctrl_pts.shape[1] - 1 > 30:
+        print(f"[cert_bridge] {who}: degree {ctrl_pts.shape[1] - 1} > 30 (long-binomial overflow) -> FAIL-CLOSED", flush=True)
+        return False
+    if not (np.isfinite(ctrl_pts).all() and np.isfinite(t0s).all() and np.isfinite(durs).all()
+            and all(np.isfinite(np.asarray(e, float)).all() for e in extras)):
+        print(f"[cert_bridge] {who}: non-finite input -> FAIL-CLOSED", flush=True)
+        return False
+    return True
+
+
 class Certifier:
-    """Run the continuous-time Bernstein cert on arbitrary BSeg (ctrl_pts, t0s, durs)."""
+    """Run the continuous-time Bernstein cert on arbitrary BSeg (ctrl_pts, t0s, durs).
+    NB the C++ core clips the window to the trajectory's own end: t_hi > total duration certifies
+    only [0, t_end] -- the caller owns checking the committed trajectory spans its trust window."""
 
     @staticmethod
     def certify_horizontal(ctrl_pts, t0s, durs, c0, R, vel=(0, 0, 0), acc=(0, 0, 0),
                            t_hi=-1.0, v_eff=0.0, delta=0.0, n_axes=2):
         ctrl_pts = np.asarray(ctrl_pts, float)
+        t0s = np.asarray(t0s, float); durs = np.asarray(durs, float)
+        if not _guard(ctrl_pts, t0s, durs, (c0, R, vel, acc, v_eff, delta), "certify_horizontal"):
+            return False, float("-inf")
         n_seg, npts, _ = ctrl_pts.shape; deg = npts - 1
         _cp, cp = _p(ctrl_pts); _t, t0 = _p(t0s); _du, du = _p(durs)
         _c, cc = _p(c0); _v, vv = _p(vel); _a, aa = _p(acc)
@@ -115,6 +137,9 @@ class Certifier:
     @staticmethod
     def certify_above(ctrl_pts, t0s, durs, z_clear, t_hi=-1.0, v_eff_z=0.0, delta=0.0, bez_pad=1e-9):
         ctrl_pts = np.asarray(ctrl_pts, float)
+        t0s = np.asarray(t0s, float); durs = np.asarray(durs, float)
+        if not _guard(ctrl_pts, t0s, durs, (z_clear, v_eff_z, delta, bez_pad), "certify_above"):
+            return False, float("-inf")
         n_seg, npts, _ = ctrl_pts.shape; deg = npts - 1
         _cp, cp = _p(ctrl_pts); _t, t0 = _p(t0s); _du, du = _p(durs)
         m = C.c_double(0.0)

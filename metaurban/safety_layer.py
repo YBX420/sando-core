@@ -29,7 +29,16 @@ HORIZON = 7.5
 _OUTDIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "out", "conformal")
 
 
-def load_calib(eps=0.05):
+def _calib_eps(eps):
+    """Single source of truth for the risk tier: explicit arg > CALIB_EPS env > 0.05.
+    (2026-07-20 audit finding #8: bench_shard/probe_v3 exported CALIB_EPS=0.10 but every loader
+    pinned eps=0.05 -- the labelled risk tier and the flown tubes disagreed. Loaders now honour
+    the env; callers passing eps explicitly are untouched.)"""
+    return float(eps) if eps is not None else float(os.environ.get("CALIB_EPS", "0.05"))
+
+
+def load_calib(eps=None):
+    eps = _calib_eps(eps)
     """class -> (q_conformal, v_eff) at this eps from out/conformal/calib.json (the SAME file both paths read).
     Falls back to a conservative hand value if missing."""
     path = os.path.join(_OUTDIR, "calib.json")
@@ -557,6 +566,12 @@ if _STC_ON:
           f"adopt(T={_STC_ADOPT_T}s,S={_STC_ADOPT_S}) refract={_STC_REFRACT} dn={_STC_DN}"
           + (" -- ST_SPEED in-rank stage DISABLED (ST_COMMIT owns the schedule)" if _ST_ON else ""),
           flush=True)
+# FORBIDDEN COMBO (2026-07-20 audit finding #6): the piecewise-warp ST certificate has no
+# anisotropic judge; an ellipse row would silently be certified as its SMALLER centred circle
+# (along-track semi-axis kappa*r_geom+q > row R). st_cert.certify_profile carries a fail-closed
+# backstop; this is the loud front door.
+assert not ((_ST_ON or _STC_ON) and os.environ.get("ELLIPSE", "0") == "1"), \
+    "ELLIPSE=1 with ST_SPEED/ST_COMMIT is forbidden: no anisotropic piecewise-warp certificate"
 
 
 def _st_load(ego):
@@ -1241,10 +1256,11 @@ def maneuver_decide_v2(ego, p_d, v_d, a_d, goal, ztop, cyl, state,
     return dk, s_ok
 
 
-def load_calib_v2(eps=0.05):
+def load_calib_v2(eps=None):
     """FS3C-R consumer: class -> dict(mature=(q0, v_eff), young=(q0y, growth), status).
     FAIL-CLOSED: an UNCALIBRATED / missing class gets q0=1e6 (nothing near it certifies) and a
     loud log line -- never a silent optimistic fallback (spec ruling #20 / #13)."""
+    eps = _calib_eps(eps)
     path = (os.environ.get("CALIB_FILE") or os.path.join(_OUTDIR, "calib_v2.json"))
     rep = json.load(open(path))                     # missing file = hard crash, intended
     out = {}
@@ -1267,10 +1283,11 @@ def load_calib_v2(eps=0.05):
     return out
 
 
-def load_calib_v6(eps=0.05):
+def load_calib_v6(eps=None):
     """v6 CAPSULE (segment conformal) consumer: same entry shape as v2 plus capsule=True and
     n_pearls. The mature law's q̃/v_eff are DIST-TO-SEGMENT quantities -- only sound when the cert
     covers the whole segment [c0, c0+v*t] (pearl string), never as a plain centred circle."""
+    eps = _calib_eps(eps)
     path = (os.environ.get("CALIB_FILE_V6") or os.path.join(_OUTDIR, "calib_v6.json"))
     rep = json.load(open(path))
     out = {}
@@ -1295,11 +1312,12 @@ def load_calib_v6(eps=0.05):
     return out
 
 
-def load_calib_v5(eps=0.05):
+def load_calib_v5(eps=None):
     """lambda-SHAPE-HE (v5, ELLIPTICAL motion-frame conformal) consumer: same entry shape as
     load_calib_v2 PLUS per-class 'kappa' (frozen along/cross aspect, >=1) and the shared
     'v_min_dir' (KF speed below which the direction is untrusted -> isotropic circle).
     FAIL-CLOSED like v2: missing class = q0 1e6, kappa 1."""
+    eps = _calib_eps(eps)
     path = (os.environ.get("CALIB_FILE_V5") or os.path.join(_OUTDIR, "calib_v5.json"))
     rep = json.load(open(path))                     # missing file = hard crash, intended
     out = {}

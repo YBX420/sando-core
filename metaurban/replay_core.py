@@ -112,9 +112,11 @@ CLS_H = {"pedestrian": 1.80, "vehicle": 1.60, "animal": 1.00}
 WIN = 9.0                                              # episode window length (s)
 
 
-def load_calib(eps=0.05):
+def load_calib(eps=None):
     """Return dict class -> (q_conformal, v_eff) at the given eps, from calib.json. Falls back to 'all', then
-    to a conservative hand value if a class is missing."""
+    to a conservative hand value if a class is missing. eps=None -> CALIB_EPS env -> 0.05 (single
+    source of truth for the risk tier, audit finding #8)."""
+    eps = float(eps) if eps is not None else float(os.environ.get("CALIB_EPS", "0.05"))
     path = os.path.join(OUTDIR, "calib.json")
     out = {}
     if os.path.exists(path):
