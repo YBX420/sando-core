@@ -309,8 +309,11 @@ def run_replay(movers, ep, mode="ours", calib=None, predict=True, max_vel=3.0, m
     rng = np.random.default_rng(int(os.environ.get("PERCEPT_SEED", 1234567)))
     # ^ detection-noise stream follows PERCEPT_SEED in BOTH gt and realistic modes: otherwise the gt
     #   arms are deterministic and N "resamples" are one run copied N times (fake sample size).
-    if PERCEPT_HARVEST is not None:
-        _HARV_EP[0] += 1                                   # episode id for exchangeable-unit splitting
+    # 07-20 harvest contract: the episode id is the CALLER's registered identity -- run_replay must
+    # never mutate it. The old `_HARV_EP[0] += 1` here shifted every harvest row one episode ahead
+    # of its manifest entry (the diagnosed off-by-one: pool-internal statistics survived because
+    # the shift was uniform, but manifest cross-referencing was silently wrong, and the v3 merge's
+    # registration-equality check flagged 16 phantom 'zero-row' episodes on the pilot).
     # PERCEPT=realistic swaps OUR mover perception for the shared front-end (perception.py): FOV cone +
     # occlusion + distance miss/noise + NN-associated tracks with NO GT identity. Default stays "gt"
     # (omniscient control) until the B-bucket recalibration -- never silently change a headline's meaning.
