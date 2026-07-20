@@ -65,12 +65,16 @@ def _current_cloud(dets, movers, p_d, fov_r=12.0):
     return np.asarray(pts, float) if pts else np.zeros((0, 3))
 
 
+R_DRONE = 0.25   # quadrotor body radius: measurement convention matches the planning keep-outs
+
+
 def _clearance(p, c_xy, r, h):
-    """Signed clearance from drone point p to the solid cylinder (radius r, z in [0,h]). <0 => collision."""
+    """Signed BODY clearance from the drone (surface, radius R_DRONE) to the solid cylinder
+    (radius r, z in [0,h]). <0 => body contact. (2026-07-20 audit #4: was centre-based.)"""
     horiz = math.hypot(p[0] - c_xy[0], p[1] - c_xy[1])
     if p[2] <= h:
-        return horiz - r
-    return math.hypot(max(0.0, horiz - r), p[2] - h)
+        return horiz - r - R_DRONE
+    return math.hypot(max(0.0, horiz - r), p[2] - h) - R_DRONE
 
 
 def _rot(v2, ang):
@@ -200,11 +204,11 @@ def run_episode(mode="ours", max_vel=None, scene_name=None, seed=2026, record=Fa
         max_z = max(max_z, float(p_d[2]))
         tick_clr = 1e18; worst_m = None
         for c, v, r, h in movers:
-            cl = _clearance(p_d, c[:2], r, h)
-            if cl < tick_clr:
-                tick_clr = cl; worst_m = c[:2].copy()
+            c[:2] += v[:2] * DT                       # movers advance over THIS tick too: measure the
+            cl = _clearance(p_d, c[:2], r, h)         # stepped drone against t+DT movers (audit #4;
+            if cl < tick_clr:                         # next tick's decision saw the updated state
+                tick_clr = cl; worst_m = c[:2].copy() # either way -- measurement-only change)
             min_clr = min(min_clr, cl)
-            c[:2] += v[:2] * DT
         if record:
             hist.append(dict(tick=tick, clr=round(tick_clr, 3), kind=kind, z=round(float(p_d[2]), 2),
                              p=[round(float(p_d[0]), 2), round(float(p_d[1]), 2)],
