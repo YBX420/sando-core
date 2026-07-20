@@ -55,6 +55,11 @@ class PerceptCfg:
         # an EXPLICIT short leash (no 0-means-inherit sentinel).
         self.confirmed_ttl_s = float(confirmed_ttl_s)
         self.tentative_ttl_s = float(tentative_ttl_s)
+        from kf_tracker import _COAST_TAU_A
+        assert self.confirmed_ttl_s <= _COAST_TAU_A + 1e-9, (
+            f"confirmed_ttl_s={self.confirmed_ttl_s} exceeds the coast-dominance horizon "
+            f"TAU_A={_COAST_TAU_A}: the A+ conservatism proof (sigma_v >= |a_held|*T) only covers "
+            f"T <= TAU_A -- raise TAU_A with a new proof or lower the TTL (07-20 fail-loud ruling)")
         self.dt = float(dt)
         self.ttl_ticks = max(1, int(round(self.confirmed_ttl_s / self.dt)))   # legacy READERS only
         self.fp_rate = float(fp_rate)          # Poisson clutter detections per tick, uniform in the cone (0=off)
