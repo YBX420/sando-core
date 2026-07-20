@@ -551,7 +551,16 @@ def run_replay(movers, ep, mode="ours", calib=None, predict=True, max_vel=3.0, m
                                                    + ((_HARV_SCN[0], int(_QUAL_MEMO.get(gi, True)),
                                                        int(tr.trk.miss > 0),          # coast flag (theta3)
                                                        float(getattr(tr.trk, "sigma_v", 0.0)),
-                                                       _ea, _ec, _spd, _esg, _erb, _etp)   # + signed overruns (v6.1)
+                                                       _ea, _ec, _spd, _esg, _erb, _etp,  # + signed overruns (v6.1)
+                                                       # 07-20 harvest contract: the EGO_MEM_K /
+                                                       # coast-pricing analysis needs the filter's
+                                                       # own uncertainty per row, not just flags
+                                                       float(getattr(tr.trk, "pos_sigma", 0.0)),
+                                                       float(getattr(tr, "miss_s", 0.0)),
+                                                       float(np.hypot(tr.trk.fx.x[2], tr.trk.fy.x[2])),
+                                                       0.0)   # mem_margin: replay cert prices coast
+                                                      #   via the calibrated plates, no MEM_K margin
+                                                      #   on this face (renderer face fills it)
                                                       if _HARV_V2 else ()))
             else:
                 percepts = [(trackers[i], dets[i], movers.m[i]["r"], movers.m[i]["h"], movers.m[i]["cls"])

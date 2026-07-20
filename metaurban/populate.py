@@ -16,13 +16,71 @@ Usage (metaurban conda env; builds the map to read its geometry):
   ./metadrone.sh gen --seed 3 --peds 8 --vehicles 3 --out scenarios/street_life.json
 """
 import argparse
+import hashlib
 import json
 import os
+import subprocess
 
 import numpy as np
 
 import scenario_lib as SLB
 import urban_rules as UR
+
+try:
+    _GEN_COMMIT = subprocess.check_output(
+        ["git", "rev-parse", "--short", "HEAD"],
+        cwd=os.path.dirname(os.path.abspath(__file__)), text=True).strip()
+except Exception:
+    _GEN_COMMIT = "unknown"
+
+
+def _encounter_ok(scn, tol_s=1.0):
+    """SPACETIME encounter acceptance (07-20 generator fix): at least one retimed mover truly
+    crosses the FINAL corridor within tol_s of the drone's own arrival at that crossing point
+    (v_nom cruise from the FINAL start). Timing bookkeeping is not proof; this is the check."""
+    st = np.asarray(scn["drone"]["start"][:2], float)
+    gl = np.asarray(scn["drone"]["goal"][:2], float)
+    L = float(np.linalg.norm(gl - st))
+    v_nom = float(scn.get("_v_nom", 2.4))
+    n_ok = 0
+    for m in scn["movers"]:
+        if not m.get("_retimed"):
+            continue
+        path = np.asarray(m["path"], float)
+        seg_off = 0.0
+        for k in range(len(path) - 1):
+            frac = _seg_cross(st, gl, path[k], path[k + 1])
+            if frac is None:
+                seg_off += float(np.linalg.norm(path[k + 1] - path[k]))
+                continue
+            cross = st + frac * (gl - st)
+            t_drone = frac * L / v_nom
+            spd = m["speed"] if not isinstance(m["speed"], dict) else m["speed"].get("v1", 5.0)
+            spd = max(0.3, float(spd) if not isinstance(spd, str) else 5.0)
+            t_mover = float(m["spawn_t"]) + (seg_off + float(np.linalg.norm(cross - path[k]))) / spd
+            if abs(t_mover - t_drone) <= tol_s:
+                n_ok += 1
+            break
+    scn["encounters_verified"] = n_ok
+    return n_ok >= 1
+
+
+def _finalize_scn(scn, name, family, params, map_seed, block, gen_seed, cluster=None):
+    """Strip working markers and stamp the provenance block (07-20 generator fix): generator
+    commit, seed, family, params, map seed, block, cluster (same-world multistarts share one
+    cluster -- they must never masquerade as independent scenarios) and the scenario SHA."""
+    for m in scn["movers"]:
+        m.pop("_retimed", None)
+    scn.pop("_v_nom", None)
+    scn["name"] = name
+    scn["provenance"] = dict(generator_commit=_GEN_COMMIT, gen_seed=int(gen_seed),
+                             family=str(family), params=dict(params),
+                             map_seed=int(map_seed), block=str(block),
+                             cluster=str(cluster or name))
+    blob = json.dumps({k: v for k, v in scn.items() if k != "provenance"},
+                      sort_keys=True, default=str)
+    scn["provenance"]["scenario_sha"] = hashlib.sha256(blob.encode()).hexdigest()[:16]
+    return scn
 
 PED_SPEED_MU, PED_SPEED_SD = 1.3, 0.25
 VEH_SPEED_LO, VEH_SPEED_HI = 4.0, 8.0
@@ -256,6 +314,8 @@ def _contest(scn, rng, crossers, n_anchor=3, occlude=True, veh_align=True, L=36.
         w = min_pair_dist(scn)
         if w is None or w[2] >= w[3]:
             timed = True
+            anchor["_retimed"] = True                     # encounter bookkeeping (07-20 generator fix):
+            scn["_v_nom"] = 2.4                           #   pushback re-timing + spacetime validation
             break
         anchor["spawn_t"] = old_spawn                     # this anchor can't retime legally: next one
     if timed and n_anchor > 1:
@@ -293,8 +353,10 @@ def _contest(scn, rng, crossers, n_anchor=3, occlude=True, veh_align=True, L=36.
             w = min_pair_dist(scn)
             if w is not None and w[2] < w[3]:
                 m["spawn_t"] = old_sp                     # breach -> revert this one
-            elif m["cls"] == "pedestrian":
-                n_extra += 1
+            else:
+                m["_retimed"] = True
+                if m["cls"] == "pedestrian":
+                    n_extra += 1
         if occlude and eng is not None:
             import urban_rules as UR
             boards = 0
@@ -315,7 +377,8 @@ def _contest(scn, rng, crossers, n_anchor=3, occlude=True, veh_align=True, L=36.
     scn["description"] += (" CONTESTED: corridor crosses the anchor crosser, arrivals time-aligned."
                            if timed else
                            " CONTESTED(spatial): no anchor could retime within spacing floors.")
-    _ensure_clear_start(scn)
+    if _ensure_clear_start(scn) is None:
+        scn["_reject"] = True                             # 07-20: no safe start / broken retime = REJECT
     return scn
 
 
@@ -358,13 +421,34 @@ def _ensure_clear_start(scn, r_clear=3.0, t_window=3.0, max_back=16.0):
     while back <= max_back and not clear(st - axis * back):
         back += 2.0
     if back > max_back:
-        scn["description"] += " [WARN: no clear takeoff spot found within 16 m backoff]"
-        print(f"[populate] WARN {scn.get('name')}: takeoff zone NOT clear after {max_back} m backoff")
-        return
+        scn["description"] += " [REJECT: no clear takeoff spot within 16 m backoff]"
+        print(f"[populate] REJECT {scn.get('name')}: takeoff zone NOT clear after {max_back} m backoff")
+        return None                                        # 07-20 generator fix: no safe start = REJECT
     if back > 0:
         d["start"] = [round(float(st[0] - axis[0] * back), 2),
                       round(float(st[1] - axis[1] * back), 2), d["start"][2]]
-        print(f"[populate] {scn.get('name')}: start moved back {back:.0f} m for a clear takeoff zone")
+        # RE-TIME after the pushback (07-20 generator fix): every retimed encounter was aligned to
+        # the ORIGINAL start; moving the start back by `back` delays the drone at every crossing
+        # point by back/v_nom -- shift the retimed movers' spawn_t by the same amount, then
+        # re-verify the launch window (a shifted mover may now conflict with takeoff).
+        v_nom = float(scn.get("_v_nom", 2.4))
+        n_shift = 0
+        for m in scn["movers"]:
+            if m.get("_retimed"):
+                m["spawn_t"] = round(float(m["spawn_t"]) + back / v_nom, 1)
+                n_shift += 1
+        if n_shift:
+            print(f"[populate] {scn.get('name')}: start moved back {back:.0f} m; "
+                  f"{n_shift} retimed movers shifted +{back / v_nom:.1f}s to keep the encounter", flush=True)
+            st2 = np.asarray(d["start"][:2], float)
+            tracks[:] = [SLB.compile_mover(m, float(scn.get("t_max", 30.0))) for m in scn["movers"]]
+            if not clear(st2):
+                scn["description"] += " [REJECT: shifted encounter re-entered the takeoff window]"
+                print(f"[populate] REJECT {scn.get('name')}: retime shift broke the takeoff window", flush=True)
+                return None
+        else:
+            print(f"[populate] {scn.get('name')}: start moved back {back:.0f} m for a clear takeoff zone")
+    return back
 
 
 def main():
@@ -403,20 +487,35 @@ def main():
                 scn = _contest(scn, rng_a, [cr[i] for i in order] or
                                [m for m in scn["movers"] if m["cls"] == "pedestrian"],
                                n_anchor=3, occlude=True, veh_align=True)
-            else:
+            elif args.contested:
+                # 07-20 generator fix: --contested finally GATES this branch (it was unconditional)
                 scn = make_contested(scn, rng_a)
+            else:
+                if _ensure_clear_start(scn) is None:        # plain scene still needs a safe start
+                    scn["_reject"] = True
             scn.pop("_engine", None)
+            if scn.pop("_reject", False):
+                continue                                    # REJECT this attempt (no safe start)
+            if (args.hard or args.contested) and not _encounter_ok(scn):
+                continue                                    # contested INTENT without a true encounter
             pr = corridor_pressure(scn)
             if pr < best_p:
                 best_scn, best_stats, best_p = scn, stats, pr
             if pr <= 1.0:
                 break
+        if best_scn is None:
+            print(f"[populate] REJECT {out}: all 6 attempts failed eligibility "
+                  f"(no safe start / no true encounter)", flush=True)
+            return None
         scn, stats = best_scn, best_stats
         stats["pressure"] = round(best_p, 2)
         if best_p > 1.0:
             print(f"[populate] WARN {out}: geometry pressure {best_p:.1f}m > 1.0 after 6 tries")
         scn["map"] = dict(seed=args.map_seed, block_str=args.block)
-        scn["name"] = os.path.splitext(os.path.basename(out))[0]
+        _finalize_scn(scn, os.path.splitext(os.path.basename(out))[0], (tier or "custom"),
+                      dict(peds=nw, crossers=nc, vehicles=nv, hard=bool(args.hard),
+                           contested=bool(args.contested)),
+                      args.map_seed, args.block, seed)
         json.dump(scn, open(out, "w"), indent=1)
         print(f"[populate] {scn['name']}: {stats['n']} movers ({stats['dropped']} dropped), "
               f"worst pair {stats['worst_pair']}")
@@ -429,6 +528,8 @@ def main():
             for k in range(args.bench):
                 out = f"scenarios/bench/street_{tier}_s{k}.json"
                 st = one(k, tier, out)
+                if st is None:
+                    continue                                # rejected scene: no file, no manifest row
                 manifest.append(dict(file=out, tier=tier, seed=k, **st))
                 for ms in range(1, args.multistart + 1):    # same world, different departure corridor
                     scn = json.load(open(out))
@@ -436,10 +537,17 @@ def main():
                     scn["_engine"] = env.engine
                     scn = make_contested(scn, rng2)
                     scn.pop("_engine", None)
-                    scn["name"] = f"street_{tier}_s{k}_alt{ms}"
+                    if scn.pop("_reject", False) or not _encounter_ok(scn):
+                        continue                            # alt corridor failed eligibility
+                    _finalize_scn(scn, f"street_{tier}_s{k}_alt{ms}", tier,
+                                  dict(alt=ms, contested=True), args.map_seed, args.block, k,
+                                  cluster=f"street_{tier}_s{k}")
+                    #   ^ SAME WORLD = ONE CLUSTER (07-20): a multistart must never masquerade as
+                    #     an independent scenario in any exchangeability-sensitive split
                     out2 = f"scenarios/bench/street_{tier}_s{k}_alt{ms}.json"
                     json.dump(scn, open(out2, "w"), indent=1)
-                    manifest.append(dict(file=out2, tier=tier, seed=k, alt=ms))
+                    manifest.append(dict(file=out2, tier=tier, seed=k, alt=ms,
+                                         cluster=f"street_{tier}_s{k}"))
         json.dump(manifest, open("scenarios/bench/MANIFEST.json", "w"), indent=1)
         print(f"[populate] benchmark suite: {len(manifest)} scenes + MANIFEST.json")
     else:

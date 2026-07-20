@@ -749,22 +749,23 @@ def feed(sando, _cache, t_sim, p_drone):
         if np.linalg.norm(pos[:2] - p_drone[:2]) <= SENSE_R:
             if sando is not None:
                 _dt_into(sando, _cache, tid, size, pos, np.zeros(2), [], t_sim, z=min(float(size[2]), Z_CEIL) * 0.5)
-    fed.extend((c, c3, sz) for (c, c3, sz) in STATIC_FED if np.linalg.norm(c3[:2] - p_drone[:2]) <= SENSE_R)
-    # --- dynamic movers (per frame) ---
+    fed.extend((c, c3, sz, f"st{_i}") for _i, (c, c3, sz) in enumerate(STATIC_FED)
+               if np.linalg.norm(c3[:2] - p_drone[:2]) <= SENSE_R)
+    # --- dynamic movers (per frame); rows carry a STABLE object id (07-20 collider-identity law) ---
     for oid, cls, pos, vel, size in native_objects():
         if cls == "static": continue
         c3 = p3(pos, size[2] * 0.5)
         if np.linalg.norm(c3[:2] - p_drone[:2]) > SENSE_R: continue
         if sando is not None:
             _dt_into(sando, _cache, abs(hash(oid)) % 1000, size, pos, vel, CLASS_LABEL[cls], t_sim)
-        fed.append((cls, c3, size))
+        fed.append((cls, c3, size, str(oid)[:12]))
     for a in animals:
         pos = a.p0 + a.vel * t_sim; c3 = p3(pos, a.size[2] * 0.5)
         if np.linalg.norm(c3[:2] - p_drone[:2]) <= SENSE_R:
             if sando is not None:
                 _dt_into(sando, _cache, a.id, a.size, pos, a.vel,
                          CLASS_LABEL.get(getattr(a, "cls_name", "animal"), CLASS_LABEL["animal"]), t_sim)
-            fed.append(("animal", c3, a.size))
+            fed.append(("animal", c3, a.size, f"anim{a.id}"))
     if sando is not None:
         sando.update_occupancy_map_ptr(cloud)
     return fed
@@ -1619,6 +1620,10 @@ if "EGO_MEM_TICKS" in os.environ:
 else:
     MAN_MEM_TICKS = max(1, int(round(MAN_MEM_S / REPLAN_DT)))
 MAN_MEM_K = float(os.environ.get("EGO_MEM_K", 2.0))        # keep-out inflation = this many KF position-sigmas (covariance growth)
+from kf_tracker import _COAST_TAU_A as _KF_TAU_A
+assert MAN_MEM_TICKS * REPLAN_DT <= _KF_TAU_A + 1e-9, (
+    f"EGO memory {MAN_MEM_TICKS * REPLAN_DT:.2f}s exceeds the coast-dominance horizon "
+    f"TAU_A={_KF_TAU_A}: the A+ conservatism proof only covers T <= TAU_A (07-20 fail-loud ruling)")
 if _PFE is not None and not any(k in os.environ for k in ("PERCEPT_TTL_S", "PERCEPT_TTL")):
     _PFE.cfg.confirmed_ttl_s = MAN_MEM_TICKS * REPLAN_DT   # realistic memory horizon follows the SAME dial as gt
     # (a gt-vs-realistic A/B must not silently compare different memory policies)
@@ -2310,8 +2315,12 @@ def feed_native(t_sim, p_drone):
 
 
 def clearance(p, fed):
-    r = float(par.drone_radius); gmin = np.inf; per = {}
-    for cls, c3, size in fed:
+    """Returns (gmin, per-class min, PER-OBJECT list [(oid, cls, sd)]) -- the per-object column is
+    the collider-identity law (07-20): a collision ledger must name the object, not the class."""
+    r = float(par.drone_radius); gmin = np.inf; per = {}; objs = []
+    for row in fed:
+        cls, c3, size = row[0], row[1], row[2]
+        oid = row[3] if len(row) > 3 else f"{cls}?"
         d = p - c3; sz = np.asarray(size, float)
         if cls == "static":   # round trees/poles -> VERTICAL CYLINDER (radius = half the square footprint), not a box:
             R = 0.5 * sz[0]; hh = 0.5 * sz[2]              # matches the real round mesh; no over-conservative corners
@@ -2322,10 +2331,10 @@ def clearance(p, fed):
             halfb = 0.5 * sz
             outside = np.maximum(np.abs(d) - halfb, 0.0)
             sd = (np.linalg.norm(outside) if np.any(outside > 0) else -np.min(halfb - np.abs(d))) - r
-        gmin = min(gmin, sd); per[cls] = min(per.get(cls, np.inf), sd)
+        gmin = min(gmin, sd); per[cls] = min(per.get(cls, np.inf), sd); objs.append((oid, cls, float(sd)))
         if cls == "static" and sd < _min_static[0]:
             _min_static[0] = sd; _min_static[1] = np.asarray(size, float).copy(); _min_static[2] = np.asarray(p, float).copy()
-    return gmin, per
+    return gmin, per, objs
 
 
 FONT = cv2.FONT_HERSHEY_SIMPLEX
@@ -2557,8 +2566,8 @@ while not quit_now:
         best = (-1e9, route, axis, left)                                                      #  descend; seed23)
         for att in range(16):
             s0 = np.asarray(route[0], float); g0 = np.asarray(route[-1], float)
-            c0, _ = clearance(s0, feed(None, {}, 0.0, s0))
-            cg, _ = clearance(g0, feed(None, {}, 0.0, g0))   # GOAL must be OPEN too: a cluttered goal makes
+            c0, _, _o1 = clearance(s0, feed(None, {}, 0.0, s0))
+            cg, _, _o2 = clearance(g0, feed(None, {}, 0.0, g0))   # GOAL must be OPEN too: a cluttered goal makes
             gped = _goal_idle_ped_gap(g0[:2])                #   the drone climb near it and fail to descend
             score = min(min(c0, cg) - SPAWN_CLR_MIN, gped - GOAL_PED_MIN)  # BOTH must clear their targets
             if score > best[0]: best = (score, route, axis, left)
@@ -2979,26 +2988,29 @@ while not quit_now:
             # stale movers. feed(None, ...) is a pure reader; the next tick's decision rebuilds its
             # own fed at 'replan' time, so flight behaviour is untouched.
             fed = feed(None, _cache, t, p_d)
-        c, per = clearance(p_d, fed)
+        c, per, _objs = clearance(p_d, fed)
         _hits = []
         if args.maneuver:
             # SWEPT mover contacts over the tick (shared algebra; 07-20 ruling): drone chord vs
-            # mover chord (decision-time fed row paired to post-step row by class+proximity).
-            # UNDER-approx cylinder r = half the SHORT box side -- catches real within-tick
-            # penetrations, never false-alarms a long vehicle box; the box law keeps the ledger.
-            _prev_mv = [e for e in (fed_dec or []) if e[0] != "static"]
-            for (cls2, c3, sz) in fed:
+            # mover chord, decision-time row paired to post-step row BY OBJECT ID (collider-
+            # identity law: two same-class movers can no longer swap blame). UNDER-approx cylinder
+            # r = half the SHORT box side -- catches real within-tick penetrations, never
+            # false-alarms a long vehicle box; the box law keeps the ledger.
+            _prev_by_id = {row[3]: row for row in (fed_dec or [])
+                           if len(row) > 3 and row[0] != "static"}
+            for row in fed:
+                cls2, c3, sz = row[0], row[1], row[2]
                 if cls2 == "static":
                     continue
-                m1 = np.asarray(c3, float)[:2]; m0 = m1
-                for (cp2, cc3, _csz) in _prev_mv:
-                    if cp2 == cls2 and float(np.hypot(cc3[0] - c3[0], cc3[1] - c3[1])) < 1.5:
-                        m0 = np.asarray(cc3, float)[:2]; break
+                oid2 = row[3] if len(row) > 3 else f"{cls2}?"
+                m1 = np.asarray(c3, float)[:2]
+                _pr = _prev_by_id.get(oid2)
+                m0 = np.asarray(_pr[1], float)[:2] if _pr is not None else m1
                 cl2, s2 = CA.swept_clearance(p_prev_exec, p_d, m0, m1,
                                              0.5 * float(min(sz[0], sz[1])),
                                              float(c3[2]) + 0.5 * float(sz[2]))
                 if cl2 < -1e-6:
-                    _hits.append((cls2, cl2, s2, m0, m1))
+                    _hits.append((oid2, cls2, cl2, s2, m0, m1))
                     c = min(c, cl2)    # a within-tick penetration the endpoint law missed IS a hit
         mclr = min(mclr, c)
         if args.maneuver:
@@ -3011,19 +3023,21 @@ while not quit_now:
                 _rcp["executed_segment_hash"] = CA.executed_hash(p_prev_exec, p_d, _exec_src)
                 _rcp["exec_src"] = _exec_src
             if c < -1e-6 and not _hits:
-                # endpoint contact without a swept-cylinder hit (grazing corner the under-approx
-                # cylinder legitimately misses): book the offender by MOST-NEGATIVE per-class
-                # clearance -- nearest-centre picked the wrong object when a large clear mover sat
-                # closer than the small touching one (s19 forensic bug, 07-20).
-                _ncls = min((k for k in per if k != "static"), key=lambda k: per[k], default=None)
-                if _ncls is not None and per[_ncls] < -1e-6:
-                    _off = min(((cl3, c3, sz) for (cl3, c3, sz) in fed if cl3 == _ncls),
-                               key=lambda e: float(np.hypot(p_d[0] - e[1][0], p_d[1] - e[1][1])),
-                               default=None)
-                    if _off is not None:
-                        _m = np.asarray(_off[1], float)[:2]
-                        _hits = [(_ncls, float(per[_ncls]), 1.0, _m, _m)]
-            for (cls2, cl2, s2, m0, m1) in _hits:
+                # endpoint contact the under-approx swept cylinder legitimately missed (grazing
+                # corner): book the MOST-NEGATIVE dynamic OBJECT from the per-object column
+                # (nearest-centre and per-class both mis-attributed; s19 forensic, 07-20).
+                _worst = min((o for o in _objs if o[1] != "static"), key=lambda o: o[2],
+                             default=None)
+                if _worst is not None and _worst[2] < -1e-6:
+                    _row = next((r for r in fed if len(r) > 3 and r[3] == _worst[0]), None)
+                    if _row is not None:
+                        _m = np.asarray(_row[1], float)[:2]
+                        _hits = [(_worst[0], _worst[1], float(_worst[2]), 1.0, _m, _m)]
+            _all_contact = ([(o[0], o[1], o[2], "static" if o[1] == "static" else "dynamic")
+                             for o in _objs if o[2] < -1e-6]
+                            + [(h[0], h[1], h[2], "dynamic") for h in _hits
+                               if all(o[0] != h[0] for o in _objs if o[2] < -1e-6)])
+            for (oid2, cls2, cl2, s2, m0, m1) in _hits:
                 _tc = _t_dec + s2 * REPLAN_DT
                 _v = CA.attribute(receipt=_rcp, exec_src=_exec_src, contact_t=_tc,
                                   valid_from=(_rcp or {}).get("valid_from", _t_dec),
@@ -3032,15 +3046,16 @@ while not quit_now:
                                   delta=REPLAN_DT, track_state=None, domain=_ATTR_DOMAIN,
                                   p_subcode="unknown")
                 _ATTRIB.append(CA.collision_record(
-                    tick=iters, contact_t=_tc, collider_id=-1, collider_cls=cls2,
+                    tick=iters, contact_t=_tc, collider_id=oid2, collider_cls=cls2,
                     clearance=cl2, obj_scope="dynamic", verdict=_v,
-                    all_colliders=[(-1, h2[0], h2[1], "dynamic") for h2 in _hits]))
-                print(f"[attrib] t={_tc:.2f} {cls2} clr={cl2:+.3f} -> {_v['primary']} "
+                    all_colliders=_all_contact))
+                print(f"[attrib] t={_tc:.2f} {cls2}#{oid2} clr={cl2:+.3f} -> {_v['primary']} "
                       f"aux={_v['aux']}", flush=True)
             if per.get("static", 1e9) < -1e-6:
                 # statics carry NO conformal tube: a static hit on a certified plan tick is by
                 # definition a deterministic-chain violation (D); on an uncertified/override
                 # tick it is U. Total ledger never drops static contacts (07-20 ruling).
+                _sworst = min((o for o in _objs if o[1] == "static"), key=lambda o: o[2])
                 _pu = (_rcp is None or not _rcp.get("certified") or _exec_src != "plan")
                 _v = dict(primary=("U" if _pu else "D"), aux=["static_gate"],
                           domain=_ATTR_DOMAIN, tube_excess=None, tube_rho=None, pred_dist=None,
@@ -3048,16 +3063,16 @@ while not quit_now:
                           cert_id=(_rcp or {}).get("cert_id"), exec_src=_exec_src,
                           contact_t=round(float(t), 3))
                 _ATTRIB.append(CA.collision_record(
-                    tick=iters, contact_t=t, collider_id=-1, collider_cls="static",
-                    clearance=float(per["static"]), obj_scope="static", verdict=_v,
-                    all_colliders=[(-1, "static", float(per["static"]), "static")]))
-                print(f"[attrib] t={t:.2f} STATIC clr={per['static']:+.3f} -> {_v['primary']}",
-                      flush=True)
+                    tick=iters, contact_t=t, collider_id=_sworst[0], collider_cls="static",
+                    clearance=float(_sworst[2]), obj_scope="static", verdict=_v,
+                    all_colliders=_all_contact))
+                print(f"[attrib] t={t:.2f} STATIC#{_sworst[0]} clr={_sworst[2]:+.3f} -> "
+                      f"{_v['primary']}", flush=True)
         for k, val in per.items(): per_all[k] = min(per_all.get(k, np.inf), val)
         if c < -1e-6 and os.environ.get("MAN_COLLDBG") == "1":
             # which fed entry is the offender, and what did the cert see for it?
             hit_cls = min(per, key=per.get)
-            off = min(((cl, c3, sz) for (cl, c3, sz) in fed if cl == hit_cls),
+            off = min(((row[0], row[1], row[2]) for row in fed if row[0] == hit_cls),
                       key=lambda e: (np.linalg.norm((p_d - e[1])[:2]) - 0.5 * max(e[2][0], e[2][1])))
             ocls, oc3, osz = off
             # attribute against the SAME forward cone the planner/cert actually used (cam_heading=quad.yaw), NOT the
