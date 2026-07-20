@@ -241,32 +241,9 @@ def _clearance(p, c_xy, r, h):
     return math.hypot(max(0.0, horiz - r), p[2] - h) - R_DRONE
 
 
-def _swept_clearance(p0, p1, m0, m1, r, h):
-    """Minimum BODY clearance over one tick (07-20 ruling: earliest-contact judgement): drone
-    chord p0->p1 vs mover chord m0->m1, both linear in s in [0,1]. Candidates = both endpoints,
-    the exact minimiser of the relative-xy quadratic, and the cylinder-top z-crossing. Endpoint-
-    only measurement missed within-tick penetrations (0.6 m of mover motion per tick at 6 m/s)
-    and could book the contact against the wrong tick's certification state."""
-    p0 = np.asarray(p0, float); p1 = np.asarray(p1, float)
-    m0 = np.asarray(m0, float)[:2]; m1 = np.asarray(m1, float)[:2]
-    d0 = p0[:2] - m0; dd = (p1[:2] - p0[:2]) - (m1 - m0)
-    cands = [0.0, 1.0]
-    a = float(dd @ dd)
-    if a > 1e-12:
-        s_star = -float(d0 @ dd) / a
-        if 0.0 < s_star < 1.0:
-            cands.append(s_star)
-    z0, z1 = float(p0[2]), float(p1[2])
-    if abs(z1 - z0) > 1e-9:
-        s_h = (h - z0) / (z1 - z0)
-        if 0.0 < s_h < 1.0:
-            cands.append(s_h)
-    best = 1e18
-    for s in cands:
-        cl = _clearance(p0 + (p1 - p0) * s, m0 + (m1 - m0) * s, r, h)
-        if cl < best:
-            best = cl
-    return best
+import collision_attribution as CA
+# swept-contact + the U/P/Q/D algebra live in the SHARED module (07-20 ruling: replay and the
+# renderer must book a collision identically -- one algebra, one implementation)
 
 
 def _rot(v2, ang):
@@ -351,6 +328,8 @@ def run_replay(movers, ep, mode="ours", calib=None, predict=True, max_vel=3.0, m
     _stick = {}                                      # SMOOTH=1 incumbent-maneuver state (kind/age)
     _v3st = {}                                        # DECIDE=v3 CPL incumbent (warm-start) state
     _v2esc = {}                                       # V2_ESC=1: pre-certified escape branch for v2
+    collisions = []                                  # U/P/Q/D collision records (shared algebra)
+    _DOMAIN = os.environ.get("COLL_DOMAIN", "ID")    # per-EPISODE frozen domain label (ID|OOD|UNKNOWN)
     rta = dict(certified_ticks=0, violations=0)      # RTA failure rate: cert-passed tick followed by
     #                                                  a clearance violation within the SAME trust window
     hist = []
@@ -844,6 +823,11 @@ def run_replay(movers, ep, mode="ours", calib=None, predict=True, max_vel=3.0, m
                     p_ref, v_ref, a_ref = pos, vel, np.zeros(3)
             counts[kind] = counts.get(kind, 0) + 1
 
+        _PLAN_KINDS = ("straight", "around_l", "around_r", "over", "climb", "cret", "cpl",
+                       "gap_b", "gap_a", "soar")
+        exec_src = "plan" if (kind is None or kind in _PLAN_KINDS) else str(kind)
+        #   ^ what the executor actually flies this tick: the certified plan, or an override
+        #   (evade/brake/escape/...). The receipt's executed_segment_hash + U-judgement key off it.
         p_prev = p_d.copy()            # start-of-tick drone position (swept-contact chord anchor)
         # apply the set-point: real PX4 SITL (flier) > local quadrotor model (dynamics) > teleport (optimistic)
         if flier is not None:                              # real PX4 SITL in the loop (flier streams the set-point)
@@ -859,12 +843,47 @@ def run_replay(movers, ep, mode="ours", calib=None, predict=True, max_vel=3.0, m
 
         max_z = max(max_z, float(p_d[2]))
         tick_clr = 1e18
+        _contacts = []
         t_meas = t + DT                # SWEPT contact over [t, t+DT]: drone chord p_prev->p_d vs
         for i in sorted(set(present_idx(t)) | set(present_idx(t_meas))):   # mover chord (07-20 ruling)
             m0 = pos_l(i, t) if movers.present(i, t) else pos_l(i, t_meas)
             m1 = pos_l(i, t_meas) if movers.present(i, t_meas) else m0
-            cl = _swept_clearance(p_prev, p_d, m0, m1, movers.m[i]["r"], movers.m[i]["h"])
+            cl, _s_hit = CA.swept_clearance(p_prev, p_d, m0, m1, movers.m[i]["r"], movers.m[i]["h"])
             tick_clr = min(tick_clr, cl); min_clr = min(min_clr, cl)
+            if cl < -1e-6:
+                _contacts.append((i, cl, _s_hit, np.asarray(m0, float)[:2], np.asarray(m1, float)[:2]))
+        if receipt is not None:
+            receipt["valid_from"] = round(t, 3)
+            receipt["valid_until"] = round(t + float(receipt.get("window", TAU)), 3)
+            receipt["executed_segment_hash"] = CA.executed_hash(p_prev, p_d, exec_src)
+            receipt["exec_src"] = exec_src
+        for (_ci, _cl, _s_hit, _m0, _m1) in _contacts:
+            _tc = t + _s_hit * DT
+            _trk = trackers.get(_ci)
+            _tstate = (dict(age=int(getattr(_trk, "n", -1)), miss=int(getattr(_trk, "miss", 0)),
+                            sigma_v=round(float(getattr(_trk, "sigma_v", 0.0)), 3))
+                       if _trk is not None else None)
+            if _ci not in near:
+                _sub = "out_of_sensing"
+            elif _trk is None:
+                _sub = "occluded_or_missed"
+            elif int(getattr(_trk, "n", 99)) < 4:
+                _sub = "snapshot_gap"
+            else:
+                _sub = "unknown"
+            _v = CA.attribute(receipt=receipt, exec_src=exec_src, contact_t=_tc,
+                              valid_from=(receipt or {}).get("valid_from", t),
+                              valid_until=(receipt or {}).get("valid_until", t),
+                              m_xy_at_t0=_m0, m_true_xy=_m0 + (_m1 - _m0) * _s_hit,
+                              delta=DELTA, track_state=_tstate, domain=_DOMAIN, p_subcode=_sub)
+            collisions.append(CA.collision_record(
+                tick=tick, contact_t=_tc, collider_id=int(_ci),
+                collider_cls=str(movers.m[_ci]["cls"]), clearance=_cl, obj_scope="dynamic",
+                verdict=_v,
+                all_colliders=[(int(j), movers.m[j]["cls"], c2, "dynamic")
+                               for (j, c2, *_r) in _contacts]))
+            print(f"[attrib] t={_tc:.2f} mover{_ci}({movers.m[_ci]['cls']}) clr={_cl:+.3f} "
+                  f"-> {_v['primary']} aux={_v['aux']}", flush=True)
         _dcmd = np.asarray(p_ref, float)[:2] - p_d[:2]
         if float(np.hypot(*_dcmd)) > 0.15:
             _hd_cmd[0] = _dcmd.copy()      # look where you are COMMANDED to go (real quads yaw-to-path)
@@ -872,8 +891,7 @@ def run_replay(movers, ep, mode="ours", calib=None, predict=True, max_vel=3.0, m
             # RECEIPT-DRIVEN accounting (07-20 ruling): a tick is certified iff its receipt says
             # so; the kind string is display only. V2_ESC escape overrides keep the evade receipt
             # (certified=False) -> escape flight books as uncertified exposure (conservative).
-            receipt["valid_from"] = round(t, 3)
-            receipt["valid_until"] = round(t + float(receipt.get("window", TAU)), 3)
+            # (valid window + executed hash stamped at measurement time above)
             if receipt.get("certified"):
                 rta["certified_ticks"] += 1
                 if tick_clr < 1e17 and tick_clr < 0.0:
@@ -941,12 +959,17 @@ def run_replay(movers, ep, mode="ours", calib=None, predict=True, max_vel=3.0, m
         if stall > 40:                                 # ~12 s without net progress -> give up (not reached)
             break
 
+    _att = {}
+    for c in collisions:
+        _att[c["verdict"]["primary"]] = _att.get(c["verdict"]["primary"], 0) + 1
     return dict(mode=mode, reached=reached, ticks=tick + 1, time_s=(tick + 1) * DT,
                 min_clr=float(min_clr) if min_clr < 1e17 else None,
                 collided=(min_clr < -1e-6), max_z=max_z, counts=counts, dynamics=dynamics,
                 track_err_med=float(np.median(track_err)) if track_err else 0.0,
                 track_err_max=float(np.max(track_err)) if track_err else 0.0,
-                predict=predict, cont_cert=cont_cert, rta=rta, history=hist if record else None)
+                predict=predict, cont_cert=cont_cert, rta=rta,
+                collisions=collisions, attrib=_att, domain_status=_DOMAIN,
+                history=hist if record else None)
 
 
 if __name__ == "__main__":

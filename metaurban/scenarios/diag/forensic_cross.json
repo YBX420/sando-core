@@ -1,0 +1,14 @@
+{
+ "schema": "sando-scenario-v1",
+ "name": "forensic_cross",
+ "description": "Attribution-pipeline forensic probe: two fast crossers converge on the drone's spawn within ~0.4s (physical envelope by construction) -> a deterministic collision to validate U/P/Q/D bookkeeping, NOT a performance scenario.",
+ "map": {"seed": null},
+ "drone": {"start": [0.0, 0.0, 1.5], "goal": [20.0, 0.0, 1.5], "cruise_z": 1.5, "max_vel": 3.0, "max_acc": 6.0},
+ "statics": [],
+ "movers": [
+  {"cls": "vehicle", "spawn_t": 0.0, "path": [[0.0, 2.6], [0.0, -6.0]], "speed": 7.0, "hold_end": false},
+  {"cls": "vehicle", "spawn_t": 0.0, "path": [[0.4, -2.6], [0.4, 6.0]], "speed": 7.0, "hold_end": false}
+ ],
+ "params": {},
+ "t_max": 12.0
+}

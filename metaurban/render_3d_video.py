@@ -38,6 +38,7 @@ from custom_glb_object import make_glb_class, make_drone_class
 from quadrotor import Quadrotor
 from px4_bridge import PX4Bridge   # real PX4 SITL flight stack (used when --px4)
 from ego_bridge import EGOPlanner  # standalone EGO-Planner core (used when --ego), fed the depth-FOV cloud
+import collision_attribution as CA  # shared U/P/Q/D collision algebra (07-20 ruling: one implementation)
 # sando_native_bridge is imported lazily inside the --native branch (its .so links GUROBI; only load on demand)
 from metaurban import SidewalkDynamicMetaUrbanEnv
 from metaurban.component.sensors.rgb_camera import RGBCamera
@@ -1353,6 +1354,8 @@ EGO_DECIDE = os.environ.get("EGO_DECIDE", "v2")   # unified tournament DEFAULT (
 #   (one shared implementation with the headless benchmark; absorbs CCF/CRET/FOVCAP speed patches)
 import safety_layer as _SL
 _MAN_V2 = {}
+_ATTRIB = []                                        # U/P/Q/D collision records (shared algebra)
+_ATTR_DOMAIN = os.environ.get("COLL_DOMAIN", "ID")  # per-EPISODE frozen domain label
 # ---- v5 MOTION-FRAME ELLIPSE on the render face (ELLIPSE=1, default OFF -> byte-identical) ----
 # Mature (age>=4), non-coasting, moving (|v|>=v_min_dir) ped/veh tracks swap their mover law to the
 # calib_v5 ellipse: along-axis A(t)=R+v_eff*(t+d) on the KF velocity, cross A(t)/kappa. Carried as the
@@ -2761,6 +2764,7 @@ while not quit_now:
             sando.update_state(st)
             fed = feed(sando, _cache, t, p_d)
             t0 = time.perf_counter(); sando.replan(last_rt, t); last_rt = time.perf_counter() - t0
+        p_prev_exec = p_d.copy()       # start-of-tick drone position (swept-contact chord anchor)
         if px4 is not None:
             # REAL PX4: stream the committed set-point to offboard, pace to wall-clock (PX4 is real-time),
             # read PX4's fused pose back to drive the render. PX4 = inner control + jMAVSim dynamics.
@@ -2952,13 +2956,82 @@ while not quit_now:
             if args.maneuver or args.slip:
                 draw_predictions()                 # <- the LIVE Kalman forecast every mover is routed around
         step_env()
+        fed_dec = fed                  # decision-time snapshot (mover swept-contact chord anchor)
         if ego is not None:
             # measurement-only refresh (audit #4): step_env() just advanced the world one tick, but
             # `fed` was the DECISION-time snapshot -- the stepped drone was being measured against
             # stale movers. feed(None, ...) is a pure reader; the next tick's decision rebuilds its
             # own fed at 'replan' time, so flight behaviour is untouched.
             fed = feed(None, _cache, t, p_d)
-        c, per = clearance(p_d, fed); mclr = min(mclr, c)
+        c, per = clearance(p_d, fed)
+        _hits = []
+        if args.maneuver:
+            # SWEPT mover contacts over the tick (shared algebra; 07-20 ruling): drone chord vs
+            # mover chord (decision-time fed row paired to post-step row by class+proximity).
+            # UNDER-approx cylinder r = half the SHORT box side -- catches real within-tick
+            # penetrations, never false-alarms a long vehicle box; the box law keeps the ledger.
+            _prev_mv = [e for e in (fed_dec or []) if e[0] != "static"]
+            for (cls2, c3, sz) in fed:
+                if cls2 == "static":
+                    continue
+                m1 = np.asarray(c3, float)[:2]; m0 = m1
+                for (cp2, cc3, _csz) in _prev_mv:
+                    if cp2 == cls2 and float(np.hypot(cc3[0] - c3[0], cc3[1] - c3[1])) < 1.5:
+                        m0 = np.asarray(cc3, float)[:2]; break
+                cl2, s2 = CA.swept_clearance(p_prev_exec, p_d, m0, m1,
+                                             0.5 * float(min(sz[0], sz[1])),
+                                             float(c3[2]) + 0.5 * float(sz[2]))
+                if cl2 < -1e-6:
+                    _hits.append((cls2, cl2, s2, m0, m1))
+                    c = min(c, cl2)    # a within-tick penetration the endpoint law missed IS a hit
+        mclr = min(mclr, c)
+        if args.maneuver:
+            _rcp = _MAN_V2.get("receipt")
+            _t_dec = t - REPLAN_DT
+            _exec_src = "hold" if (man_kind == "hold" or ego_cert_hold) else "plan"
+            if _rcp is not None:
+                _rcp["valid_from"] = round(_t_dec, 3)
+                _rcp["valid_until"] = round(_t_dec + float(_rcp.get("window", 0.75)), 3)
+                _rcp["executed_segment_hash"] = CA.executed_hash(p_prev_exec, p_d, _exec_src)
+                _rcp["exec_src"] = _exec_src
+            if c < -1e-6 and not _hits:
+                # endpoint contact without a swept-cylinder hit: book the nearest offender
+                _off = min(((cl3, c3, sz) for (cl3, c3, sz) in fed if cl3 != "static"),
+                           key=lambda e: float(np.hypot(p_d[0] - e[1][0], p_d[1] - e[1][1])),
+                           default=None)
+                if _off is not None and per.get(_off[0], 1e9) < -1e-6:
+                    _m = np.asarray(_off[1], float)[:2]
+                    _hits = [(_off[0], float(per[_off[0]]), 1.0, _m, _m)]
+            for (cls2, cl2, s2, m0, m1) in _hits:
+                _tc = _t_dec + s2 * REPLAN_DT
+                _v = CA.attribute(receipt=_rcp, exec_src=_exec_src, contact_t=_tc,
+                                  valid_from=(_rcp or {}).get("valid_from", _t_dec),
+                                  valid_until=(_rcp or {}).get("valid_until", _t_dec),
+                                  m_xy_at_t0=m0, m_true_xy=m0 + (m1 - m0) * s2,
+                                  delta=REPLAN_DT, track_state=None, domain=_ATTR_DOMAIN,
+                                  p_subcode="unknown")
+                _ATTRIB.append(CA.collision_record(
+                    tick=iters, contact_t=_tc, collider_id=-1, collider_cls=cls2,
+                    clearance=cl2, obj_scope="dynamic", verdict=_v,
+                    all_colliders=[(-1, h2[0], h2[1], "dynamic") for h2 in _hits]))
+                print(f"[attrib] t={_tc:.2f} {cls2} clr={cl2:+.3f} -> {_v['primary']} "
+                      f"aux={_v['aux']}", flush=True)
+            if per.get("static", 1e9) < -1e-6:
+                # statics carry NO conformal tube: a static hit on a certified plan tick is by
+                # definition a deterministic-chain violation (D); on an uncertified/override
+                # tick it is U. Total ledger never drops static contacts (07-20 ruling).
+                _pu = (_rcp is None or not _rcp.get("certified") or _exec_src != "plan")
+                _v = dict(primary=("U" if _pu else "D"), aux=["static_gate"],
+                          domain=_ATTR_DOMAIN, tube_excess=None, tube_rho=None, pred_dist=None,
+                          snapshot_row=None, track_state=None,
+                          cert_id=(_rcp or {}).get("cert_id"), exec_src=_exec_src,
+                          contact_t=round(float(t), 3))
+                _ATTRIB.append(CA.collision_record(
+                    tick=iters, contact_t=t, collider_id=-1, collider_cls="static",
+                    clearance=float(per["static"]), obj_scope="static", verdict=_v,
+                    all_colliders=[(-1, "static", float(per["static"]), "static")]))
+                print(f"[attrib] t={t:.2f} STATIC clr={per['static']:+.3f} -> {_v['primary']}",
+                      flush=True)
         for k, val in per.items(): per_all[k] = min(per_all.get(k, np.inf), val)
         if c < -1e-6 and os.environ.get("MAN_COLLDBG") == "1":
             # which fed entry is the offender, and what did the cert see for it?
@@ -3062,6 +3135,15 @@ while not quit_now:
              f"spchurn={_spvar:.1f} " + " ".join(f"{k}:{v}" for k, v in sorted(man_counts.items())) + "]"
              if args.maneuver else "")
           + (f"  egosafe[cert={ego_n_cert} brake={ego_n_slow} hold={ego_n_hold}]" if (args.ego and args.ego_safe) else ""), flush=True)
+    if _ATTRIB:
+        _acnt = {}
+        for _r in _ATTRIB:
+            _acnt[_r["verdict"]["primary"]] = _acnt.get(_r["verdict"]["primary"], 0) + 1
+        print(f"[attrib] episode verdicts: {_acnt} (domain={_ATTR_DOMAIN}, n={len(_ATTRIB)})",
+              flush=True)
+        if os.environ.get("OUT_ATTRIB"):
+            json.dump(_ATTRIB, open(os.environ["OUT_ATTRIB"], "w"), indent=1)
+            print(f"[attrib] records -> {os.environ['OUT_ATTRIB']}", flush=True)
     if os.environ.get("TREE_DBG") == "1" and _min_static[1] is not None:
         print(f"[treedbg] closest static approach: clearance={_min_static[0]:.3f}m to a box "
               f"W={_min_static[1][0]:.2f} L={_min_static[1][1]:.2f} H={_min_static[1][2]:.2f} "
