@@ -22,13 +22,29 @@ import numpy as np
 # quickly and NIS stays sane because S carries the wide prior. Default = twopoint (byte-identical).
 _KF_INIT_BAYES = os.environ.get("KF_INIT", "twopoint") == "bayes"
 
-# KF 病② knife (07-20 work order #6): with NO measurement, extrapolate the STATE under the
-# CERTIFIED hypothesis (CV -- the deployed cert polynomial is PRED_MODEL=cv), while the
-# covariance keeps the FULL CA white-jerk growth (conservative superset). The legacy CA coast
-# integrated the noisiest state component (a) into v every missed tick: a newborn's garbage
-# accel turned |v| 0.6->2.1 in 0.6 s of occlusion (seed7 diagnosis 2026-07-13), poisoning
-# association gates, feed rings and the young laws. KF_COAST=ca restores the legacy propagator.
+# KF 病② knife, A+ closure (07-20 ruling): with NO measurement, mean AND covariance both
+# propagate under the SAME CV transition (the deployed cert polynomial is PRED_MODEL=cv; the
+# first cut's CV-mean/CA-covariance hybrid was not automatically a conservative superset -- the
+# deleted acceleration mean-shift never entered P). Coast process noise is the EXACT CV integral
+# of two terms, so variable-cadence composition stays bit-exact:
+#   - white jerk drives ONLY the a-channel under CV (q_jerk * dt);
+#   - a white-ACCELERATION term with PSD q_a = max(|a_held|, A_FLOOR)^2 * TAU_A puts the ignored
+#     accel into the second moment: sigma_v(T) = a*sqrt(TAU_A*T) >= a*T for every T <= TAU_A,
+#     so the 1-sigma ball DOMINATES the deleted deterministic drift over the whole memory window
+#     (TAU_A=2.0 s > confirmed TTL 1.6 s). a is HELD during the streak -> q_a constant -> exact.
+# Re-detection (ruling): the FIRST post-coast update predicts to the measurement time under CV
+# too (the old CA predict re-integrated the stale accel into v once); CA re-engages from the
+# next consecutive detection. KF_COAST=ca restores the legacy CA coast wholesale.
 _KF_COAST_CA = os.environ.get("KF_COAST", "cv") == "ca"
+_COAST_A_FLOOR = float(os.environ.get("KF_COAST_AFLOOR", "0.0"))
+#   m/s^2: unmodelled-manoeuvre floor, DEFAULT 0 (07-20 s19 forensic): the A+ dominance argument
+#   (sigma_v = |a_held|*sqrt(TAU_A*T) >= |a_held|*T for T<=TAU_A) needs NO floor -- q_a =
+#   a_held^2*TAU_A alone covers the drift the CV mean deleted. A floor of 1.0 added Singer-style
+#   "he MAY start moving" heat whose price lands on the coast keep-out (MEM_K * pos_sigma): it
+#   sealed corridors, froze the drone into uncertified HOLDs and got it run over (s19, verdict U).
+#   Whether unmodelled-manoeuvre heat is owed AT ALL is a coverage question the final
+#   scenario-conformal calibration owns -- never hand-set here again.
+_COAST_TAU_A = 2.0      # s: dominance horizon of the white-accel term (> confirmed TTL 1.6 s)
 
 
 class _AxisCAKalman:
@@ -46,6 +62,8 @@ class _AxisCAKalman:
         self._gap = 0.0          # ELAPSED coast time since first detection (dt_eff bookkeeping across
                                  # misses; replaces the old _steps*dt count so VARIABLE-dt ticks stay exact)
         self._a_var = float(a_prior) ** 2
+        self._coasted = False    # True while the track is in (or just leaving) a coast streak:
+        #                          the next update's PREDICT stays CV (A+ closure, 07-20 ruling)
         self.last_nis = None     # innovation^2/S of the latest measurement update (self-check instrument)
 
     def _mats(self, dt):
@@ -59,6 +77,20 @@ class _AxisCAKalman:
                                     [dt**3 / 6,  dt**2 / 2, dt]])
         return F, Q
 
+    def _cv_mats(self, dt, a_held):
+        """Exact COAST discretization (A+ closure): CV transition for mean AND covariance, plus the
+        exact CV integrals of (white jerk -> a-channel only) and (white accel with PSD
+        q_a = max(|a_held|, A_FLOOR)^2 * TAU_A -> the p/v block). Both terms compose bit-exactly
+        under F_cv, so the 3x0.1s == 1x0.3s variable-cadence law survives the hybrid."""
+        F = np.array([[1, dt, 0.0],
+                      [0, 1, 0.0],
+                      [0, 0, 1.0]])
+        q_a = max(abs(float(a_held)), _COAST_A_FLOOR) ** 2 * _COAST_TAU_A
+        Q = np.array([[q_a * dt**3 / 3, q_a * dt**2 / 2, 0.0],
+                      [q_a * dt**2 / 2, q_a * dt,        0.0],
+                      [0.0,             0.0,             self.q_jerk * dt]])
+        return F, Q
+
     def update(self, z, dt=None):
         step = self.dt if dt is None else float(dt)
         if self.x is None:                                   # first detection: position only; v/a still unknown.
@@ -66,7 +98,7 @@ class _AxisCAKalman:
             # not "v=0" -- the old P=diag([R,1,1]) asserted a confident zero velocity, so a fast target's second
             # update arrived with NIS ~ v^2*dt^2/ (R+1e-ish) (~56 for a vehicle): an absurd prior, not information.
             self.x = np.array([z, 0.0, 0.0]); self.P = np.diag([self.R, 100.0, self._a_var])
-            self._z0 = float(z); self._gap = 0.0; return
+            self._z0 = float(z); self._gap = 0.0; self._coasted = False; return
         if self._z0 is not None and not _KF_INIT_BAYES:      # second detection: TWO-POINT DIFFERENCING re-init
             dte = self._gap + step                           # coasted time + this update's interval = dt_eff
             v0 = (z - self._z0) / dte
@@ -74,9 +106,16 @@ class _AxisCAKalman:
             self.P = np.array([[self.R,       self.R / dte,          0.0],
                                [self.R / dte, 2.0 * self.R / dte**2, 0.0],
                                [0.0,          0.0,                   self._a_var]])
-            self._z0 = None; self.last_nis = None; return    # exact re-init: no meaningful innovation this tick
+            self._z0 = None; self.last_nis = None; self._coasted = False
+            return                                           # exact re-init: no meaningful innovation this tick
         self._z0 = None                                      # bayes path: plain Kalman update from the wide prior
-        F, Q = (self.F, self.Q) if step == self.dt else self._mats(step)
+        if self._coasted and not _KF_COAST_CA:
+            # FIRST post-coast update (A+ closure): predict to the measurement time under CV too --
+            # the old CA predict re-integrated the whole stale accel into v exactly once here.
+            F, Q = self._cv_mats(step, self.x[2])
+        else:
+            F, Q = (self.F, self.Q) if step == self.dt else self._mats(step)
+        self._coasted = False                                # consecutive detections re-enable CA
         x = F @ self.x; P = F @ self.P @ F.T + Q                          # predict
         y = z - self.H @ x; S = self.H @ P @ self.H.T + self.R           # innovation
         self.last_nis = float(y * y / S)                                 # NIS self-check (should be ~chi2_1)
@@ -92,14 +131,15 @@ class _AxisCAKalman:
             return
         step = self.dt if dt is None else float(dt)
         self._gap += step
-        F, Q = (self.F, self.Q) if step == self.dt else self._mats(step)
         if _KF_COAST_CA:
+            F, Q = (self.F, self.Q) if step == self.dt else self._mats(step)
             self.x = F @ self.x                       # legacy CA coast (病②: integrates accel into v)
-        else:
-            # CV state extrapolation (exact composition: p += v*dt with v held, so 3x0.1s == 1x0.3s
-            # bit-for-bit); a is HELD, not integrated -- it re-engages on the next real measurement.
-            self.x = np.array([self.x[0] + self.x[1] * step, self.x[1], self.x[2]])
+            self.P = F @ self.P @ F.T + Q
+            return
+        F, Q = self._cv_mats(step, self.x[2])         # A+ closure: ONE transition for mean AND cov
+        self.x = F @ self.x
         self.P = F @ self.P @ F.T + Q
+        self._coasted = True
 
     def update_velocity(self, zv, r_vel):
         """DIRECT velocity measurement update, H=[0,1,0] -- the radar port (M1c, timespace plan).
@@ -362,7 +402,9 @@ if __name__ == "__main__":
 
     # KF 病② coast-drift regression (07-20 work order #6): inject the diagnosed garbage accel
     # (young track, a=2.5 after a noisy curvature fit) and coast 0.6 s. Legacy CA coast integrated
-    # it into velocity (|v| 0.6 -> ~2.1); the CV-state coast must HOLD v while P still grows.
+    # it into velocity (|v| 0.6 -> ~2.1); the CV coast must HOLD v while P still grows, and the
+    # 1-sigma velocity ball must DOMINATE the deleted drift (A+ closure: sigma_v >= a*T for
+    # T <= TAU_A, so ignoring the accel mean-shift is genuinely conservative, not asserted).
     trk_g = MoverTracker(dt=0.10, meas_noise=0.07)
     trk_g.update([0.0, 0.0, 1.5]); trk_g.update([0.06, 0.0, 1.5])
     trk_g.fx.x = np.array([0.06, 0.6, 2.5])                 # the seed7 pathology, verbatim
@@ -370,7 +412,23 @@ if __name__ == "__main__":
     for _ in range(6):
         trk_g.coast()
     v_after = float(trk_g.fx.x[1])
-    ok_d = abs(v_after - 0.6) < 1e-9 and float(trk_g.fx.P[0, 0]) > p_var0
-    print(f"[kf] coast-drift knife: v 0.60 -> {v_after:.2f} after 0.6s coast "
-          f"(legacy CA would be ~{0.6 + 2.5 * 0.6:.2f}); P grew {p_var0:.4f} -> {float(trk_g.fx.P[0, 0]):.4f}")
-    print("[kf] coast-drift PASS" if ok_d else "[kf] coast-drift FAIL (velocity drifted or P froze)")
+    sig_v = float(np.sqrt(trk_g.fx.P[1, 1]))
+    drift = 2.5 * 0.6                                        # the drift the CV mean ignored
+    ok_d = (abs(v_after - 0.6) < 1e-9 and float(trk_g.fx.P[0, 0]) > p_var0 and sig_v >= drift)
+    print(f"[kf] coast-drift knife: v 0.60 -> {v_after:.2f} after 0.6s coast (legacy CA ~2.10); "
+          f"sigma_v={sig_v:.2f} >= ignored drift {drift:.2f}")
+    print("[kf] coast-drift PASS" if ok_d else "[kf] coast-drift FAIL (drifted / P froze / ball too small)")
+
+    # A+ re-detection consistency (07-20 ruling): after a coast streak the FIRST update must
+    # predict under CV too -- the old CA predict re-integrated the stale accel into v once.
+    trk_h = MoverTracker(dt=0.10, meas_noise=0.07)
+    trk_h.update([0.0, 0.0, 1.5]); trk_h.update([0.06, 0.0, 1.5])
+    trk_h.fx.x = np.array([0.06, 0.6, 2.5])
+    for _ in range(3):
+        trk_h.coast()
+    v_pre = float(trk_h.fx.x[1])
+    trk_h.update([0.06 + 0.6 * 0.4, 0.0, 1.5])              # detection right on the CV path
+    v_post = float(trk_h.fx.x[1])
+    ok_h = abs(v_pre - 0.6) < 1e-9 and abs(v_post - 0.6) < 0.2
+    print(f"[kf] post-coast re-detect: v {v_pre:.2f} -> {v_post:.2f} (CA predict would bump +0.25 first)")
+    print("[kf] hybrid re-detect PASS" if ok_h else "[kf] hybrid re-detect FAIL (CA re-integrated stale accel)")

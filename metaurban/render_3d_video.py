@@ -1609,10 +1609,18 @@ if _PERCEPT_REAL:
 # ticks, COAST its filter forward (growing covariance), and inflate its keep-out by the covariance growth. The state
 # comes purely from the last in-cone KF estimate -- we never re-read native_objects() for an out-of-cone mover.
 MAN_MEM = os.environ.get("EGO_MEM", "1") == "1"             # master switch for out-of-cone mover track memory
-MAN_MEM_TICKS = int(os.environ.get("EGO_MEM_TICKS", 8))    # remember an out-of-cone mover this many replan ticks (~0.8s @10Hz)
+MAN_MEM_S = float(os.environ.get("EGO_MEM_S", "1.6"))       # memory horizon in SECONDS (A+ closure,
+#   07-20 ruling): the replay face ticks at 0.30 s and this face at 0.10 s -- a tick-count dial
+#   meant different physical memory on each face (病③ never actually landed here: ticks=8=0.8 s).
+if "EGO_MEM_TICKS" in os.environ:
+    MAN_MEM_TICKS = int(os.environ["EGO_MEM_TICKS"])       # legacy tick dial, honoured LOUDLY
+    print(f"[mem] LEGACY EGO_MEM_TICKS={MAN_MEM_TICKS} -> {MAN_MEM_TICKS * REPLAN_DT:.2f}s "
+          f"(switch to EGO_MEM_S)", flush=True)
+else:
+    MAN_MEM_TICKS = max(1, int(round(MAN_MEM_S / REPLAN_DT)))
 MAN_MEM_K = float(os.environ.get("EGO_MEM_K", 2.0))        # keep-out inflation = this many KF position-sigmas (covariance growth)
-if _PFE is not None and "PERCEPT_TTL" not in os.environ:
-    _PFE.cfg.ttl_ticks = MAN_MEM_TICKS                     # realistic memory horizon follows the SAME dial as gt
+if _PFE is not None and not any(k in os.environ for k in ("PERCEPT_TTL_S", "PERCEPT_TTL")):
+    _PFE.cfg.confirmed_ttl_s = MAN_MEM_TICKS * REPLAN_DT   # realistic memory horizon follows the SAME dial as gt
     # (a gt-vs-realistic A/B must not silently compare different memory policies)
 MAN_PHI = np.radians(25.0)
 MAN_DEADBAND = 0.5    # hysteresis: keep the CURRENT maneuver unless another certified one beats its goal-ward
@@ -3003,13 +3011,18 @@ while not quit_now:
                 _rcp["executed_segment_hash"] = CA.executed_hash(p_prev_exec, p_d, _exec_src)
                 _rcp["exec_src"] = _exec_src
             if c < -1e-6 and not _hits:
-                # endpoint contact without a swept-cylinder hit: book the nearest offender
-                _off = min(((cl3, c3, sz) for (cl3, c3, sz) in fed if cl3 != "static"),
-                           key=lambda e: float(np.hypot(p_d[0] - e[1][0], p_d[1] - e[1][1])),
-                           default=None)
-                if _off is not None and per.get(_off[0], 1e9) < -1e-6:
-                    _m = np.asarray(_off[1], float)[:2]
-                    _hits = [(_off[0], float(per[_off[0]]), 1.0, _m, _m)]
+                # endpoint contact without a swept-cylinder hit (grazing corner the under-approx
+                # cylinder legitimately misses): book the offender by MOST-NEGATIVE per-class
+                # clearance -- nearest-centre picked the wrong object when a large clear mover sat
+                # closer than the small touching one (s19 forensic bug, 07-20).
+                _ncls = min((k for k in per if k != "static"), key=lambda k: per[k], default=None)
+                if _ncls is not None and per[_ncls] < -1e-6:
+                    _off = min(((cl3, c3, sz) for (cl3, c3, sz) in fed if cl3 == _ncls),
+                               key=lambda e: float(np.hypot(p_d[0] - e[1][0], p_d[1] - e[1][1])),
+                               default=None)
+                    if _off is not None:
+                        _m = np.asarray(_off[1], float)[:2]
+                        _hits = [(_ncls, float(per[_ncls]), 1.0, _m, _m)]
             for (cls2, cl2, s2, m0, m1) in _hits:
                 _tc = _t_dec + s2 * REPLAN_DT
                 _v = CA.attribute(receipt=_rcp, exec_src=_exec_src, contact_t=_tc,
