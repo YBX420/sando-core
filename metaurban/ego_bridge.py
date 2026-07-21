@@ -9,6 +9,16 @@ import numpy as np
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _SO = os.environ.get("EGO_CAPI_SO") or os.path.join(os.path.dirname(_HERE), "ego", "capi", "ego_capi.so")
+if os.environ.get("STACK_MANIFEST"):
+    # 07-21 ruling #3: a git tag cannot prove WHICH hand-built .so an experiment loaded --
+    # under a frozen stack, verify the binary we are about to dlopen against the manifest.
+    import hashlib as _hl
+    import json as _js
+    _rec = _js.load(open(os.environ["STACK_MANIFEST"]))
+    _want = (_rec.get("so_sha256") or {}).get("ego_capi.so")
+    _have = _hl.sha256(open(_SO, "rb").read()).hexdigest()
+    assert _want == _have, (f"STACK_MANIFEST violation: ego_capi.so {_have[:16]} != frozen "
+                            f"{str(_want)[:16]} -- the running binary is NOT the frozen one")
 _lib = C.CDLL(_SO)
 _d = C.POINTER(C.c_double)
 

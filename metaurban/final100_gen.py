@@ -33,12 +33,23 @@ ap.add_argument("--plan", required=True)
 ap.add_argument("--slots", required=True, help="A-B inclusive slot range for this process")
 args = ap.parse_args()
 plan = json.load(open(args.plan))
-cur = subprocess.check_output(["git", "rev-parse", "--short", "HEAD"], cwd=HERE, text=True).strip()
+_chk = dict(plan); _got = _chk.pop("plan_sha")
+assert hashlib.sha256(json.dumps(_chk, sort_keys=True).encode()).hexdigest()[:16] == _got, \
+    "PLAN INTEGRITY: plan_sha does not verify -- the registration was edited after emission"
+cur = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=HERE, text=True).strip()
 if not plan.get("draft"):
     assert cur == plan["stack_sha"], \
-        f"GIT LOCK: tree {cur} != frozen plan stack {plan['stack_sha']} -- generation refused"
+        f"GIT LOCK: tree {cur[:12]}.. != frozen plan stack {str(plan['stack_sha'])[:12]}.. -- refused"
+    import stack_manifest as SM
+    have = SM.runtime_shas()
+    assert have == plan["stack_runtime"], (
+        "RUNTIME LOCK: the loaded binary set differs from the plan's frozen stack_runtime -- "
+        f"have {json.dumps(have['so_sha256'])[:120]}")
+NS = "scenarios/final100_draft" if plan.get("draft") else "scenarios/final100"
+#   07-21 ruling: draft output is ISOLATED -- a draft artefact can never be silently reused by a
+#   real plan (different namespace + plan_sha-bound resume below)
 a, b = (int(x) for x in args.slots.split("-"))
-os.makedirs("scenarios/final100", exist_ok=True)
+os.makedirs(NS, exist_ok=True)
 
 _ENVS = {}
 
@@ -56,13 +67,17 @@ def sha_file(p):
 
 
 for slot in plan["slots"][a:b + 1]:
-    out = slot["out"]; rp = out + ".receipt.json"
+    out = os.path.join(NS, os.path.basename(slot["out"])); rp = out + ".receipt.json"
     if os.path.exists(out) and os.path.exists(rp):
         rc = json.load(open(rp))
-        if rc.get("slot") == slot and rc.get("scenario_sha") == sha_file(out):
-            print(f"[f100 {slot['slot_id']}] SKIP (scenario+receipt+sha match)")
+        if (rc.get("status") == "ok" and rc.get("slot") == slot
+                and rc.get("plan_sha") == plan["plan_sha"] and rc.get("stack_sha") == cur
+                and rc.get("scenario_sha") == sha_file(out)):
+            # 07-21: resume is PLAN-BOUND -- status + plan_sha + stack_sha + slot + file sha must
+            # ALL match; a draft artefact or another plan's output can never be silently reused
+            print(f"[f100 {slot['slot_id']}] SKIP (scenario+receipt+plan+stack match)")
             continue
-        print(f"[f100 {slot['slot_id']}] stale artefacts -> regenerating")
+        print(f"[f100 {slot['slot_id']}] stale/foreign artefacts -> regenerating")
     prm = dict(slot["params"])
     tier = prm.get("tier")
     nw, nc, nv = (P.TIERS[tier] if tier else (prm.get("peds", 5), prm.get("crossers", 3),
@@ -101,7 +116,8 @@ for slot in plan["slots"][a:b + 1]:
         accepted = (scn, stats, pr, seed_used, attempt)
         break
     if accepted is None:
-        json.dump(dict(slot=slot, status="FAILED", rejects=rejects, stack_sha=cur),
+        json.dump(dict(slot=slot, status="FAILED", rejects=rejects, stack_sha=cur,
+                       plan_sha=plan["plan_sha"]),
                   open(rp + ".tmp", "w"), indent=1)
         os.replace(rp + ".tmp", rp)
         print(f"[f100 {slot['slot_id']}] FAILED after 50 attempts ({len(rejects)} rejects "
@@ -118,7 +134,7 @@ for slot in plan["slots"][a:b + 1]:
     json.dump(dict(slot=slot, status="ok", seed_used=seed_used, attempt=attempt,
                    rejects=rejects, pressure=round(pr, 2),
                    encounters_verified=int(scn.get("encounters_verified", 0)),
-                   scenario_sha=sha_file(out), stack_sha=cur),
+                   scenario_sha=sha_file(out), stack_sha=cur, plan_sha=plan["plan_sha"]),
               open(rp + ".tmp", "w"), indent=1)
     os.replace(rp + ".tmp", rp)
     print(f"[f100 {slot['slot_id']}] OK {slot['name']} attempt={attempt} seed={seed_used} "
