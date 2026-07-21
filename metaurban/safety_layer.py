@@ -197,7 +197,7 @@ def _cap_behind(ent, ego, tau, d, warp=1.0):
     return ok
 
 
-def hover_clear(p, cyl, tau, delta=None, t_lo=0.0):
+def hover_clear(p, cyl, tau, delta=None, t_lo=0.0, why=None):
     """Certify a STATIONARY point p over the REAL-TIME window [t_lo, tau] against every mover
     keep-out (07-20 deterministic-chain conditions #5b/#5c). SOUND sampling: step H with the
     Lipschitz bound |d/dt(dist - rho)| <= |v| + veff, requiring margin > H*L/2 at every sample.
@@ -207,7 +207,7 @@ def hover_clear(p, cyl, tau, delta=None, t_lo=0.0):
     d = tau if delta is None else delta
     p = np.asarray(p, float)
     H = 0.05
-    for ent in cyl:
+    for _mi, ent in enumerate(cyl):
         (c0, vv, aa, R, zc, veff) = ent[:6]
         if p[2] >= zc:
             continue
@@ -228,6 +228,8 @@ def hover_clear(p, cyl, tau, delta=None, t_lo=0.0):
                 c = c0[:2] + v_p[:2] * tt
                 rho = R_eff + float(veff) * (tt + d)
                 if float(np.hypot(p[0] - c[0], p[1] - c[1])) - rho <= need:
+                    if why is not None:      # EXPLAIN chain (07-21): who killed the hover, when
+                        why.append(dict(leg="hover", m=_mi, t=round(float(tt), 2)))
                     return False
     return True
 
@@ -240,7 +242,7 @@ def _u_stop(ego):
     return max(ego.duration() - 1e-3, 0.0)
 
 
-def _tail_covered(ego, cyl, tau, d, warp=1.0):
+def _tail_covered(ego, cyl, tau, d, warp=1.0, why=None):
     """WINDOW COMPLETION (07-20 #5b): the C++ cert fail-closes on under-covered windows, so a
     short committed spline (goal arrival inside the trust window) is certified over [0, u_stop]
     -- the drone then HOVERS at eval(u_stop). Require the terminal hover to certify over the
@@ -252,22 +254,26 @@ def _tail_covered(ego, cyl, tau, d, warp=1.0):
         return True
     r_end = ego.eval(u_stop)
     if r_end is None:
+        if why is not None:
+            why.append(dict(leg="tail", err="eval_none"))
         return False
-    return hover_clear(np.asarray(r_end[0], float), cyl, tau, delta=d, t_lo=t_cov)
+    return hover_clear(np.asarray(r_end[0], float), cyl, tau, delta=d, t_lo=t_cov, why=why)
 
 
-def cert_clear(ego, cyl, tau=TAU, delta=None):
+def cert_clear(ego, cyl, tau=TAU, delta=None, why=None):
     """The cylinder disjunction on ego's CURRENTLY-committed B-spline: per mover, (horiz-predicted AND
     horiz-current) OR above. AND across movers. A mover carrying the v4 ellipse field is judged in the
-    whitened motion frame (cross-track semi-axis = along/kappa) -- same disjunction shape."""
+    whitened motion frame (cross-track semi-axis = along/kappa) -- same disjunction shape.
+    why: optional EXPLAIN sink (07-21 ruling: every refusal names mover + leg -- the decision log
+    is the interpretability artifact); None = zero-cost path, byte-identical."""
     d = tau if delta is None else delta
-    if not _tail_covered(ego, cyl, tau, d):
+    if not _tail_covered(ego, cyl, tau, d, why=why):
         return False
     _tw = min(tau, _u_stop(ego))
     #   EXPLICIT window clip (07-21 ruling): the C++ core now FAIL-CLOSES on under-covered
     #   windows; the remainder [_tw, tau] is certified by the hover-tail law above, so the clip
     #   is OURS with a sound completion -- the core never silently shrinks a window again.
-    for ent in cyl:
+    for _mi, ent in enumerate(cyl):
         (c0, vv, aa, R, zc, veff) = ent[:6]
         cap = _cap_of(ent)
         if cap is not None:
@@ -296,6 +302,9 @@ def cert_clear(ego, cyl, tau=TAU, delta=None):
                 hc, _ = ego.certify_horizontal(obs_c0=c0, R=R, obs_vel=(0, 0, 0), t_hi=_tw, v_eff=veff, delta=d)
         vo, _ = ego.certify_above(z_clear=zc, t_hi=_tw, v_eff_z=0.0, delta=d)
         if not ((hp and hc) or vo):
+            if why is not None:
+                why.append(dict(m=_mi, pred=bool(hp), frozen=bool(hc), above=bool(vo),
+                                cap=bool(cap is not None)))
             return False
     return True
 
@@ -498,18 +507,18 @@ def maneuver_decide_sticky(ego, p_d, v_d, a_d, goal, ztop, clear_fn, state,
     return kind
 
 
-def cert_clear_warp(ego, cyl, s, tau=TAU, delta=None):
+def cert_clear_warp(ego, cyl, s, tau=TAU, delta=None, why=None):
     """Constant-slip RETIME certification of the committed spline at warp s<=1 -- the headless twin
     of the renderer's slip-behind identity (sound substitution obs_vel=v/s, t_hi=s*tau, v_eff=veff/s,
     delta=d*s). Predicted-only: the frozen-at-current conjunct of cert_clear would forbid every
     yield. Statics (vel=0, veff=0) are warp-invariant -- slowing never fixes a static conflict."""
     d = (tau if delta is None else delta)
     s = float(s)
-    if not _tail_covered(ego, cyl, tau, d, warp=s):
+    if not _tail_covered(ego, cyl, tau, d, warp=s, why=why):
         return False
     _tws = min(s * tau, _u_stop(ego))
     #   explicit SPLINE-time window clip (07-21): remainder covered by the hover-tail law above
-    for ent in cyl:
+    for _mi, ent in enumerate(cyl):
         (c0, vv, aa, R, zc, veff) = ent[:6]
         cap = _cap_of(ent)
         if cap is not None:                     # retime commutes with the pearl cover too
@@ -534,6 +543,8 @@ def cert_clear_warp(ego, cyl, s, tau=TAU, delta=None):
                                                obs_acc=(0, 0, 0), t_hi=_tws, v_eff=veff / s, delta=d * s)
         vo, _ = ego.certify_above(z_clear=zc, t_hi=_tws, v_eff_z=0.0, delta=d * s)
         if not (hp or vo):
+            if why is not None:
+                why.append(dict(m=_mi, pred=bool(hp), above=bool(vo), warp=round(s, 2)))
             return False
     return True
 
@@ -855,6 +866,9 @@ def maneuver_decide_v2(ego, p_d, v_d, a_d, goal, ztop, cyl, state,
     def _ok_plan():
         return extra_gate() if extra_gate is not None else True
 
+    _exp = [] if os.environ.get("EGO_EXPLAIN", "0") == "1" else None
+    _exp_dir = [None]                 # which direction the current cert probe belongs to
+    state["_explain"] = _exp          # same list object; the receipt wrapper harvests it
     _tau_speed = os.environ.get("TAU_SPEED", "0") == "1"
     _fov_on = os.environ.get("FOV_RET", "0") == "1"
     if _fov_on:
@@ -870,9 +884,13 @@ def maneuver_decide_v2(ego, p_d, v_d, a_d, goal, ztop, cyl, state,
         # frozen 0.75s; a crawl honestly needs only ~0.38s, so its tube grows half as much: the
         # "even standing still is uncertifiable" flicker ticks become certifiable slow progress.
         t_c = min(tau, 0.30 + 0.5 * s + 0.05) if _tau_speed else tau
-        if s >= 0.999:
-            return cert_clear(ego, cyl, tau=t_c, delta=dd)
-        return cert_clear_warp(ego, cyl, s, tau=t_c, delta=dd)
+        _w = [] if _exp is not None else None
+        ok = (cert_clear(ego, cyl, tau=t_c, delta=dd, why=_w) if s >= 0.999
+              else cert_clear_warp(ego, cyl, s, tau=t_c, delta=dd, why=_w))
+        if _exp is not None:
+            _exp.append(dict(dir=_exp_dir[0], s=round(float(s), 2), ok=bool(ok),
+                             strict=bool(strict), why=_w))
+        return ok
 
     def _best_s(smax=1.0, strict=False):
         """Fastest certified speed for the CURRENT ego spline, scanning the grid down from smax."""
@@ -1210,12 +1228,14 @@ def maneuver_decide_v2(ego, p_d, v_d, a_d, goal, ztop, cyl, state,
             state["age"] = 0                                # dwell-gated STRICT upgrade probe
             for uk in DIRS[:DIRS.index(inc)]:
                 gs = _gsub(uk)
+                _exp_dir[0] = f"up:{uk}"
                 if gs is not None and ego.replan(p_d, v_d, a_d, gs) and ego.duration() > 1e-3 and _ok_plan():
                     s_up = _best_s(strict=True)
                     if s_up >= max(inc_s, speeds[-1]) - 1e-9 and s_up > 0.0:
                         # upgrade must be certified-with-margin AND not slower than the incumbent
                         state.update(kind=uk, gsub=gs, s=s_up)
                         return uk, s_up
+        _exp_dir[0] = f"inc:{inc}"
         if ego.replan(p_d, v_d, a_d, gs_inc) and ego.duration() > 1e-3 and _ok_plan():
             idx = max(0, speeds.index(inc_s) - 1) if inc_s in speeds else 0
             s_now = _best_s(smax=speeds[idx])               # may rise ONE grid step above last tick
@@ -1243,10 +1263,15 @@ def maneuver_decide_v2(ego, p_d, v_d, a_d, goal, ztop, cyl, state,
         gs = _gsub(dk)
         if gs is None:
             continue                        # gap carrot with binding mover gone: skip, NEVER replan(None)
+        _exp_dir[0] = dk
         if not (ego.replan(p_d, v_d, a_d, gs) and ego.duration() > 1e-3):
+            if _exp is not None:
+                _exp.append(dict(dir=dk, s=None, ok=False, why=[dict(leg="replan")]))
             continue
         last_replanned = dk
         if not _ok_plan():
+            if _exp is not None:
+                _exp.append(dict(dir=dk, s=None, ok=False, why=[dict(leg="gate")]))
             continue
         s_ok = _best_s()
         if _ST_ON and not _STC_ON and s_ok >= 0.0:   # ST_COMMIT owns the schedule stage when on
@@ -1334,7 +1359,7 @@ def maneuver_decide_v2(ego, p_d, v_d, a_d, goal, ztop, cyl, state,
                     return "evade", 0.0
                 state.update(kind=dk, gsub=gs, s=s_plain, age=0)
                 return dk, s_plain
-        elif not _cert_at(s_ok):
+        elif (_exp_dir.__setitem__(0, f"restore:{dk}") or not _cert_at(s_ok)):
             state.update(kind=None, gsub=None, s=1.0, age=0)
             return "evade", 0.0
     if _st_win is not None:
@@ -1565,6 +1590,7 @@ def maneuver_decide_v2(ego, p_d, v_d, a_d, goal, ztop, cyl, state,
     kind, s = _decide_v2_slew(ego, p_d, v_d, a_d, goal, ztop, cyl, state, cruise_z=cruise_z,
                               horizon=horizon, straight_clip=straight_clip, tau=tau, delta=delta,
                               speeds=speeds, **kw)
+    _explain = state.pop("_explain", None)
     certified = (kind != "evade")
     d = (tau if delta is None else delta)
     t_c = min(tau, 0.30 + 0.5 * s + 0.05) \
@@ -1574,4 +1600,6 @@ def maneuver_decide_v2(ego, p_d, v_d, a_d, goal, ztop, cyl, state,
                                                warp=bool(certified and 0.0 < s < 0.999),
                                                slew=os.environ.get("SPEED_SLEW", "0") == "1"),
                                     track_ids=cyl_ids)
+    if _explain is not None:
+        state["receipt"]["explain"] = _explain   # EGO_EXPLAIN=1: full candidate kill-matrix
     return kind, s

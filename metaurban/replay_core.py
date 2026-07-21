@@ -709,6 +709,14 @@ def run_replay(movers, ep, mode="ours", calib=None, predict=True, max_vel=3.0, m
                 kind, _v2s = SL.maneuver_decide_v2(ego, p_d, v_d, a_d, goal, ztop, cyl, _stick,
                                                    cruise_z=CRUISE_Z, horizon=HORIZON, delta=DELTA)
                 receipt = _stick.get("receipt")
+                if os.environ.get("EXPLAIN_LOG") and receipt is not None:
+                    with open(os.environ["EXPLAIN_LOG"], "a") as _fx:
+                        _fx.write(json.dumps(dict(
+                            t=round(t, 2),
+                            p=[round(float(p_d[0]), 2), round(float(p_d[1]), 2)],
+                            win=kind, s=round(float(_v2s), 2), ncyl=len(cyl),
+                            cert_id=receipt.get("cert_id"), certified=receipt.get("certified"),
+                            cands=receipt.get("explain"))) + "\n")
                 if kind in ("around_l2", "around_r2"):
                     kind = kind[:-1]                        # counts/HUD keep the l/r bucket names
                 if os.environ.get("V2_ESC", "0") == "1":
