@@ -314,6 +314,32 @@ inline double g_seg_worst_deficit(const std::vector<Iv>& b, int depth, int maxde
                   g_seg_worst_deficit(R, depth + 1, maxdepth, refuted));
 }
 
+// WINDOW-COVERAGE contract (07-21 ruling): a FINITE requested window must be covered by a
+// contiguous tiling that starts at t<=0+eps and reaches t_hi_in. The old silent clip
+// t_hi = min(t_hi_in, t_end) let a short trajectory (or a gapped tiling) return 'certified'
+// for time it never proved -- an E1-theorem poison: events that belong to U/D could book as
+// certified. Callers holding a SOUND completion for the remainder (the hover-tail law) must
+// CLIP THEIR REQUEST EXPLICITLY; this core never shrinks a window on its own again.
+inline bool g_window_covered(const std::vector<BSeg>& segs, double t_hi_in, const char* who) {
+  if (!std::isfinite(t_hi_in)) return true;      // whole-trajectory request: no window contract
+  std::vector<std::pair<double, double>> iv;
+  for (const auto& sg : segs) if (sg.dur > 0.0) iv.emplace_back(sg.t0, sg.t0 + sg.dur);
+  std::sort(iv.begin(), iv.end());
+  double cover = 0.0;
+  bool ok = !iv.empty() && iv.front().first <= 1e-6;
+  for (const auto& p : iv) {
+    if (!ok) break;
+    if (p.first > cover + 1e-6) { ok = false; break; }   // gap in the tiling
+    cover = std::max(cover, p.second);
+  }
+  if (!ok || cover + 1e-6 < t_hi_in) {
+    std::fprintf(stderr, "[bcert] %s: requested window %.3f NOT contiguously covered "
+                 "(tiled to %.3f) -> FAIL-CLOSED\n", who, t_hi_in, cover);
+    return false;
+  }
+  return true;
+}
+
 // FAIL-CLOSED input guard for the generic piecewise-Bernstein entries (2026-07-20 audit finding #7).
 // Two silent-lie modes it closes, LOUDLY (never a quiet fallback):
 //   - a NaN/Inf coefficient poisons every downstream comparison (NaN compares false, so the deficit
@@ -360,7 +386,8 @@ inline Verdict certify_segments_vs_sphere(const std::vector<BSeg>& segs, const E
                                           double R, double t_hi_in = std::numeric_limits<double>::infinity(),
                                           int maxdepth = 16, double v_eff = 0.0, double delta = 0.0,
                                           int n_axes = 3, bool* refuted = nullptr) {
-  if (!g_segs_guard(segs, "certify_segments_vs_sphere"))
+  if (!g_segs_guard(segs, "certify_segments_vs_sphere")
+      || !g_window_covered(segs, t_hi_in, "certify_segments_vs_sphere"))
     return Verdict{false, -std::numeric_limits<double>::infinity()};
   if (!c0.allFinite() || !vel.allFinite() || !acc.allFinite()
       || !std::isfinite(R) || !std::isfinite(v_eff) || !std::isfinite(delta)) {
@@ -443,7 +470,8 @@ inline Verdict certify_segments_above_plane(const std::vector<BSeg>& segs, doubl
                                             int maxdepth = 16, double v_eff_z = 0.0,
                                             double delta = 0.0, double bez_pad = 0.0,
                                             bool* refuted = nullptr) {
-  if (!g_segs_guard(segs, "certify_segments_above_plane"))
+  if (!g_segs_guard(segs, "certify_segments_above_plane")
+      || !g_window_covered(segs, t_hi_in, "certify_segments_above_plane"))
     return Verdict{false, -std::numeric_limits<double>::infinity()};
   if (!std::isfinite(z_clear) || !std::isfinite(v_eff_z) || !std::isfinite(delta) || !std::isfinite(bez_pad)) {
     std::fprintf(stderr, "[bcert] certify_segments_above_plane: non-finite plane params -> FAIL-CLOSED\n");
