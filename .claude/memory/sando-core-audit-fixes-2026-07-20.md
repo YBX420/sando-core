@@ -75,4 +75,9 @@ min_clr 自 d32b63b 起=**机体净空**(旧=中心净空,差 0.25+时序);渲�
 - **验证**:6-seed 5 个逐字节不变,s5(车重)18.3→23.5s=堵车辆真洞的代价,6/6 零碰撞;replay 回归面不涉(renderer 独有档)。
 - **待塔菲大人**:①K 表冻结批准(接受 s5 代价 vs 车辆律改形);②stack-freeze-m3off tag;③工序 6 开机(新 100 场景一次性预注册生成)。
 
+## 07-21 三否决裁决 + 最短路径执行完毕(d551476..ccb7cc0)
+塔菲大人三个都不批,病灶全中:**K=13.5 撤回**(拟合把全视界 e(d)/psig(0) 混池,而运行时 K 只买 d=0 锚——量纲错;分层真相:锚 d=0 q90=0.873全体/0.845行人/**1.225车辆**,13.3=长视界(d=1.05 阶梯到 2.79)+young 冻结预测器(young 4.6 vs mature 1.41);外加 0.30s 拟合 vs 0.10s 应用、只接 realistic 路径漏 GT-keyed、与 conformal q+v_eff·t 重复收费)→**统一 K=2.0 作工程锚 buffer 保留,"车辆洞已关闭"撤回**,重拟前提+可追溯账本=out/baselines/mem_k_evidence_2026-07-21.json;零行集"可见≠参赛"(flight_sups 只枚举有行 episode);44/138 是 episode 比例,场景级=**20/69 全空+4 半空**(正合原判"约20个消失")。
+**最短路径三步全落**:①K 恢复 2.0(s5 逐字节复现 18.3=撤回精确);②**证书窗口覆盖契约**(C++ g_window_covered:有限窗必须 t≤0 起连续铺满否则 fail-closed 大声;五个门函数显式裁剪 _tw/_tws,尾窗由 hover 律背书——**12 键与候选金逐字节同=零行为变化关掉 E1 毒洞**);③**零行 calibrator**(flight_sups(universe=):design69 94→138 flights、参赛场景 49→69)+**final100 契约建成未开机**(final100_plan 预注册:100 slot/家族冻结 RNG iid 或 --balanced 25×4 两注册选项/60-40 按 slot 冻结/root seed+重试律 root+1000k<50/注册 map-seed 集/stack SHA 必填离树拒发;final100_gen git 锁+原子场景+收据(实际 seed/attempt/全 reject 记录/scenario+stack sha)+resume 三配+耗尽写 FAILED 收据不补位+压力帽 1.5;ops/final100.sh 单 worker 每进程 5 slot)+**生成器内核四闭**(encounter 查全部交点+弧长记账;shift 后重验 min_pair 间距;provenance 记实际 attempt seed;bench 防覆盖+MANIFEST 合并不截断)。
+**现状**:栈在 ccb7cc0,证书窗/K 口径两个 tag 阻塞项已关;**待塔菲大人:①iid vs balanced 家族方案二选一;②stack-freeze-m3off tag 批准(钉后由冻结树发真 plan);③工序 6 开机**。设计面重收(design69)+锚律证据+零行参赛全部就绪;M3-off 终版标定路径畅通。
+
 相关 [[sando-core-m3-2026-07-20]] [[sando-core-raceline-2026-07-16]]
