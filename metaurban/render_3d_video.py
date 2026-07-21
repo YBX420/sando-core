@@ -2152,6 +2152,20 @@ def ego_maneuver_replan(p_d, v_d, a_d, cur_wp, t_sim):
                 _MAN_V2["receipt"] = _SL.make_receipt("hold_cert", 0.0, True, ego, _cyl,
                                                       _tau_now(), REPLAN_DT,
                                                       gates=dict(hover=True))
+        if os.environ.get("EXPLAIN_LOG"):
+            # DECISION EXPLAIN LOG (07-21 ruling: the log itself is the interpretability
+            # artifact -- every tick records the winner AND every refused candidate with the
+            # mover+leg that killed it, machine-checkable and diffable across faces)
+            _rcp0 = _MAN_V2.get("receipt") or {}
+            with open(os.environ["EXPLAIN_LOG"], "a") as _fx:
+                _fx.write(json.dumps(dict(
+                    t=round(float(t_sim), 2),
+                    p=[round(float(p_d[0]), 2), round(float(p_d[1]), 2), round(float(p_d[2]), 2)],
+                    v=round(float(np.hypot(v_d[0], v_d[1])), 2),
+                    win=kind, s=round(float(s_v2), 2) if s_v2 is not None else None,
+                    ncyl=len(_cyl), cert_id=_rcp0.get("cert_id"),
+                    certified=_rcp0.get("certified"),
+                    cands=_rcp0.get("explain"))) + "\n")
         dur = ego.duration()
         pts = [ego.eval(u)[0] for u in np.linspace(0, dur, 24)] if (kind != "hold" and dur > 1e-3) else None
         if KFDBG and (kind == "hold" or s_v2 < 0.999):
