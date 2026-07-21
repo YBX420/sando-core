@@ -1,0 +1,95 @@
+{
+ "slot": {
+  "slot_id": 89,
+  "name": "f100_089_single_timed_encounter",
+  "family": "single_timed_encounter",
+  "params": {
+   "peds": 4,
+   "crossers": 2,
+   "vehicles": 0,
+   "contested": true,
+   "hard": false
+  },
+  "root_seed": 73855144,
+  "map_seed": 29,
+  "block": "X",
+  "cluster": "f100_089_single_timed_encounter",
+  "out": "scenarios/final100/f100_089_single_timed_encounter.json",
+  "split": "test"
+ },
+ "status": "ok",
+ "seed_used": 73868144,
+ "attempt": 13,
+ "rejects": [
+  {
+   "attempt": 0,
+   "seed": 73855144,
+   "reason": "no_true_encounter"
+  },
+  {
+   "attempt": 1,
+   "seed": 73856144,
+   "reason": "no_true_encounter"
+  },
+  {
+   "attempt": 2,
+   "seed": 73857144,
+   "reason": "no_true_encounter"
+  },
+  {
+   "attempt": 3,
+   "seed": 73858144,
+   "reason": "no_safe_start"
+  },
+  {
+   "attempt": 4,
+   "seed": 73859144,
+   "reason": "no_safe_start"
+  },
+  {
+   "attempt": 5,
+   "seed": 73860144,
+   "reason": "no_true_encounter"
+  },
+  {
+   "attempt": 6,
+   "seed": 73861144,
+   "reason": "no_safe_start"
+  },
+  {
+   "attempt": 7,
+   "seed": 73862144,
+   "reason": "pressure_1.77"
+  },
+  {
+   "attempt": 8,
+   "seed": 73863144,
+   "reason": "no_true_encounter"
+  },
+  {
+   "attempt": 9,
+   "seed": 73864144,
+   "reason": "pressure_1.68"
+  },
+  {
+   "attempt": 10,
+   "seed": 73865144,
+   "reason": "no_safe_start"
+  },
+  {
+   "attempt": 11,
+   "seed": 73866144,
+   "reason": "no_true_encounter"
+  },
+  {
+   "attempt": 12,
+   "seed": 73867144,
+   "reason": "pressure_1.78"
+  }
+ ],
+ "pressure": 0.74,
+ "encounters_verified": 1,
+ "scenario_sha": "4dfaad5b6a120549",
+ "stack_sha": "07207c0dd1d35263af3d77c821523195369db116",
+ "plan_sha": "52bd39b5208ff220"
+}

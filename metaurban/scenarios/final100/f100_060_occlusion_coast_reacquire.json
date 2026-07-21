@@ -1,0 +1,337 @@
+{
+ "schema": "sando-scenario-v1",
+ "name": "f100_060_occlusion_coast_reacquire",
+ "description": "procedurally populated street life (seed 17664490): sidewalk walkers, crosswalk-area crossers, lane-following vehicles; pairwise spacing verified over the compiled timeline (floors ped-ped 0.8 / ped-veh 2.0 / veh-veh 4.0 m beyond radii). CONTESTED: corridor crosses the anchor crosser, arrivals time-aligned.",
+ "map": {
+  "seed": 29,
+  "block_str": "X"
+ },
+ "drone": {
+  "start": [
+   113.6,
+   -93.71,
+   1.5
+  ],
+  "goal": [
+   113.6,
+   -47.71,
+   1.5
+  ],
+  "cruise_z": 1.5,
+  "max_vel": 3.0,
+  "max_acc": 6.0
+ },
+ "statics": [],
+ "movers": [
+  {
+   "cls": "pedestrian",
+   "spawn_t": 5.5,
+   "path": [
+    [
+     205.4,
+     20.84
+    ],
+    [
+     200.27,
+     20.84
+    ],
+    [
+     195.15,
+     20.84
+    ],
+    [
+     190.02,
+     20.84
+    ],
+    [
+     184.9,
+     20.84
+    ],
+    [
+     179.77,
+     20.84
+    ]
+   ],
+   "speed": 1.2,
+   "hold_end": false
+  },
+  {
+   "cls": "pedestrian",
+   "spawn_t": 3.2,
+   "path": [
+    [
+     39.89,
+     23.31
+    ],
+    [
+     36.67,
+     23.31
+    ],
+    [
+     33.45,
+     23.31
+    ],
+    [
+     30.23,
+     23.31
+    ],
+    [
+     27.01,
+     23.31
+    ],
+    [
+     23.8,
+     23.31
+    ]
+   ],
+   "speed": 1.02,
+   "hold_end": false
+  },
+  {
+   "cls": "pedestrian",
+   "spawn_t": 2.2,
+   "path": [
+    [
+     147.64,
+     33.47
+    ],
+    [
+     144.79,
+     35.83
+    ],
+    [
+     142.12,
+     38.39
+    ],
+    [
+     139.66,
+     41.15
+    ],
+    [
+     137.41,
+     44.08
+    ],
+    [
+     135.39,
+     47.17
+    ]
+   ],
+   "speed": 1.62,
+   "hold_end": false
+  },
+  {
+   "cls": "pedestrian",
+   "spawn_t": 3.7,
+   "path": [
+    [
+     198.46,
+     -2.07
+    ],
+    [
+     201.27,
+     -2.07
+    ],
+    [
+     204.08,
+     -2.07
+    ],
+    [
+     206.88,
+     -2.07
+    ],
+    [
+     209.69,
+     -2.07
+    ],
+    [
+     212.5,
+     -2.07
+    ]
+   ],
+   "speed": 1.4,
+   "hold_end": false
+  },
+  {
+   "cls": "pedestrian",
+   "spawn_t": 1.2,
+   "path": [
+    [
+     31.65,
+     21.49
+    ],
+    [
+     27.32,
+     21.49
+    ],
+    [
+     22.99,
+     21.49
+    ],
+    [
+     18.66,
+     21.49
+    ],
+    [
+     14.33,
+     21.49
+    ],
+    [
+     10.0,
+     21.49
+    ]
+   ],
+   "speed": 1.33,
+   "hold_end": false
+  },
+  {
+   "cls": "pedestrian",
+   "spawn_t": 3.3,
+   "path": [
+    [
+     50.59,
+     -4.81
+    ],
+    [
+     54.94,
+     -5.05
+    ],
+    [
+     59.25,
+     -5.67
+    ],
+    [
+     63.5,
+     -6.66
+    ],
+    [
+     67.64,
+     -8.01
+    ],
+    [
+     71.65,
+     -9.72
+    ]
+   ],
+   "speed": 0.99,
+   "hold_end": false
+  },
+  {
+   "cls": "pedestrian",
+   "spawn_t": 6.9,
+   "path": [
+    [
+     126.08,
+     90.83
+    ],
+    [
+     102.15,
+     90.83
+    ]
+   ],
+   "speed": 1.17,
+   "hold_end": false
+  },
+  {
+   "cls": "pedestrian",
+   "spawn_t": 4.4,
+   "path": [
+    [
+     101.85,
+     -60.71
+    ],
+    [
+     125.35,
+     -60.71
+    ]
+   ],
+   "speed": 1.25,
+   "hold_end": false
+  },
+  {
+   "cls": "pedestrian",
+   "spawn_t": 0.6,
+   "path": [
+    [
+     100.79,
+     -66.37
+    ],
+    [
+     125.35,
+     -66.37
+    ]
+   ],
+   "speed": 1.19,
+   "hold_end": false
+  },
+  {
+   "cls": "vehicle",
+   "spawn_t": 4.1,
+   "path": [
+    [
+     177.5,
+     17.5
+    ],
+    [
+     164.91,
+     16.4
+    ],
+    [
+     152.7,
+     13.13
+    ],
+    [
+     141.25,
+     7.79
+    ],
+    [
+     130.9,
+     0.54
+    ],
+    [
+     121.96,
+     -8.4
+    ],
+    [
+     114.71,
+     -18.75
+    ],
+    [
+     109.37,
+     -30.2
+    ],
+    [
+     106.1,
+     -42.41
+    ],
+    [
+     105.0,
+     -55.0
+    ]
+   ],
+   "speed": 5.1,
+   "hold_end": false
+  }
+ ],
+ "params": {},
+ "t_max": 35.0,
+ "encounters_verified": 2,
+ "provenance": {
+  "generator_commit": "07207c0",
+  "root_seed": 17664490,
+  "gen_seed": 17664490,
+  "attempt": 0,
+  "family": "occlusion_coast_reacquire",
+  "params": {
+   "peds": 6,
+   "crossers": 3,
+   "vehicles": 1,
+   "contested": false,
+   "hard": true,
+   "split": "cal"
+  },
+  "map_seed": 29,
+  "block": "X",
+  "cluster": "f100_060_occlusion_coast_reacquire",
+  "scenario_sha": "35b61c04a7b2b9f0"
+ }
+}

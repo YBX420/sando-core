@@ -1,0 +1,1793 @@
+{
+ "schema": "final100.v1",
+ "draft": false,
+ "family_scheme": "iid_equal_prob",
+ "stack_sha": "07207c0dd1d35263af3d77c821523195369db116",
+ "stack_runtime": {
+  "git_sha": "07207c0dd1d35263af3d77c821523195369db116",
+  "metaurban_sha": "efbc6ade70f50fa602b4525f647c0fb73cdc4d1a",
+  "so_sha256": {
+   "ego_capi.so": "f50126f509e9aab6e339cc14be264622da5e368268a145a059386a86335bbe15",
+   "sando_capi.so": "93b036ada49eada372c4e7bde733b6dda7b2b01699fbd01228fec72a28599d01",
+   "cert_capi.so": "6d4e747270b8ba889fc8f4ad63c23f97d20886d271a9fe552a589ab6f86e4bb6"
+  }
+ },
+ "rng_seed": 20260721,
+ "retry_rule": "seed = root_seed + 1000*attempt, attempt < 50; every reject recorded in the receipt",
+ "map_seeds": [
+  3,
+  11,
+  17,
+  29
+ ],
+ "blocks": [
+  "X"
+ ],
+ "families": {
+  "single_timed_encounter": {
+   "peds": 4,
+   "crossers": 2,
+   "vehicles": 0,
+   "contested": true,
+   "hard": false
+  },
+  "dense_multibody": {
+   "tier": "rush",
+   "contested": true,
+   "hard": false
+  },
+  "occlusion_coast_reacquire": {
+   "peds": 6,
+   "crossers": 3,
+   "vehicles": 1,
+   "contested": false,
+   "hard": true
+  },
+  "high_dynamics_vehicles": {
+   "peds": 3,
+   "crossers": 2,
+   "vehicles": 4,
+   "contested": false,
+   "hard": true
+  }
+ },
+ "family_histogram": {
+  "single_timed_encounter": 18,
+  "dense_multibody": 38,
+  "occlusion_coast_reacquire": 26,
+  "high_dynamics_vehicles": 18
+ },
+ "split": {
+  "cal": 60,
+  "test": 40,
+  "note": "split fixed per slot BEFORE generation; cal computes quantiles only; test opens exactly once, never for tuning"
+ },
+ "animals": "stress suite only, excluded from the main coverage theorem",
+ "slots": [
+  {
+   "slot_id": 0,
+   "name": "f100_000_single_timed_encounter",
+   "family": "single_timed_encounter",
+   "params": {
+    "peds": 4,
+    "crossers": 2,
+    "vehicles": 0,
+    "contested": true,
+    "hard": false
+   },
+   "root_seed": 70098089,
+   "map_seed": 29,
+   "block": "X",
+   "cluster": "f100_000_single_timed_encounter",
+   "out": "scenarios/final100/f100_000_single_timed_encounter.json",
+   "split": "cal"
+  },
+  {
+   "slot_id": 1,
+   "name": "f100_001_dense_multibody",
+   "family": "dense_multibody",
+   "params": {
+    "tier": "rush",
+    "contested": true,
+    "hard": false
+   },
+   "root_seed": 56885736,
+   "map_seed": 11,
+   "block": "X",
+   "cluster": "f100_001_dense_multibody",
+   "out": "scenarios/final100/f100_001_dense_multibody.json",
+   "split": "cal"
+  },
+  {
+   "slot_id": 2,
+   "name": "f100_002_dense_multibody",
+   "family": "dense_multibody",
+   "params": {
+    "tier": "rush",
+    "contested": true,
+    "hard": false
+   },
+   "root_seed": 55273131,
+   "map_seed": 11,
+   "block": "X",
+   "cluster": "f100_002_dense_multibody",
+   "out": "scenarios/final100/f100_002_dense_multibody.json",
+   "split": "test"
+  },
+  {
+   "slot_id": 3,
+   "name": "f100_003_dense_multibody",
+   "family": "dense_multibody",
+   "params": {
+    "tier": "rush",
+    "contested": true,
+    "hard": false
+   },
+   "root_seed": 24412380,
+   "map_seed": 17,
+   "block": "X",
+   "cluster": "f100_003_dense_multibody",
+   "out": "scenarios/final100/f100_003_dense_multibody.json",
+   "split": "cal"
+  },
+  {
+   "slot_id": 4,
+   "name": "f100_004_occlusion_coast_reacquire",
+   "family": "occlusion_coast_reacquire",
+   "params": {
+    "peds": 6,
+    "crossers": 3,
+    "vehicles": 1,
+    "contested": false,
+    "hard": true
+   },
+   "root_seed": 89356491,
+   "map_seed": 3,
+   "block": "X",
+   "cluster": "f100_004_occlusion_coast_reacquire",
+   "out": "scenarios/final100/f100_004_occlusion_coast_reacquire.json",
+   "split": "cal"
+  },
+  {
+   "slot_id": 5,
+   "name": "f100_005_occlusion_coast_reacquire",
+   "family": "occlusion_coast_reacquire",
+   "params": {
+    "peds": 6,
+    "crossers": 3,
+    "vehicles": 1,
+    "contested": false,
+    "hard": true
+   },
+   "root_seed": 43191447,
+   "map_seed": 3,
+   "block": "X",
+   "cluster": "f100_005_occlusion_coast_reacquire",
+   "out": "scenarios/final100/f100_005_occlusion_coast_reacquire.json",
+   "split": "test"
+  },
+  {
+   "slot_id": 6,
+   "name": "f100_006_single_timed_encounter",
+   "family": "single_timed_encounter",
+   "params": {
+    "peds": 4,
+    "crossers": 2,
+    "vehicles": 0,
+    "contested": true,
+    "hard": false
+   },
+   "root_seed": 61232735,
+   "map_seed": 17,
+   "block": "X",
+   "cluster": "f100_006_single_timed_encounter",
+   "out": "scenarios/final100/f100_006_single_timed_encounter.json",
+   "split": "cal"
+  },
+  {
+   "slot_id": 7,
+   "name": "f100_007_high_dynamics_vehicles",
+   "family": "high_dynamics_vehicles",
+   "params": {
+    "peds": 3,
+    "crossers": 2,
+    "vehicles": 4,
+    "contested": false,
+    "hard": true
+   },
+   "root_seed": 81288627,
+   "map_seed": 3,
+   "block": "X",
+   "cluster": "f100_007_high_dynamics_vehicles",
+   "out": "scenarios/final100/f100_007_high_dynamics_vehicles.json",
+   "split": "test"
+  },
+  {
+   "slot_id": 8,
+   "name": "f100_008_high_dynamics_vehicles",
+   "family": "high_dynamics_vehicles",
+   "params": {
+    "peds": 3,
+    "crossers": 2,
+    "vehicles": 4,
+    "contested": false,
+    "hard": true
+   },
+   "root_seed": 80886372,
+   "map_seed": 3,
+   "block": "X",
+   "cluster": "f100_008_high_dynamics_vehicles",
+   "out": "scenarios/final100/f100_008_high_dynamics_vehicles.json",
+   "split": "test"
+  },
+  {
+   "slot_id": 9,
+   "name": "f100_009_occlusion_coast_reacquire",
+   "family": "occlusion_coast_reacquire",
+   "params": {
+    "peds": 6,
+    "crossers": 3,
+    "vehicles": 1,
+    "contested": false,
+    "hard": true
+   },
+   "root_seed": 44941915,
+   "map_seed": 29,
+   "block": "X",
+   "cluster": "f100_009_occlusion_coast_reacquire",
+   "out": "scenarios/final100/f100_009_occlusion_coast_reacquire.json",
+   "split": "cal"
+  },
+  {
+   "slot_id": 10,
+   "name": "f100_010_occlusion_coast_reacquire",
+   "family": "occlusion_coast_reacquire",
+   "params": {
+    "peds": 6,
+    "crossers": 3,
+    "vehicles": 1,
+    "contested": false,
+    "hard": true
+   },
+   "root_seed": 93352531,
+   "map_seed": 29,
+   "block": "X",
+   "cluster": "f100_010_occlusion_coast_reacquire",
+   "out": "scenarios/final100/f100_010_occlusion_coast_reacquire.json",
+   "split": "test"
+  },
+  {
+   "slot_id": 11,
+   "name": "f100_011_single_timed_encounter",
+   "family": "single_timed_encounter",
+   "params": {
+    "peds": 4,
+    "crossers": 2,
+    "vehicles": 0,
+    "contested": true,
+    "hard": false
+   },
+   "root_seed": 29450910,
+   "map_seed": 11,
+   "block": "X",
+   "cluster": "f100_011_single_timed_encounter",
+   "out": "scenarios/final100/f100_011_single_timed_encounter.json",
+   "split": "test"
+  },
+  {
+   "slot_id": 12,
+   "name": "f100_012_occlusion_coast_reacquire",
+   "family": "occlusion_coast_reacquire",
+   "params": {
+    "peds": 6,
+    "crossers": 3,
+    "vehicles": 1,
+    "contested": false,
+    "hard": true
+   },
+   "root_seed": 73466996,
+   "map_seed": 17,
+   "block": "X",
+   "cluster": "f100_012_occlusion_coast_reacquire",
+   "out": "scenarios/final100/f100_012_occlusion_coast_reacquire.json",
+   "split": "cal"
+  },
+  {
+   "slot_id": 13,
+   "name": "f100_013_single_timed_encounter",
+   "family": "single_timed_encounter",
+   "params": {
+    "peds": 4,
+    "crossers": 2,
+    "vehicles": 0,
+    "contested": true,
+    "hard": false
+   },
+   "root_seed": 1120711,
+   "map_seed": 11,
+   "block": "X",
+   "cluster": "f100_013_single_timed_encounter",
+   "out": "scenarios/final100/f100_013_single_timed_encounter.json",
+   "split": "cal"
+  },
+  {
+   "slot_id": 14,
+   "name": "f100_014_occlusion_coast_reacquire",
+   "family": "occlusion_coast_reacquire",
+   "params": {
+    "peds": 6,
+    "crossers": 3,
+    "vehicles": 1,
+    "contested": false,
+    "hard": true
+   },
+   "root_seed": 30967084,
+   "map_seed": 29,
+   "block": "X",
+   "cluster": "f100_014_occlusion_coast_reacquire",
+   "out": "scenarios/final100/f100_014_occlusion_coast_reacquire.json",
+   "split": "cal"
+  },
+  {
+   "slot_id": 15,
+   "name": "f100_015_dense_multibody",
+   "family": "dense_multibody",
+   "params": {
+    "tier": "rush",
+    "contested": true,
+    "hard": false
+   },
+   "root_seed": 87157783,
+   "map_seed": 3,
+   "block": "X",
+   "cluster": "f100_015_dense_multibody",
+   "out": "scenarios/final100/f100_015_dense_multibody.json",
+   "split": "test"
+  },
+  {
+   "slot_id": 16,
+   "name": "f100_016_single_timed_encounter",
+   "family": "single_timed_encounter",
+   "params": {
+    "peds": 4,
+    "crossers": 2,
+    "vehicles": 0,
+    "contested": true,
+    "hard": false
+   },
+   "root_seed": 33447812,
+   "map_seed": 3,
+   "block": "X",
+   "cluster": "f100_016_single_timed_encounter",
+   "out": "scenarios/final100/f100_016_single_timed_encounter.json",
+   "split": "test"
+  },
+  {
+   "slot_id": 17,
+   "name": "f100_017_single_timed_encounter",
+   "family": "single_timed_encounter",
+   "params": {
+    "peds": 4,
+    "crossers": 2,
+    "vehicles": 0,
+    "contested": true,
+    "hard": false
+   },
+   "root_seed": 4243379,
+   "map_seed": 3,
+   "block": "X",
+   "cluster": "f100_017_single_timed_encounter",
+   "out": "scenarios/final100/f100_017_single_timed_encounter.json",
+   "split": "test"
+  },
+  {
+   "slot_id": 18,
+   "name": "f100_018_dense_multibody",
+   "family": "dense_multibody",
+   "params": {
+    "tier": "rush",
+    "contested": true,
+    "hard": false
+   },
+   "root_seed": 65075447,
+   "map_seed": 3,
+   "block": "X",
+   "cluster": "f100_018_dense_multibody",
+   "out": "scenarios/final100/f100_018_dense_multibody.json",
+   "split": "cal"
+  },
+  {
+   "slot_id": 19,
+   "name": "f100_019_dense_multibody",
+   "family": "dense_multibody",
+   "params": {
+    "tier": "rush",
+    "contested": true,
+    "hard": false
+   },
+   "root_seed": 66839656,
+   "map_seed": 17,
+   "block": "X",
+   "cluster": "f100_019_dense_multibody",
+   "out": "scenarios/final100/f100_019_dense_multibody.json",
+   "split": "test"
+  },
+  {
+   "slot_id": 20,
+   "name": "f100_020_high_dynamics_vehicles",
+   "family": "high_dynamics_vehicles",
+   "params": {
+    "peds": 3,
+    "crossers": 2,
+    "vehicles": 4,
+    "contested": false,
+    "hard": true
+   },
+   "root_seed": 50950527,
+   "map_seed": 17,
+   "block": "X",
+   "cluster": "f100_020_high_dynamics_vehicles",
+   "out": "scenarios/final100/f100_020_high_dynamics_vehicles.json",
+   "split": "cal"
+  },
+  {
+   "slot_id": 21,
+   "name": "f100_021_single_timed_encounter",
+   "family": "single_timed_encounter",
+   "params": {
+    "peds": 4,
+    "crossers": 2,
+    "vehicles": 0,
+    "contested": true,
+    "hard": false
+   },
+   "root_seed": 97294906,
+   "map_seed": 29,
+   "block": "X",
+   "cluster": "f100_021_single_timed_encounter",
+   "out": "scenarios/final100/f100_021_single_timed_encounter.json",
+   "split": "test"
+  },
+  {
+   "slot_id": 22,
+   "name": "f100_022_dense_multibody",
+   "family": "dense_multibody",
+   "params": {
+    "tier": "rush",
+    "contested": true,
+    "hard": false
+   },
+   "root_seed": 5272804,
+   "map_seed": 11,
+   "block": "X",
+   "cluster": "f100_022_dense_multibody",
+   "out": "scenarios/final100/f100_022_dense_multibody.json",
+   "split": "cal"
+  },
+  {
+   "slot_id": 23,
+   "name": "f100_023_occlusion_coast_reacquire",
+   "family": "occlusion_coast_reacquire",
+   "params": {
+    "peds": 6,
+    "crossers": 3,
+    "vehicles": 1,
+    "contested": false,
+    "hard": true
+   },
+   "root_seed": 8297509,
+   "map_seed": 29,
+   "block": "X",
+   "cluster": "f100_023_occlusion_coast_reacquire",
+   "out": "scenarios/final100/f100_023_occlusion_coast_reacquire.json",
+   "split": "test"
+  },
+  {
+   "slot_id": 24,
+   "name": "f100_024_occlusion_coast_reacquire",
+   "family": "occlusion_coast_reacquire",
+   "params": {
+    "peds": 6,
+    "crossers": 3,
+    "vehicles": 1,
+    "contested": false,
+    "hard": true
+   },
+   "root_seed": 94086846,
+   "map_seed": 3,
+   "block": "X",
+   "cluster": "f100_024_occlusion_coast_reacquire",
+   "out": "scenarios/final100/f100_024_occlusion_coast_reacquire.json",
+   "split": "cal"
+  },
+  {
+   "slot_id": 25,
+   "name": "f100_025_dense_multibody",
+   "family": "dense_multibody",
+   "params": {
+    "tier": "rush",
+    "contested": true,
+    "hard": false
+   },
+   "root_seed": 4992110,
+   "map_seed": 11,
+   "block": "X",
+   "cluster": "f100_025_dense_multibody",
+   "out": "scenarios/final100/f100_025_dense_multibody.json",
+   "split": "test"
+  },
+  {
+   "slot_id": 26,
+   "name": "f100_026_occlusion_coast_reacquire",
+   "family": "occlusion_coast_reacquire",
+   "params": {
+    "peds": 6,
+    "crossers": 3,
+    "vehicles": 1,
+    "contested": false,
+    "hard": true
+   },
+   "root_seed": 292266,
+   "map_seed": 29,
+   "block": "X",
+   "cluster": "f100_026_occlusion_coast_reacquire",
+   "out": "scenarios/final100/f100_026_occlusion_coast_reacquire.json",
+   "split": "cal"
+  },
+  {
+   "slot_id": 27,
+   "name": "f100_027_occlusion_coast_reacquire",
+   "family": "occlusion_coast_reacquire",
+   "params": {
+    "peds": 6,
+    "crossers": 3,
+    "vehicles": 1,
+    "contested": false,
+    "hard": true
+   },
+   "root_seed": 92929504,
+   "map_seed": 11,
+   "block": "X",
+   "cluster": "f100_027_occlusion_coast_reacquire",
+   "out": "scenarios/final100/f100_027_occlusion_coast_reacquire.json",
+   "split": "cal"
+  },
+  {
+   "slot_id": 28,
+   "name": "f100_028_single_timed_encounter",
+   "family": "single_timed_encounter",
+   "params": {
+    "peds": 4,
+    "crossers": 2,
+    "vehicles": 0,
+    "contested": true,
+    "hard": false
+   },
+   "root_seed": 47136764,
+   "map_seed": 11,
+   "block": "X",
+   "cluster": "f100_028_single_timed_encounter",
+   "out": "scenarios/final100/f100_028_single_timed_encounter.json",
+   "split": "cal"
+  },
+  {
+   "slot_id": 29,
+   "name": "f100_029_high_dynamics_vehicles",
+   "family": "high_dynamics_vehicles",
+   "params": {
+    "peds": 3,
+    "crossers": 2,
+    "vehicles": 4,
+    "contested": false,
+    "hard": true
+   },
+   "root_seed": 54005491,
+   "map_seed": 29,
+   "block": "X",
+   "cluster": "f100_029_high_dynamics_vehicles",
+   "out": "scenarios/final100/f100_029_high_dynamics_vehicles.json",
+   "split": "cal"
+  },
+  {
+   "slot_id": 30,
+   "name": "f100_030_dense_multibody",
+   "family": "dense_multibody",
+   "params": {
+    "tier": "rush",
+    "contested": true,
+    "hard": false
+   },
+   "root_seed": 31008498,
+   "map_seed": 11,
+   "block": "X",
+   "cluster": "f100_030_dense_multibody",
+   "out": "scenarios/final100/f100_030_dense_multibody.json",
+   "split": "test"
+  },
+  {
+   "slot_id": 31,
+   "name": "f100_031_dense_multibody",
+   "family": "dense_multibody",
+   "params": {
+    "tier": "rush",
+    "contested": true,
+    "hard": false
+   },
+   "root_seed": 98355153,
+   "map_seed": 29,
+   "block": "X",
+   "cluster": "f100_031_dense_multibody",
+   "out": "scenarios/final100/f100_031_dense_multibody.json",
+   "split": "cal"
+  },
+  {
+   "slot_id": 32,
+   "name": "f100_032_dense_multibody",
+   "family": "dense_multibody",
+   "params": {
+    "tier": "rush",
+    "contested": true,
+    "hard": false
+   },
+   "root_seed": 43163124,
+   "map_seed": 17,
+   "block": "X",
+   "cluster": "f100_032_dense_multibody",
+   "out": "scenarios/final100/f100_032_dense_multibody.json",
+   "split": "cal"
+  },
+  {
+   "slot_id": 33,
+   "name": "f100_033_occlusion_coast_reacquire",
+   "family": "occlusion_coast_reacquire",
+   "params": {
+    "peds": 6,
+    "crossers": 3,
+    "vehicles": 1,
+    "contested": false,
+    "hard": true
+   },
+   "root_seed": 33426359,
+   "map_seed": 3,
+   "block": "X",
+   "cluster": "f100_033_occlusion_coast_reacquire",
+   "out": "scenarios/final100/f100_033_occlusion_coast_reacquire.json",
+   "split": "test"
+  },
+  {
+   "slot_id": 34,
+   "name": "f100_034_high_dynamics_vehicles",
+   "family": "high_dynamics_vehicles",
+   "params": {
+    "peds": 3,
+    "crossers": 2,
+    "vehicles": 4,
+    "contested": false,
+    "hard": true
+   },
+   "root_seed": 45626498,
+   "map_seed": 11,
+   "block": "X",
+   "cluster": "f100_034_high_dynamics_vehicles",
+   "out": "scenarios/final100/f100_034_high_dynamics_vehicles.json",
+   "split": "cal"
+  },
+  {
+   "slot_id": 35,
+   "name": "f100_035_occlusion_coast_reacquire",
+   "family": "occlusion_coast_reacquire",
+   "params": {
+    "peds": 6,
+    "crossers": 3,
+    "vehicles": 1,
+    "contested": false,
+    "hard": true
+   },
+   "root_seed": 64272008,
+   "map_seed": 17,
+   "block": "X",
+   "cluster": "f100_035_occlusion_coast_reacquire",
+   "out": "scenarios/final100/f100_035_occlusion_coast_reacquire.json",
+   "split": "test"
+  },
+  {
+   "slot_id": 36,
+   "name": "f100_036_occlusion_coast_reacquire",
+   "family": "occlusion_coast_reacquire",
+   "params": {
+    "peds": 6,
+    "crossers": 3,
+    "vehicles": 1,
+    "contested": false,
+    "hard": true
+   },
+   "root_seed": 91605910,
+   "map_seed": 17,
+   "block": "X",
+   "cluster": "f100_036_occlusion_coast_reacquire",
+   "out": "scenarios/final100/f100_036_occlusion_coast_reacquire.json",
+   "split": "cal"
+  },
+  {
+   "slot_id": 37,
+   "name": "f100_037_single_timed_encounter",
+   "family": "single_timed_encounter",
+   "params": {
+    "peds": 4,
+    "crossers": 2,
+    "vehicles": 0,
+    "contested": true,
+    "hard": false
+   },
+   "root_seed": 62132173,
+   "map_seed": 29,
+   "block": "X",
+   "cluster": "f100_037_single_timed_encounter",
+   "out": "scenarios/final100/f100_037_single_timed_encounter.json",
+   "split": "cal"
+  },
+  {
+   "slot_id": 38,
+   "name": "f100_038_dense_multibody",
+   "family": "dense_multibody",
+   "params": {
+    "tier": "rush",
+    "contested": true,
+    "hard": false
+   },
+   "root_seed": 87621221,
+   "map_seed": 3,
+   "block": "X",
+   "cluster": "f100_038_dense_multibody",
+   "out": "scenarios/final100/f100_038_dense_multibody.json",
+   "split": "test"
+  },
+  {
+   "slot_id": 39,
+   "name": "f100_039_dense_multibody",
+   "family": "dense_multibody",
+   "params": {
+    "tier": "rush",
+    "contested": true,
+    "hard": false
+   },
+   "root_seed": 17839900,
+   "map_seed": 17,
+   "block": "X",
+   "cluster": "f100_039_dense_multibody",
+   "out": "scenarios/final100/f100_039_dense_multibody.json",
+   "split": "cal"
+  },
+  {
+   "slot_id": 40,
+   "name": "f100_040_occlusion_coast_reacquire",
+   "family": "occlusion_coast_reacquire",
+   "params": {
+    "peds": 6,
+    "crossers": 3,
+    "vehicles": 1,
+    "contested": false,
+    "hard": true
+   },
+   "root_seed": 52101410,
+   "map_seed": 17,
+   "block": "X",
+   "cluster": "f100_040_occlusion_coast_reacquire",
+   "out": "scenarios/final100/f100_040_occlusion_coast_reacquire.json",
+   "split": "cal"
+  },
+  {
+   "slot_id": 41,
+   "name": "f100_041_dense_multibody",
+   "family": "dense_multibody",
+   "params": {
+    "tier": "rush",
+    "contested": true,
+    "hard": false
+   },
+   "root_seed": 61717972,
+   "map_seed": 11,
+   "block": "X",
+   "cluster": "f100_041_dense_multibody",
+   "out": "scenarios/final100/f100_041_dense_multibody.json",
+   "split": "cal"
+  },
+  {
+   "slot_id": 42,
+   "name": "f100_042_dense_multibody",
+   "family": "dense_multibody",
+   "params": {
+    "tier": "rush",
+    "contested": true,
+    "hard": false
+   },
+   "root_seed": 32048751,
+   "map_seed": 3,
+   "block": "X",
+   "cluster": "f100_042_dense_multibody",
+   "out": "scenarios/final100/f100_042_dense_multibody.json",
+   "split": "cal"
+  },
+  {
+   "slot_id": 43,
+   "name": "f100_043_occlusion_coast_reacquire",
+   "family": "occlusion_coast_reacquire",
+   "params": {
+    "peds": 6,
+    "crossers": 3,
+    "vehicles": 1,
+    "contested": false,
+    "hard": true
+   },
+   "root_seed": 22657534,
+   "map_seed": 11,
+   "block": "X",
+   "cluster": "f100_043_occlusion_coast_reacquire",
+   "out": "scenarios/final100/f100_043_occlusion_coast_reacquire.json",
+   "split": "cal"
+  },
+  {
+   "slot_id": 44,
+   "name": "f100_044_high_dynamics_vehicles",
+   "family": "high_dynamics_vehicles",
+   "params": {
+    "peds": 3,
+    "crossers": 2,
+    "vehicles": 4,
+    "contested": false,
+    "hard": true
+   },
+   "root_seed": 7409278,
+   "map_seed": 11,
+   "block": "X",
+   "cluster": "f100_044_high_dynamics_vehicles",
+   "out": "scenarios/final100/f100_044_high_dynamics_vehicles.json",
+   "split": "test"
+  },
+  {
+   "slot_id": 45,
+   "name": "f100_045_dense_multibody",
+   "family": "dense_multibody",
+   "params": {
+    "tier": "rush",
+    "contested": true,
+    "hard": false
+   },
+   "root_seed": 78101054,
+   "map_seed": 17,
+   "block": "X",
+   "cluster": "f100_045_dense_multibody",
+   "out": "scenarios/final100/f100_045_dense_multibody.json",
+   "split": "cal"
+  },
+  {
+   "slot_id": 46,
+   "name": "f100_046_dense_multibody",
+   "family": "dense_multibody",
+   "params": {
+    "tier": "rush",
+    "contested": true,
+    "hard": false
+   },
+   "root_seed": 35337697,
+   "map_seed": 29,
+   "block": "X",
+   "cluster": "f100_046_dense_multibody",
+   "out": "scenarios/final100/f100_046_dense_multibody.json",
+   "split": "cal"
+  },
+  {
+   "slot_id": 47,
+   "name": "f100_047_high_dynamics_vehicles",
+   "family": "high_dynamics_vehicles",
+   "params": {
+    "peds": 3,
+    "crossers": 2,
+    "vehicles": 4,
+    "contested": false,
+    "hard": true
+   },
+   "root_seed": 15527439,
+   "map_seed": 3,
+   "block": "X",
+   "cluster": "f100_047_high_dynamics_vehicles",
+   "out": "scenarios/final100/f100_047_high_dynamics_vehicles.json",
+   "split": "cal"
+  },
+  {
+   "slot_id": 48,
+   "name": "f100_048_high_dynamics_vehicles",
+   "family": "high_dynamics_vehicles",
+   "params": {
+    "peds": 3,
+    "crossers": 2,
+    "vehicles": 4,
+    "contested": false,
+    "hard": true
+   },
+   "root_seed": 1437331,
+   "map_seed": 3,
+   "block": "X",
+   "cluster": "f100_048_high_dynamics_vehicles",
+   "out": "scenarios/final100/f100_048_high_dynamics_vehicles.json",
+   "split": "cal"
+  },
+  {
+   "slot_id": 49,
+   "name": "f100_049_high_dynamics_vehicles",
+   "family": "high_dynamics_vehicles",
+   "params": {
+    "peds": 3,
+    "crossers": 2,
+    "vehicles": 4,
+    "contested": false,
+    "hard": true
+   },
+   "root_seed": 57874087,
+   "map_seed": 17,
+   "block": "X",
+   "cluster": "f100_049_high_dynamics_vehicles",
+   "out": "scenarios/final100/f100_049_high_dynamics_vehicles.json",
+   "split": "cal"
+  },
+  {
+   "slot_id": 50,
+   "name": "f100_050_dense_multibody",
+   "family": "dense_multibody",
+   "params": {
+    "tier": "rush",
+    "contested": true,
+    "hard": false
+   },
+   "root_seed": 84021654,
+   "map_seed": 11,
+   "block": "X",
+   "cluster": "f100_050_dense_multibody",
+   "out": "scenarios/final100/f100_050_dense_multibody.json",
+   "split": "cal"
+  },
+  {
+   "slot_id": 51,
+   "name": "f100_051_dense_multibody",
+   "family": "dense_multibody",
+   "params": {
+    "tier": "rush",
+    "contested": true,
+    "hard": false
+   },
+   "root_seed": 39295770,
+   "map_seed": 11,
+   "block": "X",
+   "cluster": "f100_051_dense_multibody",
+   "out": "scenarios/final100/f100_051_dense_multibody.json",
+   "split": "test"
+  },
+  {
+   "slot_id": 52,
+   "name": "f100_052_single_timed_encounter",
+   "family": "single_timed_encounter",
+   "params": {
+    "peds": 4,
+    "crossers": 2,
+    "vehicles": 0,
+    "contested": true,
+    "hard": false
+   },
+   "root_seed": 20146323,
+   "map_seed": 3,
+   "block": "X",
+   "cluster": "f100_052_single_timed_encounter",
+   "out": "scenarios/final100/f100_052_single_timed_encounter.json",
+   "split": "test"
+  },
+  {
+   "slot_id": 53,
+   "name": "f100_053_high_dynamics_vehicles",
+   "family": "high_dynamics_vehicles",
+   "params": {
+    "peds": 3,
+    "crossers": 2,
+    "vehicles": 4,
+    "contested": false,
+    "hard": true
+   },
+   "root_seed": 84442839,
+   "map_seed": 3,
+   "block": "X",
+   "cluster": "f100_053_high_dynamics_vehicles",
+   "out": "scenarios/final100/f100_053_high_dynamics_vehicles.json",
+   "split": "cal"
+  },
+  {
+   "slot_id": 54,
+   "name": "f100_054_single_timed_encounter",
+   "family": "single_timed_encounter",
+   "params": {
+    "peds": 4,
+    "crossers": 2,
+    "vehicles": 0,
+    "contested": true,
+    "hard": false
+   },
+   "root_seed": 26567658,
+   "map_seed": 17,
+   "block": "X",
+   "cluster": "f100_054_single_timed_encounter",
+   "out": "scenarios/final100/f100_054_single_timed_encounter.json",
+   "split": "test"
+  },
+  {
+   "slot_id": 55,
+   "name": "f100_055_dense_multibody",
+   "family": "dense_multibody",
+   "params": {
+    "tier": "rush",
+    "contested": true,
+    "hard": false
+   },
+   "root_seed": 68576628,
+   "map_seed": 29,
+   "block": "X",
+   "cluster": "f100_055_dense_multibody",
+   "out": "scenarios/final100/f100_055_dense_multibody.json",
+   "split": "cal"
+  },
+  {
+   "slot_id": 56,
+   "name": "f100_056_high_dynamics_vehicles",
+   "family": "high_dynamics_vehicles",
+   "params": {
+    "peds": 3,
+    "crossers": 2,
+    "vehicles": 4,
+    "contested": false,
+    "hard": true
+   },
+   "root_seed": 1686376,
+   "map_seed": 29,
+   "block": "X",
+   "cluster": "f100_056_high_dynamics_vehicles",
+   "out": "scenarios/final100/f100_056_high_dynamics_vehicles.json",
+   "split": "test"
+  },
+  {
+   "slot_id": 57,
+   "name": "f100_057_occlusion_coast_reacquire",
+   "family": "occlusion_coast_reacquire",
+   "params": {
+    "peds": 6,
+    "crossers": 3,
+    "vehicles": 1,
+    "contested": false,
+    "hard": true
+   },
+   "root_seed": 25254811,
+   "map_seed": 29,
+   "block": "X",
+   "cluster": "f100_057_occlusion_coast_reacquire",
+   "out": "scenarios/final100/f100_057_occlusion_coast_reacquire.json",
+   "split": "cal"
+  },
+  {
+   "slot_id": 58,
+   "name": "f100_058_occlusion_coast_reacquire",
+   "family": "occlusion_coast_reacquire",
+   "params": {
+    "peds": 6,
+    "crossers": 3,
+    "vehicles": 1,
+    "contested": false,
+    "hard": true
+   },
+   "root_seed": 99725581,
+   "map_seed": 29,
+   "block": "X",
+   "cluster": "f100_058_occlusion_coast_reacquire",
+   "out": "scenarios/final100/f100_058_occlusion_coast_reacquire.json",
+   "split": "cal"
+  },
+  {
+   "slot_id": 59,
+   "name": "f100_059_dense_multibody",
+   "family": "dense_multibody",
+   "params": {
+    "tier": "rush",
+    "contested": true,
+    "hard": false
+   },
+   "root_seed": 33768400,
+   "map_seed": 29,
+   "block": "X",
+   "cluster": "f100_059_dense_multibody",
+   "out": "scenarios/final100/f100_059_dense_multibody.json",
+   "split": "test"
+  },
+  {
+   "slot_id": 60,
+   "name": "f100_060_occlusion_coast_reacquire",
+   "family": "occlusion_coast_reacquire",
+   "params": {
+    "peds": 6,
+    "crossers": 3,
+    "vehicles": 1,
+    "contested": false,
+    "hard": true
+   },
+   "root_seed": 17664490,
+   "map_seed": 29,
+   "block": "X",
+   "cluster": "f100_060_occlusion_coast_reacquire",
+   "out": "scenarios/final100/f100_060_occlusion_coast_reacquire.json",
+   "split": "cal"
+  },
+  {
+   "slot_id": 61,
+   "name": "f100_061_dense_multibody",
+   "family": "dense_multibody",
+   "params": {
+    "tier": "rush",
+    "contested": true,
+    "hard": false
+   },
+   "root_seed": 99459238,
+   "map_seed": 17,
+   "block": "X",
+   "cluster": "f100_061_dense_multibody",
+   "out": "scenarios/final100/f100_061_dense_multibody.json",
+   "split": "test"
+  },
+  {
+   "slot_id": 62,
+   "name": "f100_062_occlusion_coast_reacquire",
+   "family": "occlusion_coast_reacquire",
+   "params": {
+    "peds": 6,
+    "crossers": 3,
+    "vehicles": 1,
+    "contested": false,
+    "hard": true
+   },
+   "root_seed": 91292721,
+   "map_seed": 17,
+   "block": "X",
+   "cluster": "f100_062_occlusion_coast_reacquire",
+   "out": "scenarios/final100/f100_062_occlusion_coast_reacquire.json",
+   "split": "test"
+  },
+  {
+   "slot_id": 63,
+   "name": "f100_063_dense_multibody",
+   "family": "dense_multibody",
+   "params": {
+    "tier": "rush",
+    "contested": true,
+    "hard": false
+   },
+   "root_seed": 25177216,
+   "map_seed": 17,
+   "block": "X",
+   "cluster": "f100_063_dense_multibody",
+   "out": "scenarios/final100/f100_063_dense_multibody.json",
+   "split": "cal"
+  },
+  {
+   "slot_id": 64,
+   "name": "f100_064_occlusion_coast_reacquire",
+   "family": "occlusion_coast_reacquire",
+   "params": {
+    "peds": 6,
+    "crossers": 3,
+    "vehicles": 1,
+    "contested": false,
+    "hard": true
+   },
+   "root_seed": 53358518,
+   "map_seed": 3,
+   "block": "X",
+   "cluster": "f100_064_occlusion_coast_reacquire",
+   "out": "scenarios/final100/f100_064_occlusion_coast_reacquire.json",
+   "split": "cal"
+  },
+  {
+   "slot_id": 65,
+   "name": "f100_065_high_dynamics_vehicles",
+   "family": "high_dynamics_vehicles",
+   "params": {
+    "peds": 3,
+    "crossers": 2,
+    "vehicles": 4,
+    "contested": false,
+    "hard": true
+   },
+   "root_seed": 71701889,
+   "map_seed": 11,
+   "block": "X",
+   "cluster": "f100_065_high_dynamics_vehicles",
+   "out": "scenarios/final100/f100_065_high_dynamics_vehicles.json",
+   "split": "cal"
+  },
+  {
+   "slot_id": 66,
+   "name": "f100_066_high_dynamics_vehicles",
+   "family": "high_dynamics_vehicles",
+   "params": {
+    "peds": 3,
+    "crossers": 2,
+    "vehicles": 4,
+    "contested": false,
+    "hard": true
+   },
+   "root_seed": 83727446,
+   "map_seed": 29,
+   "block": "X",
+   "cluster": "f100_066_high_dynamics_vehicles",
+   "out": "scenarios/final100/f100_066_high_dynamics_vehicles.json",
+   "split": "cal"
+  },
+  {
+   "slot_id": 67,
+   "name": "f100_067_dense_multibody",
+   "family": "dense_multibody",
+   "params": {
+    "tier": "rush",
+    "contested": true,
+    "hard": false
+   },
+   "root_seed": 62806897,
+   "map_seed": 3,
+   "block": "X",
+   "cluster": "f100_067_dense_multibody",
+   "out": "scenarios/final100/f100_067_dense_multibody.json",
+   "split": "cal"
+  },
+  {
+   "slot_id": 68,
+   "name": "f100_068_single_timed_encounter",
+   "family": "single_timed_encounter",
+   "params": {
+    "peds": 4,
+    "crossers": 2,
+    "vehicles": 0,
+    "contested": true,
+    "hard": false
+   },
+   "root_seed": 6802431,
+   "map_seed": 3,
+   "block": "X",
+   "cluster": "f100_068_single_timed_encounter",
+   "out": "scenarios/final100/f100_068_single_timed_encounter.json",
+   "split": "test"
+  },
+  {
+   "slot_id": 69,
+   "name": "f100_069_dense_multibody",
+   "family": "dense_multibody",
+   "params": {
+    "tier": "rush",
+    "contested": true,
+    "hard": false
+   },
+   "root_seed": 14014348,
+   "map_seed": 29,
+   "block": "X",
+   "cluster": "f100_069_dense_multibody",
+   "out": "scenarios/final100/f100_069_dense_multibody.json",
+   "split": "cal"
+  },
+  {
+   "slot_id": 70,
+   "name": "f100_070_dense_multibody",
+   "family": "dense_multibody",
+   "params": {
+    "tier": "rush",
+    "contested": true,
+    "hard": false
+   },
+   "root_seed": 56693582,
+   "map_seed": 17,
+   "block": "X",
+   "cluster": "f100_070_dense_multibody",
+   "out": "scenarios/final100/f100_070_dense_multibody.json",
+   "split": "test"
+  },
+  {
+   "slot_id": 71,
+   "name": "f100_071_dense_multibody",
+   "family": "dense_multibody",
+   "params": {
+    "tier": "rush",
+    "contested": true,
+    "hard": false
+   },
+   "root_seed": 10661982,
+   "map_seed": 11,
+   "block": "X",
+   "cluster": "f100_071_dense_multibody",
+   "out": "scenarios/final100/f100_071_dense_multibody.json",
+   "split": "cal"
+  },
+  {
+   "slot_id": 72,
+   "name": "f100_072_dense_multibody",
+   "family": "dense_multibody",
+   "params": {
+    "tier": "rush",
+    "contested": true,
+    "hard": false
+   },
+   "root_seed": 91737300,
+   "map_seed": 29,
+   "block": "X",
+   "cluster": "f100_072_dense_multibody",
+   "out": "scenarios/final100/f100_072_dense_multibody.json",
+   "split": "cal"
+  },
+  {
+   "slot_id": 73,
+   "name": "f100_073_high_dynamics_vehicles",
+   "family": "high_dynamics_vehicles",
+   "params": {
+    "peds": 3,
+    "crossers": 2,
+    "vehicles": 4,
+    "contested": false,
+    "hard": true
+   },
+   "root_seed": 41752578,
+   "map_seed": 17,
+   "block": "X",
+   "cluster": "f100_073_high_dynamics_vehicles",
+   "out": "scenarios/final100/f100_073_high_dynamics_vehicles.json",
+   "split": "test"
+  },
+  {
+   "slot_id": 74,
+   "name": "f100_074_dense_multibody",
+   "family": "dense_multibody",
+   "params": {
+    "tier": "rush",
+    "contested": true,
+    "hard": false
+   },
+   "root_seed": 19695807,
+   "map_seed": 11,
+   "block": "X",
+   "cluster": "f100_074_dense_multibody",
+   "out": "scenarios/final100/f100_074_dense_multibody.json",
+   "split": "test"
+  },
+  {
+   "slot_id": 75,
+   "name": "f100_075_occlusion_coast_reacquire",
+   "family": "occlusion_coast_reacquire",
+   "params": {
+    "peds": 6,
+    "crossers": 3,
+    "vehicles": 1,
+    "contested": false,
+    "hard": true
+   },
+   "root_seed": 53779247,
+   "map_seed": 17,
+   "block": "X",
+   "cluster": "f100_075_occlusion_coast_reacquire",
+   "out": "scenarios/final100/f100_075_occlusion_coast_reacquire.json",
+   "split": "test"
+  },
+  {
+   "slot_id": 76,
+   "name": "f100_076_dense_multibody",
+   "family": "dense_multibody",
+   "params": {
+    "tier": "rush",
+    "contested": true,
+    "hard": false
+   },
+   "root_seed": 42573776,
+   "map_seed": 11,
+   "block": "X",
+   "cluster": "f100_076_dense_multibody",
+   "out": "scenarios/final100/f100_076_dense_multibody.json",
+   "split": "test"
+  },
+  {
+   "slot_id": 77,
+   "name": "f100_077_high_dynamics_vehicles",
+   "family": "high_dynamics_vehicles",
+   "params": {
+    "peds": 3,
+    "crossers": 2,
+    "vehicles": 4,
+    "contested": false,
+    "hard": true
+   },
+   "root_seed": 49947361,
+   "map_seed": 11,
+   "block": "X",
+   "cluster": "f100_077_high_dynamics_vehicles",
+   "out": "scenarios/final100/f100_077_high_dynamics_vehicles.json",
+   "split": "cal"
+  },
+  {
+   "slot_id": 78,
+   "name": "f100_078_high_dynamics_vehicles",
+   "family": "high_dynamics_vehicles",
+   "params": {
+    "peds": 3,
+    "crossers": 2,
+    "vehicles": 4,
+    "contested": false,
+    "hard": true
+   },
+   "root_seed": 4576796,
+   "map_seed": 17,
+   "block": "X",
+   "cluster": "f100_078_high_dynamics_vehicles",
+   "out": "scenarios/final100/f100_078_high_dynamics_vehicles.json",
+   "split": "test"
+  },
+  {
+   "slot_id": 79,
+   "name": "f100_079_occlusion_coast_reacquire",
+   "family": "occlusion_coast_reacquire",
+   "params": {
+    "peds": 6,
+    "crossers": 3,
+    "vehicles": 1,
+    "contested": false,
+    "hard": true
+   },
+   "root_seed": 12221736,
+   "map_seed": 3,
+   "block": "X",
+   "cluster": "f100_079_occlusion_coast_reacquire",
+   "out": "scenarios/final100/f100_079_occlusion_coast_reacquire.json",
+   "split": "cal"
+  },
+  {
+   "slot_id": 80,
+   "name": "f100_080_occlusion_coast_reacquire",
+   "family": "occlusion_coast_reacquire",
+   "params": {
+    "peds": 6,
+    "crossers": 3,
+    "vehicles": 1,
+    "contested": false,
+    "hard": true
+   },
+   "root_seed": 32052999,
+   "map_seed": 29,
+   "block": "X",
+   "cluster": "f100_080_occlusion_coast_reacquire",
+   "out": "scenarios/final100/f100_080_occlusion_coast_reacquire.json",
+   "split": "test"
+  },
+  {
+   "slot_id": 81,
+   "name": "f100_081_dense_multibody",
+   "family": "dense_multibody",
+   "params": {
+    "tier": "rush",
+    "contested": true,
+    "hard": false
+   },
+   "root_seed": 49291934,
+   "map_seed": 29,
+   "block": "X",
+   "cluster": "f100_081_dense_multibody",
+   "out": "scenarios/final100/f100_081_dense_multibody.json",
+   "split": "cal"
+  },
+  {
+   "slot_id": 82,
+   "name": "f100_082_single_timed_encounter",
+   "family": "single_timed_encounter",
+   "params": {
+    "peds": 4,
+    "crossers": 2,
+    "vehicles": 0,
+    "contested": true,
+    "hard": false
+   },
+   "root_seed": 39276084,
+   "map_seed": 17,
+   "block": "X",
+   "cluster": "f100_082_single_timed_encounter",
+   "out": "scenarios/final100/f100_082_single_timed_encounter.json",
+   "split": "test"
+  },
+  {
+   "slot_id": 83,
+   "name": "f100_083_dense_multibody",
+   "family": "dense_multibody",
+   "params": {
+    "tier": "rush",
+    "contested": true,
+    "hard": false
+   },
+   "root_seed": 88875363,
+   "map_seed": 29,
+   "block": "X",
+   "cluster": "f100_083_dense_multibody",
+   "out": "scenarios/final100/f100_083_dense_multibody.json",
+   "split": "cal"
+  },
+  {
+   "slot_id": 84,
+   "name": "f100_084_occlusion_coast_reacquire",
+   "family": "occlusion_coast_reacquire",
+   "params": {
+    "peds": 6,
+    "crossers": 3,
+    "vehicles": 1,
+    "contested": false,
+    "hard": true
+   },
+   "root_seed": 21386394,
+   "map_seed": 29,
+   "block": "X",
+   "cluster": "f100_084_occlusion_coast_reacquire",
+   "out": "scenarios/final100/f100_084_occlusion_coast_reacquire.json",
+   "split": "cal"
+  },
+  {
+   "slot_id": 85,
+   "name": "f100_085_high_dynamics_vehicles",
+   "family": "high_dynamics_vehicles",
+   "params": {
+    "peds": 3,
+    "crossers": 2,
+    "vehicles": 4,
+    "contested": false,
+    "hard": true
+   },
+   "root_seed": 2388794,
+   "map_seed": 3,
+   "block": "X",
+   "cluster": "f100_085_high_dynamics_vehicles",
+   "out": "scenarios/final100/f100_085_high_dynamics_vehicles.json",
+   "split": "test"
+  },
+  {
+   "slot_id": 86,
+   "name": "f100_086_occlusion_coast_reacquire",
+   "family": "occlusion_coast_reacquire",
+   "params": {
+    "peds": 6,
+    "crossers": 3,
+    "vehicles": 1,
+    "contested": false,
+    "hard": true
+   },
+   "root_seed": 7574712,
+   "map_seed": 17,
+   "block": "X",
+   "cluster": "f100_086_occlusion_coast_reacquire",
+   "out": "scenarios/final100/f100_086_occlusion_coast_reacquire.json",
+   "split": "cal"
+  },
+  {
+   "slot_id": 87,
+   "name": "f100_087_single_timed_encounter",
+   "family": "single_timed_encounter",
+   "params": {
+    "peds": 4,
+    "crossers": 2,
+    "vehicles": 0,
+    "contested": true,
+    "hard": false
+   },
+   "root_seed": 64110219,
+   "map_seed": 11,
+   "block": "X",
+   "cluster": "f100_087_single_timed_encounter",
+   "out": "scenarios/final100/f100_087_single_timed_encounter.json",
+   "split": "cal"
+  },
+  {
+   "slot_id": 88,
+   "name": "f100_088_dense_multibody",
+   "family": "dense_multibody",
+   "params": {
+    "tier": "rush",
+    "contested": true,
+    "hard": false
+   },
+   "root_seed": 96413243,
+   "map_seed": 17,
+   "block": "X",
+   "cluster": "f100_088_dense_multibody",
+   "out": "scenarios/final100/f100_088_dense_multibody.json",
+   "split": "cal"
+  },
+  {
+   "slot_id": 89,
+   "name": "f100_089_single_timed_encounter",
+   "family": "single_timed_encounter",
+   "params": {
+    "peds": 4,
+    "crossers": 2,
+    "vehicles": 0,
+    "contested": true,
+    "hard": false
+   },
+   "root_seed": 73855144,
+   "map_seed": 29,
+   "block": "X",
+   "cluster": "f100_089_single_timed_encounter",
+   "out": "scenarios/final100/f100_089_single_timed_encounter.json",
+   "split": "test"
+  },
+  {
+   "slot_id": 90,
+   "name": "f100_090_high_dynamics_vehicles",
+   "family": "high_dynamics_vehicles",
+   "params": {
+    "peds": 3,
+    "crossers": 2,
+    "vehicles": 4,
+    "contested": false,
+    "hard": true
+   },
+   "root_seed": 67655477,
+   "map_seed": 17,
+   "block": "X",
+   "cluster": "f100_090_high_dynamics_vehicles",
+   "out": "scenarios/final100/f100_090_high_dynamics_vehicles.json",
+   "split": "cal"
+  },
+  {
+   "slot_id": 91,
+   "name": "f100_091_dense_multibody",
+   "family": "dense_multibody",
+   "params": {
+    "tier": "rush",
+    "contested": true,
+    "hard": false
+   },
+   "root_seed": 8445007,
+   "map_seed": 17,
+   "block": "X",
+   "cluster": "f100_091_dense_multibody",
+   "out": "scenarios/final100/f100_091_dense_multibody.json",
+   "split": "test"
+  },
+  {
+   "slot_id": 92,
+   "name": "f100_092_single_timed_encounter",
+   "family": "single_timed_encounter",
+   "params": {
+    "peds": 4,
+    "crossers": 2,
+    "vehicles": 0,
+    "contested": true,
+    "hard": false
+   },
+   "root_seed": 4539448,
+   "map_seed": 17,
+   "block": "X",
+   "cluster": "f100_092_single_timed_encounter",
+   "out": "scenarios/final100/f100_092_single_timed_encounter.json",
+   "split": "cal"
+  },
+  {
+   "slot_id": 93,
+   "name": "f100_093_dense_multibody",
+   "family": "dense_multibody",
+   "params": {
+    "tier": "rush",
+    "contested": true,
+    "hard": false
+   },
+   "root_seed": 65901735,
+   "map_seed": 3,
+   "block": "X",
+   "cluster": "f100_093_dense_multibody",
+   "out": "scenarios/final100/f100_093_dense_multibody.json",
+   "split": "cal"
+  },
+  {
+   "slot_id": 94,
+   "name": "f100_094_dense_multibody",
+   "family": "dense_multibody",
+   "params": {
+    "tier": "rush",
+    "contested": true,
+    "hard": false
+   },
+   "root_seed": 21013909,
+   "map_seed": 17,
+   "block": "X",
+   "cluster": "f100_094_dense_multibody",
+   "out": "scenarios/final100/f100_094_dense_multibody.json",
+   "split": "test"
+  },
+  {
+   "slot_id": 95,
+   "name": "f100_095_dense_multibody",
+   "family": "dense_multibody",
+   "params": {
+    "tier": "rush",
+    "contested": true,
+    "hard": false
+   },
+   "root_seed": 36660575,
+   "map_seed": 17,
+   "block": "X",
+   "cluster": "f100_095_dense_multibody",
+   "out": "scenarios/final100/f100_095_dense_multibody.json",
+   "split": "test"
+  },
+  {
+   "slot_id": 96,
+   "name": "f100_096_occlusion_coast_reacquire",
+   "family": "occlusion_coast_reacquire",
+   "params": {
+    "peds": 6,
+    "crossers": 3,
+    "vehicles": 1,
+    "contested": false,
+    "hard": true
+   },
+   "root_seed": 91485058,
+   "map_seed": 17,
+   "block": "X",
+   "cluster": "f100_096_occlusion_coast_reacquire",
+   "out": "scenarios/final100/f100_096_occlusion_coast_reacquire.json",
+   "split": "cal"
+  },
+  {
+   "slot_id": 97,
+   "name": "f100_097_dense_multibody",
+   "family": "dense_multibody",
+   "params": {
+    "tier": "rush",
+    "contested": true,
+    "hard": false
+   },
+   "root_seed": 2307008,
+   "map_seed": 17,
+   "block": "X",
+   "cluster": "f100_097_dense_multibody",
+   "out": "scenarios/final100/f100_097_dense_multibody.json",
+   "split": "cal"
+  },
+  {
+   "slot_id": 98,
+   "name": "f100_098_single_timed_encounter",
+   "family": "single_timed_encounter",
+   "params": {
+    "peds": 4,
+    "crossers": 2,
+    "vehicles": 0,
+    "contested": true,
+    "hard": false
+   },
+   "root_seed": 68191009,
+   "map_seed": 11,
+   "block": "X",
+   "cluster": "f100_098_single_timed_encounter",
+   "out": "scenarios/final100/f100_098_single_timed_encounter.json",
+   "split": "cal"
+  },
+  {
+   "slot_id": 99,
+   "name": "f100_099_single_timed_encounter",
+   "family": "single_timed_encounter",
+   "params": {
+    "peds": 4,
+    "crossers": 2,
+    "vehicles": 0,
+    "contested": true,
+    "hard": false
+   },
+   "root_seed": 92284843,
+   "map_seed": 3,
+   "block": "X",
+   "cluster": "f100_099_single_timed_encounter",
+   "out": "scenarios/final100/f100_099_single_timed_encounter.json",
+   "split": "test"
+  }
+ ],
+ "plan_sha": "52bd39b5208ff220"
+}

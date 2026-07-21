@@ -1,0 +1,10 @@
+{
+ "git_sha": "7fa02400391c8bf4a11555a95d568fd2d388e8ac",
+ "metaurban_sha": "efbc6ade70f50fa602b4525f647c0fb73cdc4d1a",
+ "so_sha256": {
+  "ego_capi.so": "f50126f509e9aab6e339cc14be264622da5e368268a145a059386a86335bbe15",
+  "sando_capi.so": "93b036ada49eada372c4e7bde733b6dda7b2b01699fbd01228fec72a28599d01",
+  "cert_capi.so": "6d4e747270b8ba889fc8f4ad63c23f97d20886d271a9fe552a589ab6f86e4bb6"
+ },
+ "label": "stack-freeze-m3off-2026-07-21"
+}

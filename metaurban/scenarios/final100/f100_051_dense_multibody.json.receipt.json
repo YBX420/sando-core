@@ -1,0 +1,68 @@
+{
+ "slot": {
+  "slot_id": 51,
+  "name": "f100_051_dense_multibody",
+  "family": "dense_multibody",
+  "params": {
+   "tier": "rush",
+   "contested": true,
+   "hard": false
+  },
+  "root_seed": 39295770,
+  "map_seed": 11,
+  "block": "X",
+  "cluster": "f100_051_dense_multibody",
+  "out": "scenarios/final100/f100_051_dense_multibody.json",
+  "split": "test"
+ },
+ "status": "ok",
+ "seed_used": 39303770,
+ "attempt": 8,
+ "rejects": [
+  {
+   "attempt": 0,
+   "seed": 39295770,
+   "reason": "pressure_1.70"
+  },
+  {
+   "attempt": 1,
+   "seed": 39296770,
+   "reason": "no_true_encounter"
+  },
+  {
+   "attempt": 2,
+   "seed": 39297770,
+   "reason": "pressure_1.84"
+  },
+  {
+   "attempt": 3,
+   "seed": 39298770,
+   "reason": "no_true_encounter"
+  },
+  {
+   "attempt": 4,
+   "seed": 39299770,
+   "reason": "pressure_1.53"
+  },
+  {
+   "attempt": 5,
+   "seed": 39300770,
+   "reason": "no_true_encounter"
+  },
+  {
+   "attempt": 6,
+   "seed": 39301770,
+   "reason": "no_safe_start"
+  },
+  {
+   "attempt": 7,
+   "seed": 39302770,
+   "reason": "no_true_encounter"
+  }
+ ],
+ "pressure": 0.49,
+ "encounters_verified": 1,
+ "scenario_sha": "7a6b1f835f6a14e1",
+ "stack_sha": "07207c0dd1d35263af3d77c821523195369db116",
+ "plan_sha": "52bd39b5208ff220"
+}

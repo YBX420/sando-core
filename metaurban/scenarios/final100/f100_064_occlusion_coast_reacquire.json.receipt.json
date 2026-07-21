@@ -1,0 +1,40 @@
+{
+ "slot": {
+  "slot_id": 64,
+  "name": "f100_064_occlusion_coast_reacquire",
+  "family": "occlusion_coast_reacquire",
+  "params": {
+   "peds": 6,
+   "crossers": 3,
+   "vehicles": 1,
+   "contested": false,
+   "hard": true
+  },
+  "root_seed": 53358518,
+  "map_seed": 3,
+  "block": "X",
+  "cluster": "f100_064_occlusion_coast_reacquire",
+  "out": "scenarios/final100/f100_064_occlusion_coast_reacquire.json",
+  "split": "cal"
+ },
+ "status": "ok",
+ "seed_used": 53360518,
+ "attempt": 2,
+ "rejects": [
+  {
+   "attempt": 0,
+   "seed": 53358518,
+   "reason": "pressure_1.71"
+  },
+  {
+   "attempt": 1,
+   "seed": 53359518,
+   "reason": "no_true_encounter"
+  }
+ ],
+ "pressure": 0.6,
+ "encounters_verified": 1,
+ "scenario_sha": "72b3288492fee454",
+ "stack_sha": "07207c0dd1d35263af3d77c821523195369db116",
+ "plan_sha": "52bd39b5208ff220"
+}
