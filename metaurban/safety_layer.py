@@ -232,16 +232,25 @@ def hover_clear(p, cyl, tau, delta=None, t_lo=0.0):
     return True
 
 
+def _u_stop(ego):
+    """THE shared stop point (07-21 ruling #1): the executor freezes at eval(duration-1e-3), so
+    the spline certificate proves [0, u_stop], the terminal point is eval(u_stop), and the hover
+    completion starts at u_stop/warp -- ONE constant, no more duration-1e-6 / duration /
+    duration-1e-3 mixtures leaving ~1 ms/warp of flight that nobody proved."""
+    return max(ego.duration() - 1e-3, 0.0)
+
+
 def _tail_covered(ego, cyl, tau, d, warp=1.0):
-    """WINDOW COMPLETION (07-20 #5b): the C++ cert silently clips t_hi to the spline end, so a
-    short committed spline (goal arrival inside the trust window) was certified only over
-    [0, dur] -- the drone then HOVERS at the terminal point with NO covering certificate. Require
-    the terminal hover to certify over the remainder [dur/warp, tau] (real time)."""
-    dur = ego.duration()
-    t_cov = dur / warp
+    """WINDOW COMPLETION (07-20 #5b): the C++ cert fail-closes on under-covered windows, so a
+    short committed spline (goal arrival inside the trust window) is certified over [0, u_stop]
+    -- the drone then HOVERS at eval(u_stop). Require the terminal hover to certify over the
+    remainder [u_stop/warp, tau] (real time). Seam-free by construction: spline window and hover
+    start share the SAME u_stop the executor freezes at."""
+    u_stop = _u_stop(ego)
+    t_cov = u_stop / warp
     if t_cov >= tau - 1e-6:
         return True
-    r_end = ego.eval(max(dur - 1e-3, 0.0))
+    r_end = ego.eval(u_stop)
     if r_end is None:
         return False
     return hover_clear(np.asarray(r_end[0], float), cyl, tau, delta=d, t_lo=t_cov)
@@ -254,7 +263,7 @@ def cert_clear(ego, cyl, tau=TAU, delta=None):
     d = tau if delta is None else delta
     if not _tail_covered(ego, cyl, tau, d):
         return False
-    _tw = min(tau, max(ego.duration() - 1e-6, 0.0))
+    _tw = min(tau, _u_stop(ego))
     #   EXPLICIT window clip (07-21 ruling): the C++ core now FAIL-CLOSES on under-covered
     #   windows; the remainder [_tw, tau] is certified by the hover-tail law above, so the clip
     #   is OURS with a sound completion -- the core never silently shrinks a window again.
@@ -305,7 +314,7 @@ def cert_verdict3(ego, cyl, tau=TAU, delta=None):
         if "certified" in (a, b): return "certified"
         return "refuted" if a == b == "refuted" else "unknown"
     d = tau if delta is None else delta
-    _tw = min(tau, max(ego.duration() - 1e-6, 0.0))   # explicit clip (07-21); diagnostic twin only
+    _tw = min(tau, _u_stop(ego))   # explicit clip (07-21); diagnostic twin only
     overall = "certified"; details = []
     for ent in cyl:                                   # NB diagnostic twin stays ISOTROPIC for the ellipse
         (c0, vv, aa, R, zc, veff) = ent[:6]           # (conservative); CAPSULE movers get the pearl AND --
@@ -329,6 +338,11 @@ def cert_verdict3(ego, cyl, tau=TAU, delta=None):
         details.append(dict(horiz_pred=hp, horiz_cur=hc, above=vo, verdict=mover,
                             margins=(round(mp, 4), round(mc, 4), round(mv, 4))))
         overall = _and(overall, mover)
+    if not _tail_covered(ego, cyl, tau, d) and overall == "certified":
+        # UNIFIED prefix+hover semantics (07-21 ruling #2): the flight gate fails when the hover
+        # tail does not certify -- the diagnostic twin must never report 'certified' for a flight
+        # the gate refused, or it poisons the E1/U attribution. Tail-short = at best unknown.
+        overall = "unknown"
     return overall, details
 
 
@@ -493,7 +507,7 @@ def cert_clear_warp(ego, cyl, s, tau=TAU, delta=None):
     s = float(s)
     if not _tail_covered(ego, cyl, tau, d, warp=s):
         return False
-    _tws = min(s * tau, max(ego.duration() - 1e-6, 0.0))
+    _tws = min(s * tau, _u_stop(ego))
     #   explicit SPLINE-time window clip (07-21): remainder covered by the hover-tail law above
     for ent in cyl:
         (c0, vv, aa, R, zc, veff) = ent[:6]
@@ -528,7 +542,7 @@ def cert_clear_margin(ego, cyl, tau=TAU, delta=None):
     """Margin sister of cert_clear: (ok, m) where m ~ metres of surplus clearance beyond the
     certified floor (min over movers; deficit-squared margins normalised by 2R). inf when no cyl."""
     d = tau if delta is None else delta
-    _tw = min(tau, max(ego.duration() - 1e-6, 0.0))   # explicit clip (07-21); tiebreak scorer only
+    _tw = min(tau, _u_stop(ego))   # explicit clip (07-21); tiebreak scorer only
     ok_all, m_min = True, float("inf")
     for ent in cyl:
         (c0, vv, aa, R, zc, veff) = ent[:6]
@@ -562,6 +576,7 @@ def cert_clear_margin(ego, cyl, tau=TAU, delta=None):
             return False, -1.0
         branch = max(min(float(mp), float(mc)), float(mv)) / max(2.0 * float(R), 1e-6)
         m_min = min(m_min, branch)
+    ok_all = ok_all and _tail_covered(ego, cyl, tau, d)   # prefix+hover semantics (07-21 #2)
     return ok_all, m_min
 
 
@@ -569,7 +584,7 @@ def cert_clear_warp_margin(ego, cyl, s, tau=TAU, delta=None):
     """Margin sister of cert_clear_warp (retime margins x s back to world scale)."""
     d = (tau if delta is None else delta)
     s = float(s)
-    _tws = min(s * tau, max(ego.duration() - 1e-6, 0.0))   # explicit clip (07-21); scorer only
+    _tws = min(s * tau, _u_stop(ego))   # explicit clip (07-21); scorer only
     m_min = float("inf")
     for ent in cyl:
         (c0, vv, aa, R, zc, veff) = ent[:6]
@@ -599,7 +614,7 @@ def cert_clear_warp_margin(ego, cyl, s, tau=TAU, delta=None):
         if not (hp or vo):
             return False, -1.0
         m_min = min(m_min, s * max(float(mp), float(mv)) / max(2.0 * float(R), 1e-6))
-    return True, m_min
+    return _tail_covered(ego, cyl, tau, d, warp=s), m_min   # prefix+hover semantics (07-21 #2)
 
 
 _ST_ON = os.environ.get("ST_SPEED", "0") == "1"   # M2-4 (2026-07-17): ST-graph speed stage in the

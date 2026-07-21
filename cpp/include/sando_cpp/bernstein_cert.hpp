@@ -141,6 +141,15 @@ inline Verdict certify_traj_vs_sphere(const MinjerkTraj& tr, const Eigen::Vector
                                       const Eigen::Vector3d& vel, const Eigen::Vector3d& acc,
                                       double R, double t_hi_in = std::numeric_limits<double>::infinity(),
                                       int maxdepth = 16) {
+  if (std::isfinite(t_hi_in) && t_hi_in > tr.t_end + 1e-6) {
+    // WINDOW-COVERAGE contract, MINCO entry too (07-21 ruling): a finite requested window the
+    // trajectory does not reach must FAIL-CLOSED -- the silent clip certified time never proved.
+    // plan_minco already clips its request explicitly (min(tr.t_end, ...)), so this never fires
+    // there; any other caller now gets the loud refusal instead of a partial 'certified'.
+    std::fprintf(stderr, "[bcert] certify_traj_vs_sphere: window %.3f beyond trajectory end %.3f "
+                 "-> FAIL-CLOSED\n", t_hi_in, tr.t_end);
+    return Verdict{false, -std::numeric_limits<double>::infinity()};
+  }
   static const long C5[6] = {1, 5, 10, 10, 5, 1};
   static const long C10[11] = {1, 10, 45, 120, 210, 252, 210, 120, 45, 10, 1};
   const auto& C2B = C2B_int();
