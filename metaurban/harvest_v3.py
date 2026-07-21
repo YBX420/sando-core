@@ -29,8 +29,10 @@ import sys
 import zlib
 
 ap = argparse.ArgumentParser()
-ap.add_argument("--mode", choices=["pilot12", "design69"], required=True)
+ap.add_argument("--mode", choices=["pilot12", "design69", "final100cal", "final100test"],
+                required=True)
 ap.add_argument("--run", required=True, help="versioned run directory")
+ap.add_argument("--f100-plan", default=None, help="final100 plan json (final100* modes only)")
 ap.add_argument("--plan", action="store_true")
 ap.add_argument("--job", type=int, default=None)
 ap.add_argument("--merge", action="store_true")
@@ -55,6 +57,35 @@ except Exception:
 
 
 def build_jobs():
+    if args.mode in ("final100cal", "final100test"):
+        # 07-21: jobs come from the PRE-REGISTERED final100 plan -- split fixed per slot before
+        # generation; every slot of the whole campaign must hold a verified ok receipt (the
+        # 100/100 law) or the harvest refuses to start.
+        assert args.f100_plan, "final100* modes need --f100-plan"
+        f100 = json.load(open(args.f100_plan))
+        assert not f100.get("draft"), "draft plans can never feed a paper harvest"
+        ns = "scenarios/final100"
+        want = "cal" if args.mode == "final100cal" else "test"
+        bad = []
+        for slot in f100["slots"]:
+            rp = os.path.join(ns, os.path.basename(slot["out"]) + ".receipt.json")
+            if not os.path.exists(rp):
+                bad.append((slot["slot_id"], "missing")); continue
+            rc = json.load(open(rp))
+            if rc.get("status") != "ok" or rc.get("plan_sha") != f100["plan_sha"]:
+                bad.append((slot["slot_id"], rc.get("status")))
+        assert not bad, f"final100 campaign incomplete/foreign: {bad[:6]} -- REFUSED (100/100 law)"
+        tag = {"final100cal": "F100C", "final100test": "F100T"}[args.mode]
+        jobs = []
+        for slot in f100["slots"]:
+            if slot["split"] != want:
+                continue
+            for k in range(2):                   # UNIFORM 2 episodes per scenario (quota law)
+                seed = 500_000_000 + zlib.crc32(f"{slot['name']}|{tag}{k}".encode()) % 9_000_000
+                jobs.append(dict(job_id=len(jobs), scn=slot["name"], seed=seed, ep=len(jobs),
+                                 path=os.path.join(ns, os.path.basename(slot["out"])),
+                                 f100_plan_sha=f100["plan_sha"]))
+        return jobs
     pool = sorted(CFG["scenario_pool"])
     if args.mode == "pilot12":
         pool = pool[:12]
@@ -78,6 +109,8 @@ def env_knobs():
     ks["_TAU_A"] = KF._COAST_TAU_A
     ks["_A_FLOOR"] = KF._COAST_A_FLOOR
     ks["_COAST_CA"] = KF._KF_COAST_CA
+    import stack_manifest as SM
+    ks["_runtime"] = SM.runtime_shas()     # 07-21 #3: the BINARIES the episode actually loaded
     return ks
 
 
@@ -167,8 +200,9 @@ import numpy as np
 import replay_core as RC
 import scenario_lib as SLB
 
-f = (f"scenarios/{job['scn']}.json" if os.path.exists(f"scenarios/{job['scn']}.json")
-     else f"scenarios/bench/{job['scn']}.json")
+f = job.get("path") or (f"scenarios/{job['scn']}.json"
+                        if os.path.exists(f"scenarios/{job['scn']}.json")
+                        else f"scenarios/bench/{job['scn']}.json")
 scn = SLB.load(f)
 movers = SLB.apply_rh_overrides(RC.Movers(SLB.to_movers_raw(scn)), scn)
 epi = SLB.to_episode(scn)

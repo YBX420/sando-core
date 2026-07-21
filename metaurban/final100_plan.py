@@ -46,11 +46,15 @@ ap.add_argument("--balanced", action="store_true",
                 help="the ruling's SECOND registered option: fixed 25x4 families, frozen shuffle "
                      "(balanced by construction). Default = independent equal-probability draws.")
 args = ap.parse_args()
+assert not os.path.exists(args.out), \
+    "plans are IMMUTABLE: emit to a fresh path, never overwrite a registration (07-21 ruling)"
+import stack_manifest as SM
 if not args.draft:
     assert args.stack_sha, "a real plan pins the FROZEN stack SHA (use --draft for tooling tests)"
-    cur = subprocess.check_output(["git", "rev-parse", "--short", "HEAD"],
+    cur = subprocess.check_output(["git", "rev-parse", "HEAD"],
                                   cwd=os.path.dirname(os.path.abspath(__file__)), text=True).strip()
-    assert cur == args.stack_sha, f"plan must be emitted FROM the frozen tree ({cur} != {args.stack_sha})"
+    assert cur == args.stack_sha, \
+        f"plan must be emitted FROM the frozen tree (FULL sha {cur[:12]}.. != {args.stack_sha[:12]}..)"
 
 rng = np.random.default_rng(RNG_SEED)
 fams = list(FAMILIES)
@@ -75,7 +79,10 @@ for s, lab in zip(slots, labels):
 hist = {f: sum(1 for s in slots if s["family"] == f) for f in fams}
 plan = dict(schema="final100.v1", draft=bool(args.draft),
             family_scheme=("fixed_25x4_shuffled" if args.balanced else "iid_equal_prob"),
-            stack_sha=(args.stack_sha or "DRAFT"), rng_seed=RNG_SEED,
+            stack_sha=(args.stack_sha or "DRAFT"),
+            stack_runtime=SM.runtime_shas(),   # 07-21 #3: the BINARIES frozen with this plan --
+            #   generation verifies the loaded .so set equals this record, not just the git tree
+            rng_seed=RNG_SEED,
             retry_rule=RETRY_RULE, map_seeds=list(MAP_SEEDS), blocks=list(BLOCKS),
             families=FAMILIES, family_histogram=hist,
             split=dict(cal=60, test=40,

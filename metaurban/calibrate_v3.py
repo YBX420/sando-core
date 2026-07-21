@@ -124,7 +124,15 @@ if __name__ == "__main__":
     blob = json.dumps({f"{k[0]}|{k[1]}": v for k, v in sh.items()}, sort_keys=True).encode()
     sh_hash = hashlib.sha256(blob).hexdigest()[:16]
     B = load("foldB7"); T = load("test7")
-    SB, ST = flight_sups(B, sh), flight_sups(T, sh)
+    # 07-21 ruling: the calibrator MAIN must accept the harvest registrations so zero-row
+    # episodes VOTE (-inf), not just appear in a manifest. --universe-cal/--universe-test point
+    # at harvest_v3 universe.json files; omitted = legacy rows-only behaviour (old pools).
+    _uc = _ut = None
+    if "--universe-cal" in sys.argv:
+        _uc = json.load(open(sys.argv[sys.argv.index("--universe-cal") + 1]))
+    if "--universe-test" in sys.argv:
+        _ut = json.load(open(sys.argv[sys.argv.index("--universe-test") + 1]))
+    SB, ST = flight_sups(B, sh, universe=_uc), flight_sups(T, sh, universe=_ut)
     n = len(SB)
     out = dict(provenance=dict(spec="lambda-SHAPE-H v3 (wf_18b3fdce-93a)", shape_hash=sh_hash,
                                n_flights=n, fold="B7/T7", date="2026-07-08"),
