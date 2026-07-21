@@ -1,62 +1,78 @@
-"""mem_k_fit — EGO_MEM_K determination on the retired-design face (07-20 final sequence, step 4).
+"""mem_k_fit — coast anchor-buffer evidence on the retired-design face (07-21 corrected).
 
-EGO_MEM_K is an ALGORITHM hyperparameter (the out-of-cone memory keep-out inflation, applied as
-K * pos_sigma while a track coasts). Per the 07-20 ruling it must be fixed on the RETIRED design
-face and frozen BEFORE any new-scenario cal/test data exists -- K changes flight paths, so it can
-never be chosen by looking at the calibration folds.
+07-21 ruling: the 07-20 pooled fit priced e(d)/psig(0) over ALL horizons, but the runtime K only
+inflates the CURRENT coast anchor (anchor radius += K * current pos_sigma) -- two different
+quantities, so the pooled q90 is INVALID as a K. This tool now reports the STRATIFIED truth:
 
-Fit: over COAST rows (the population the memory keep-out exists for), the ratio e / psig is the
-multiplier that would have covered THIS row's true prediction error with the filter's own
-uncertainty. K = the design-face shape quantile (q90, the house shape convention) of that ratio,
-reported per class and per coast-age bucket, with q95/q99 for the tail picture.
+  - the ANCHOR law (d == 0 rows only): the only stratum whose quantity matches what K buys;
+  - per-horizon strata (how fast the pooled number inflates with d -- the part the final
+    conformal tube prices via q + v_eff*t; charging it into K would double-bill);
+  - per-maturity strata (young frozen-predictor rows dominate the fat tails).
+
+Caveats stamped into the report: this face is the 0.30 s replay cadence; a renderer K refit must
+run at 0.10 s with the renderer's predictor/young policy, and any class K must be wired into BOTH
+the realistic and GT-keyed coast paths. Current ruling: uniform K=2.0 stays (engineering anchor
+buffer), no class K, no age-taper this cycle.
 """
 import argparse
+import hashlib
 import json
 
 import numpy as np
 
 ap = argparse.ArgumentParser()
-ap.add_argument("--npy", required=True, help="merged design69 v3 npy")
+ap.add_argument("--npy", required=True, help="merged design v3 npy")
 ap.add_argument("--out", default=None, help="optional json report path")
 args = ap.parse_args()
 
 D = np.load(args.npy)
 m = (D["coast"] == 1) & (D["psig"] > 1e-6)
 C = D[m]
-print(f"[mem_k] rows={len(D)} coast rows={len(C)} "
-      f"({100.0 * len(C) / max(1, len(D)):.1f}%) scenarios={len(set(D['scn'].tolist()))}")
-if len(C) < 50:
-    raise SystemExit("[mem_k] too few coast rows to fit K -- inspect the harvest")
-
 ratio = C["e"] / C["psig"]
-rep = dict(n_coast=int(len(C)),
-           q90=round(float(np.quantile(ratio, 0.90)), 3),
-           q95=round(float(np.quantile(ratio, 0.95)), 3),
-           q99=round(float(np.quantile(ratio, 0.99)), 3),
-           per_class={}, per_coast_age={})
-print(f"[mem_k] e/psig quantiles: q90={rep['q90']} q95={rep['q95']} q99={rep['q99']}  "
-      f"(current default K=2.0)")
+print(f"[mem_k] rows={len(D)} coast rows={len(C)} scenarios={len(set(D['scn'].tolist()))} "
+      f"(cadence: REPLAY 0.30 s -- renderer application needs its own 0.10 s refit)")
+
+
+def q(x, p):
+    return round(float(np.quantile(x, p)), 3) if len(x) else None
+
+
+rep = dict(input_sha=hashlib.sha256(open(args.npy, "rb").read()).hexdigest()[:16],
+           n_coast=int(len(C)), cadence_s=0.30,
+           pooled_all_horizons=dict(q90=q(ratio, 0.90), q95=q(ratio, 0.95),
+                                    note="INVALID as K: mixes future-horizon error into an "
+                                         "anchor-buffer quantity (07-21 ruling)"),
+           anchor_d0={}, per_horizon={}, per_maturity={})
+
+d0 = np.abs(C["d"]) < 1e-6
+print(f"[mem_k] ANCHOR law (d=0 only, the quantity K actually buys): n={int(d0.sum())} "
+      f"q90={q(ratio[d0], 0.90)} q95={q(ratio[d0], 0.95)}")
+rep["anchor_d0"]["all"] = dict(n=int(d0.sum()), q90=q(ratio[d0], 0.90), q95=q(ratio[d0], 0.95))
 for cls in sorted(set(C["cls"].tolist())):
-    mc = C["cls"] == cls
+    mc = d0 & (C["cls"] == cls)
     if mc.sum() < 30:
-        rep["per_class"][cls] = dict(n=int(mc.sum()), note="too few rows")
         continue
-    rep["per_class"][cls] = dict(n=int(mc.sum()),
-                                 q90=round(float(np.quantile(ratio[mc], 0.90)), 3),
-                                 q95=round(float(np.quantile(ratio[mc], 0.95)), 3))
-    print(f"[mem_k]   {cls:12s} n={mc.sum():6d}  q90={rep['per_class'][cls]['q90']:6.3f}  "
-          f"q95={rep['per_class'][cls]['q95']:6.3f}")
-for lo, hi in ((0.0, 0.3), (0.3, 0.8), (0.8, 1.6)):
-    mb = (C["coast_s"] >= lo) & (C["coast_s"] < hi)
-    if mb.sum() < 30:
+    rep["anchor_d0"][cls] = dict(n=int(mc.sum()), q90=q(ratio[mc], 0.90), q95=q(ratio[mc], 0.95))
+    print(f"[mem_k]   anchor {cls:12s} n={int(mc.sum()):6d} q90={rep['anchor_d0'][cls]['q90']}")
+
+for dv in sorted(set(np.round(C["d"], 2).tolist())):
+    md = np.abs(C["d"] - dv) < 1e-6
+    if md.sum() < 30:
         continue
-    q90 = round(float(np.quantile(ratio[mb], 0.90)), 3)
-    rep["per_coast_age"][f"{lo}-{hi}s"] = dict(n=int(mb.sum()), q90=q90)
-    print(f"[mem_k]   coast {lo}-{hi}s  n={mb.sum():6d}  q90={q90:6.3f}")
-rep["recommendation"] = dict(K=rep["q90"],
-                             rule="design-face shape quantile q90 over coast rows (house shape "
-                                  "convention); frozen BEFORE any cal/test data exists")
-print(f"[mem_k] RECOMMENDED EGO_MEM_K = {rep['q90']} (frozen on the retired design face)")
+    rep["per_horizon"][str(dv)] = dict(n=int(md.sum()), q90=q(ratio[md], 0.90))
+    print(f"[mem_k]   horizon d={dv:5.2f} n={int(md.sum()):6d} q90={rep['per_horizon'][str(dv)]['q90']}"
+          f"   <- priced by the conformal tube (q + v_eff*t), NOT by K")
+
+for tag, mm in (("mature(age>=4)", C["age"] >= 4), ("young(age<4)", C["age"] < 4)):
+    if mm.sum() < 30:
+        continue
+    rep["per_maturity"][tag] = dict(n=int(mm.sum()), q90=q(ratio[mm], 0.90))
+    print(f"[mem_k]   {tag:16s} n={int(mm.sum()):6d} q90={rep['per_maturity'][tag]['q90']}")
+
+rep["ruling"] = ("07-21: uniform K=2.0 retained (engineering anchor buffer); vehicle K=13.5 "
+                 "RETRACTED (quantity mismatch); future-horizon error belongs to the final "
+                 "conformal calibration; refit preconditions: renderer cadence + same predictor/"
+                 "young policy + d=0 law + both coast paths")
 if args.out:
     json.dump(rep, open(args.out, "w"), indent=1)
     print(f"[mem_k] report -> {args.out}")
