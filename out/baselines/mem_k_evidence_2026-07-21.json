@@ -1,0 +1,58 @@
+{
+ "date": "2026-07-21",
+ "decision": "uniform EGO_MEM_K=2.0 retained (engineering anchor buffer); vehicle K=13.5 RETRACTED pre-freeze",
+ "why_retracted": "fit priced e(d)/psig(0) pooled over all horizons; runtime K only inflates the d=0 coast anchor -- quantity mismatch; stratified vehicle d=0 q90=1.225 (mature 1.6 / young 21): the 13.3 was long-horizon + young-frozen-predictor, and horizon error is priced by the final conformal tube (double-charge risk); fit cadence 0.30s vs renderer 0.10s; 13.5 was wired only into the realistic coast path (GT-keyed path kept 2.0)",
+ "refit_preconditions": [
+  "renderer 0.10s cadence, same predictor/young policy",
+  "d=0 anchor law only (or predict_sigma(d) with conformal calibrated on the excess)",
+  "wired into BOTH realistic and GT-keyed coast paths"
+ ],
+ "selection_rule": "design-face stratified q90; anchor stratum only",
+ "inputs": {
+  "design69_npy_sha": "a4d257d1a809a738",
+  "run": "metaurban/out/harvest_runs/design69_d69a (jobs.json + receipts + merged.manifest)",
+  "code_git": "34966e7",
+  "fit_tool": "metaurban/mem_k_fit.py (v2 stratified)"
+ },
+ "stratified": {
+  "anchor_d0": {
+   "all": {
+    "n": 1067,
+    "q90": 0.873,
+    "q95": 1.063
+   },
+   "pedestrian": {
+    "n": 1007,
+    "q90": 0.845,
+    "q95": 1.014
+   },
+   "vehicle": {
+    "n": 60,
+    "q90": 1.225,
+    "q95": 1.46
+   }
+  },
+  "per_maturity": {
+   "mature(age>=4)": {
+    "n": 19314,
+    "q90": 1.411
+   },
+   "young(age<4)": {
+    "n": 3768,
+    "q90": 4.649
+   }
+  },
+  "pooled_INVALID": {
+   "q90": 1.733,
+   "q95": 2.546,
+   "note": "INVALID as K: mixes future-horizon error into an anchor-buffer quantity (07-21 ruling)"
+  }
+ },
+ "design69": {
+  "jobs": 138,
+  "failures": 0,
+  "rows": 98040,
+  "zero_row_episodes": 44,
+  "zero_row_scenarios": "20/69 scenarios fully empty (both episodes) + 4 half-empty -- matches the original '~20 scenarios vanished' diagnosis; episode-level 44/138"
+ }
+}
