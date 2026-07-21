@@ -1,0 +1,148 @@
+{
+ "provenance": {
+  "spec": "v6.1 capsule, scenario-level conformal on the pre-registered final100 benchmark",
+  "ruling": "07-21: shapes+rear from the retired design face; scenario rank on cal60 (uniform 2 episodes, universe-complete); scenario-disjoint folds by construction; eps=0.10 = September main-text tier; test opens exactly once",
+  "plan_sha": "52bd39b5208ff220",
+  "stack_sha": "07207c0dd1d35263af3d77c821523195369db116",
+  "stack_runtime": {
+   "git_sha": "07207c0dd1d35263af3d77c821523195369db116",
+   "metaurban_sha": "efbc6ade70f50fa602b4525f647c0fb73cdc4d1a",
+   "so_sha256": {
+    "ego_capi.so": "f50126f509e9aab6e339cc14be264622da5e368268a145a059386a86335bbe15",
+    "sando_capi.so": "93b036ada49eada372c4e7bde733b6dda7b2b01699fbd01228fec72a28599d01",
+    "cert_capi.so": "6d4e747270b8ba889fc8f4ad63c23f97d20886d271a9fe552a589ab6f86e4bb6"
+   }
+  },
+  "design_npy": {
+   "path": "out/harvest_runs/design69_d69a/harvest_design69_v3.npy",
+   "sha": "a4d257d1a809a738"
+  },
+  "cal_run": "/media/boxuan/Data2/projects/sando_py/sando-core/metaurban/out/harvest_runs/final100cal_f1",
+  "family_scheme": "iid_equal_prob",
+  "family_histogram": {
+   "single_timed_encounter": 18,
+   "dense_multibody": 38,
+   "occlusion_coast_reacquire": 26,
+   "high_dynamics_vehicles": 18
+  },
+  "test_opened": true,
+  "rank_0.05": {
+   "n": 60,
+   "k": 58,
+   "lam": 2.5254,
+   "slack": 2,
+   "observed_test_coverage": 0.95,
+   "n_test_scenarios": 40
+  },
+  "rank_0.1": {
+   "n": 60,
+   "k": 55,
+   "lam": 2.2409,
+   "slack": 5,
+   "observed_test_coverage": 0.875,
+   "n_test_scenarios": 40
+  },
+  "test_run": "/media/boxuan/Data2/projects/sando_py/sando-core/metaurban/out/harvest_runs/final100test_f1"
+ },
+ "capsule": true,
+ "n_pearls": 6,
+ "groups": {
+  "pedestrian": {
+   "levels": {
+    "0.05": {
+     "q_conformal": 0.6793,
+     "v_eff": 0.5985,
+     "status": "ok"
+    },
+    "0.1": {
+     "q_conformal": 0.6028,
+     "v_eff": 0.5311,
+     "status": "ok"
+    }
+   }
+  },
+  "vehicle": {
+   "levels": {
+    "0.05": {
+     "q_conformal": 0.8056,
+     "v_eff": 1.1137,
+     "status": "ok"
+    },
+    "0.1": {
+     "q_conformal": 0.7148,
+     "v_eff": 0.9882,
+     "status": "ok"
+    }
+   }
+  },
+  "animal": {
+   "levels": {
+    "0.05": {
+     "status": "STRESS_SUITE_ONLY"
+    },
+    "0.1": {
+     "status": "STRESS_SUITE_ONLY"
+    }
+   }
+  },
+  "static": {
+   "levels": {
+    "0.05": {
+     "q_conformal": 0.6819,
+     "v_eff": 0.0,
+     "status": "ok"
+    },
+    "0.1": {
+     "q_conformal": 0.605,
+     "v_eff": 0.0,
+     "status": "ok"
+    }
+   }
+  }
+ },
+ "young": {
+  "pedestrian": {
+   "0.05": {
+    "q0y": 0.758,
+    "growth": 2.2
+   },
+   "0.1": {
+    "q0y": 0.672,
+    "growth": 2.2
+   }
+  },
+  "vehicle": {
+   "0.05": {
+    "q0y": 1.038,
+    "growth": 11.0
+   },
+   "0.1": {
+    "q0y": 0.921,
+    "growth": 11.0
+   }
+  }
+ },
+ "rear": {
+  "pedestrian": {
+   "0.05": {
+    "q0r": 0.6844,
+    "growth": 0.0
+   },
+   "0.1": {
+    "q0r": 0.6073,
+    "growth": 0.0
+   }
+  },
+  "vehicle": {
+   "0.05": {
+    "q0r": 0.5253,
+    "growth": 0.0
+   },
+   "0.1": {
+    "q0r": 0.4661,
+    "growth": 0.0
+   }
+  }
+ },
+ "flags": []
+}

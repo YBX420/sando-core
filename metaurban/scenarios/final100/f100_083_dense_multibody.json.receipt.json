@@ -1,0 +1,48 @@
+{
+ "slot": {
+  "slot_id": 83,
+  "name": "f100_083_dense_multibody",
+  "family": "dense_multibody",
+  "params": {
+   "tier": "rush",
+   "contested": true,
+   "hard": false
+  },
+  "root_seed": 88875363,
+  "map_seed": 29,
+  "block": "X",
+  "cluster": "f100_083_dense_multibody",
+  "out": "scenarios/final100/f100_083_dense_multibody.json",
+  "split": "cal"
+ },
+ "status": "ok",
+ "seed_used": 88879363,
+ "attempt": 4,
+ "rejects": [
+  {
+   "attempt": 0,
+   "seed": 88875363,
+   "reason": "no_true_encounter"
+  },
+  {
+   "attempt": 1,
+   "seed": 88876363,
+   "reason": "no_true_encounter"
+  },
+  {
+   "attempt": 2,
+   "seed": 88877363,
+   "reason": "no_true_encounter"
+  },
+  {
+   "attempt": 3,
+   "seed": 88878363,
+   "reason": "no_safe_start"
+  }
+ ],
+ "pressure": 1.46,
+ "encounters_verified": 1,
+ "scenario_sha": "dc391367d709405d",
+ "stack_sha": "07207c0dd1d35263af3d77c821523195369db116",
+ "plan_sha": "52bd39b5208ff220"
+}

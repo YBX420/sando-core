@@ -1,0 +1,209 @@
+{
+ "schema": "sando-scenario-v1",
+ "name": "f100_017_single_timed_encounter",
+ "description": "procedurally populated street life (seed 4243379): sidewalk walkers, crosswalk-area crossers, lane-following vehicles; pairwise spacing verified over the compiled timeline (floors ped-ped 0.8 / ped-veh 2.0 / veh-veh 4.0 m beyond radii). CONTESTED: corridor crosses the anchor crosser, arrivals time-aligned.",
+ "map": {
+  "seed": 3,
+  "block_str": "X"
+ },
+ "drone": {
+  "start": [
+   113.78,
+   109.62,
+   1.5
+  ],
+  "goal": [
+   113.78,
+   71.62,
+   1.5
+  ],
+  "cruise_z": 1.5,
+  "max_vel": 3.0,
+  "max_acc": 6.0
+ },
+ "statics": [],
+ "movers": [
+  {
+   "cls": "pedestrian",
+   "spawn_t": 0.9,
+   "path": [
+    [
+     133.8,
+     48.93
+    ],
+    [
+     132.25,
+     52.07
+    ],
+    [
+     130.93,
+     55.3
+    ],
+    [
+     129.83,
+     58.62
+    ],
+    [
+     128.97,
+     62.01
+    ],
+    [
+     128.36,
+     65.45
+    ]
+   ],
+   "speed": 1.62,
+   "hold_end": false
+  },
+  {
+   "cls": "pedestrian",
+   "spawn_t": 0.1,
+   "path": [
+    [
+     67.01,
+     24.29
+    ],
+    [
+     63.71,
+     23.24
+    ],
+    [
+     60.34,
+     22.43
+    ],
+    [
+     56.92,
+     21.84
+    ],
+    [
+     53.47,
+     21.49
+    ],
+    [
+     50.0,
+     21.37
+    ]
+   ],
+   "speed": 1.53,
+   "hold_end": false
+  },
+  {
+   "cls": "pedestrian",
+   "spawn_t": 3.2,
+   "path": [
+    [
+     102.23,
+     -67.49
+    ],
+    [
+     102.23,
+     -70.52
+    ],
+    [
+     102.23,
+     -73.55
+    ],
+    [
+     102.23,
+     -76.57
+    ],
+    [
+     102.23,
+     -79.6
+    ],
+    [
+     102.23,
+     -82.62
+    ]
+   ],
+   "speed": 1.21,
+   "hold_end": false
+  },
+  {
+   "cls": "pedestrian",
+   "spawn_t": 5.6,
+   "path": [
+    [
+     195.34,
+     -3.86
+    ],
+    [
+     198.77,
+     -3.86
+    ],
+    [
+     202.2,
+     -3.86
+    ],
+    [
+     205.63,
+     -3.86
+    ],
+    [
+     209.07,
+     -3.86
+    ],
+    [
+     212.5,
+     -3.86
+    ]
+   ],
+   "speed": 1.38,
+   "hold_end": false
+  },
+  {
+   "cls": "pedestrian",
+   "spawn_t": 6.2,
+   "path": [
+    [
+     100.89,
+     95.5
+    ],
+    [
+     125.35,
+     95.5
+    ]
+   ],
+   "speed": 1.68,
+   "hold_end": false
+  },
+  {
+   "cls": "pedestrian",
+   "spawn_t": 0.5,
+   "path": [
+    [
+     125.41,
+     84.62
+    ],
+    [
+     102.15,
+     84.62
+    ]
+   ],
+   "speed": 1.17,
+   "hold_end": false
+  }
+ ],
+ "params": {},
+ "t_max": 35.0,
+ "encounters_verified": 1,
+ "provenance": {
+  "generator_commit": "07207c0",
+  "root_seed": 4243379,
+  "gen_seed": 4243379,
+  "attempt": 0,
+  "family": "single_timed_encounter",
+  "params": {
+   "peds": 4,
+   "crossers": 2,
+   "vehicles": 0,
+   "contested": true,
+   "hard": false,
+   "split": "test"
+  },
+  "map_seed": 3,
+  "block": "X",
+  "cluster": "f100_017_single_timed_encounter",
+  "scenario_sha": "4183615f4ad73ecf"
+ }
+}

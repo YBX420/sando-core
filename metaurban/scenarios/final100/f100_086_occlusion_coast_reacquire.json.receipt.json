@@ -1,0 +1,85 @@
+{
+ "slot": {
+  "slot_id": 86,
+  "name": "f100_086_occlusion_coast_reacquire",
+  "family": "occlusion_coast_reacquire",
+  "params": {
+   "peds": 6,
+   "crossers": 3,
+   "vehicles": 1,
+   "contested": false,
+   "hard": true
+  },
+  "root_seed": 7574712,
+  "map_seed": 17,
+  "block": "X",
+  "cluster": "f100_086_occlusion_coast_reacquire",
+  "out": "scenarios/final100/f100_086_occlusion_coast_reacquire.json",
+  "split": "cal"
+ },
+ "status": "ok",
+ "seed_used": 7585712,
+ "attempt": 11,
+ "rejects": [
+  {
+   "attempt": 0,
+   "seed": 7574712,
+   "reason": "no_true_encounter"
+  },
+  {
+   "attempt": 1,
+   "seed": 7575712,
+   "reason": "pressure_1.61"
+  },
+  {
+   "attempt": 2,
+   "seed": 7576712,
+   "reason": "pressure_1.80"
+  },
+  {
+   "attempt": 3,
+   "seed": 7577712,
+   "reason": "pressure_1.77"
+  },
+  {
+   "attempt": 4,
+   "seed": 7578712,
+   "reason": "no_true_encounter"
+  },
+  {
+   "attempt": 5,
+   "seed": 7579712,
+   "reason": "no_true_encounter"
+  },
+  {
+   "attempt": 6,
+   "seed": 7580712,
+   "reason": "pressure_1.71"
+  },
+  {
+   "attempt": 7,
+   "seed": 7581712,
+   "reason": "pressure_1.67"
+  },
+  {
+   "attempt": 8,
+   "seed": 7582712,
+   "reason": "no_safe_start"
+  },
+  {
+   "attempt": 9,
+   "seed": 7583712,
+   "reason": "pressure_1.95"
+  },
+  {
+   "attempt": 10,
+   "seed": 7584712,
+   "reason": "pressure_1.69"
+  }
+ ],
+ "pressure": 1.03,
+ "encounters_verified": 2,
+ "scenario_sha": "14953921fb1cffdc",
+ "stack_sha": "07207c0dd1d35263af3d77c821523195369db116",
+ "plan_sha": "52bd39b5208ff220"
+}

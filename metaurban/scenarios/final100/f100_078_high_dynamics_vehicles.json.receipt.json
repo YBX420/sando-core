@@ -1,0 +1,80 @@
+{
+ "slot": {
+  "slot_id": 78,
+  "name": "f100_078_high_dynamics_vehicles",
+  "family": "high_dynamics_vehicles",
+  "params": {
+   "peds": 3,
+   "crossers": 2,
+   "vehicles": 4,
+   "contested": false,
+   "hard": true
+  },
+  "root_seed": 4576796,
+  "map_seed": 17,
+  "block": "X",
+  "cluster": "f100_078_high_dynamics_vehicles",
+  "out": "scenarios/final100/f100_078_high_dynamics_vehicles.json",
+  "split": "test"
+ },
+ "status": "ok",
+ "seed_used": 4586796,
+ "attempt": 10,
+ "rejects": [
+  {
+   "attempt": 0,
+   "seed": 4576796,
+   "reason": "pressure_1.75"
+  },
+  {
+   "attempt": 1,
+   "seed": 4577796,
+   "reason": "no_true_encounter"
+  },
+  {
+   "attempt": 2,
+   "seed": 4578796,
+   "reason": "no_safe_start"
+  },
+  {
+   "attempt": 3,
+   "seed": 4579796,
+   "reason": "no_safe_start"
+  },
+  {
+   "attempt": 4,
+   "seed": 4580796,
+   "reason": "pressure_1.78"
+  },
+  {
+   "attempt": 5,
+   "seed": 4581796,
+   "reason": "no_true_encounter"
+  },
+  {
+   "attempt": 6,
+   "seed": 4582796,
+   "reason": "no_safe_start"
+  },
+  {
+   "attempt": 7,
+   "seed": 4583796,
+   "reason": "no_true_encounter"
+  },
+  {
+   "attempt": 8,
+   "seed": 4584796,
+   "reason": "no_safe_start"
+  },
+  {
+   "attempt": 9,
+   "seed": 4585796,
+   "reason": "no_true_encounter"
+  }
+ ],
+ "pressure": 0.95,
+ "encounters_verified": 2,
+ "scenario_sha": "fb7c8b5ee525e5f3",
+ "stack_sha": "07207c0dd1d35263af3d77c821523195369db116",
+ "plan_sha": "52bd39b5208ff220"
+}

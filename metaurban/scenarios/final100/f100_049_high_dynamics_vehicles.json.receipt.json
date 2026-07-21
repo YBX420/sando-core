@@ -1,0 +1,95 @@
+{
+ "slot": {
+  "slot_id": 49,
+  "name": "f100_049_high_dynamics_vehicles",
+  "family": "high_dynamics_vehicles",
+  "params": {
+   "peds": 3,
+   "crossers": 2,
+   "vehicles": 4,
+   "contested": false,
+   "hard": true
+  },
+  "root_seed": 57874087,
+  "map_seed": 17,
+  "block": "X",
+  "cluster": "f100_049_high_dynamics_vehicles",
+  "out": "scenarios/final100/f100_049_high_dynamics_vehicles.json",
+  "split": "cal"
+ },
+ "status": "ok",
+ "seed_used": 57887087,
+ "attempt": 13,
+ "rejects": [
+  {
+   "attempt": 0,
+   "seed": 57874087,
+   "reason": "no_true_encounter"
+  },
+  {
+   "attempt": 1,
+   "seed": 57875087,
+   "reason": "no_safe_start"
+  },
+  {
+   "attempt": 2,
+   "seed": 57876087,
+   "reason": "pressure_1.79"
+  },
+  {
+   "attempt": 3,
+   "seed": 57877087,
+   "reason": "no_safe_start"
+  },
+  {
+   "attempt": 4,
+   "seed": 57878087,
+   "reason": "pressure_1.73"
+  },
+  {
+   "attempt": 5,
+   "seed": 57879087,
+   "reason": "pressure_1.91"
+  },
+  {
+   "attempt": 6,
+   "seed": 57880087,
+   "reason": "no_safe_start"
+  },
+  {
+   "attempt": 7,
+   "seed": 57881087,
+   "reason": "pressure_1.98"
+  },
+  {
+   "attempt": 8,
+   "seed": 57882087,
+   "reason": "pressure_1.96"
+  },
+  {
+   "attempt": 9,
+   "seed": 57883087,
+   "reason": "no_true_encounter"
+  },
+  {
+   "attempt": 10,
+   "seed": 57884087,
+   "reason": "no_safe_start"
+  },
+  {
+   "attempt": 11,
+   "seed": 57885087,
+   "reason": "no_true_encounter"
+  },
+  {
+   "attempt": 12,
+   "seed": 57886087,
+   "reason": "no_true_encounter"
+  }
+ ],
+ "pressure": 0.5,
+ "encounters_verified": 2,
+ "scenario_sha": "5325d6da724a8233",
+ "stack_sha": "07207c0dd1d35263af3d77c821523195369db116",
+ "plan_sha": "52bd39b5208ff220"
+}

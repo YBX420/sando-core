@@ -1,0 +1,369 @@
+{
+ "schema": "sando-scenario-v1",
+ "name": "f100_047_high_dynamics_vehicles",
+ "description": "procedurally populated street life (seed 15533439): sidewalk walkers, crosswalk-area crossers, lane-following vehicles; pairwise spacing verified over the compiled timeline (floors ped-ped 0.8 / ped-veh 2.0 / veh-veh 4.0 m beyond radii). CONTESTED: corridor crosses the anchor crosser, arrivals time-aligned.",
+ "map": {
+  "seed": 3,
+  "block_str": "X"
+ },
+ "drone": {
+  "start": [
+   114.5,
+   110.59,
+   1.5
+  ],
+  "goal": [
+   114.5,
+   70.59,
+   1.5
+  ],
+  "cruise_z": 1.5,
+  "max_vel": 3.0,
+  "max_acc": 6.0
+ },
+ "statics": [],
+ "movers": [
+  {
+   "cls": "pedestrian",
+   "spawn_t": 4.1,
+   "path": [
+    [
+     19.63,
+     -2.38
+    ],
+    [
+     25.26,
+     -2.38
+    ],
+    [
+     30.9,
+     -2.38
+    ],
+    [
+     36.54,
+     -2.38
+    ],
+    [
+     42.18,
+     -2.38
+    ],
+    [
+     47.82,
+     -2.38
+    ]
+   ],
+   "speed": 1.21,
+   "hold_end": false
+  },
+  {
+   "cls": "pedestrian",
+   "spawn_t": 5.2,
+   "path": [
+    [
+     99.93,
+     -66.03
+    ],
+    [
+     99.93,
+     -69.57
+    ],
+    [
+     99.93,
+     -73.11
+    ],
+    [
+     99.93,
+     -76.65
+    ],
+    [
+     99.93,
+     -80.19
+    ],
+    [
+     99.93,
+     -83.73
+    ]
+   ],
+   "speed": 1.41,
+   "hold_end": false
+  },
+  {
+   "cls": "pedestrian",
+   "spawn_t": 1.4,
+   "path": [
+    [
+     61.96,
+     -4.02
+    ],
+    [
+     64.05,
+     -4.56
+    ],
+    [
+     66.12,
+     -5.18
+    ],
+    [
+     68.16,
+     -5.89
+    ],
+    [
+     70.17,
+     -6.68
+    ],
+    [
+     72.14,
+     -7.55
+    ]
+   ],
+   "speed": 1.61,
+   "hold_end": false
+  },
+  {
+   "cls": "pedestrian",
+   "spawn_t": 0.6,
+   "path": [
+    [
+     126.85,
+     83.59
+    ],
+    [
+     102.15,
+     83.59
+    ]
+   ],
+   "speed": 1.16,
+   "hold_end": false
+  },
+  {
+   "cls": "pedestrian",
+   "spawn_t": 2.8,
+   "path": [
+    [
+     101.86,
+     81.55
+    ],
+    [
+     125.35,
+     81.55
+    ]
+   ],
+   "speed": 1.36,
+   "hold_end": false
+  },
+  {
+   "cls": "vehicle",
+   "spawn_t": 3.9,
+   "path": [
+    [
+     177.5,
+     7.0
+    ],
+    [
+     181.39,
+     7.0
+    ],
+    [
+     185.28,
+     7.0
+    ],
+    [
+     189.17,
+     7.0
+    ],
+    [
+     193.06,
+     7.0
+    ],
+    [
+     196.94,
+     7.0
+    ],
+    [
+     200.83,
+     7.0
+    ],
+    [
+     204.72,
+     7.0
+    ],
+    [
+     208.61,
+     7.0
+    ],
+    [
+     212.5,
+     7.0
+    ]
+   ],
+   "speed": 7.3,
+   "hold_end": false
+  },
+  {
+   "cls": "vehicle",
+   "spawn_t": 1.5,
+   "path": [
+    [
+     122.5,
+     -90.0
+    ],
+    [
+     122.5,
+     -86.11
+    ],
+    [
+     122.5,
+     -82.22
+    ],
+    [
+     122.5,
+     -78.33
+    ],
+    [
+     122.5,
+     -74.44
+    ],
+    [
+     122.5,
+     -70.56
+    ],
+    [
+     122.5,
+     -66.67
+    ],
+    [
+     122.5,
+     -62.78
+    ],
+    [
+     122.5,
+     -58.89
+    ],
+    [
+     122.5,
+     -55.0
+    ]
+   ],
+   "speed": 4.8,
+   "hold_end": false
+  },
+  {
+   "cls": "vehicle",
+   "spawn_t": 4.0,
+   "path": [
+    [
+     50.0,
+     0.0
+    ],
+    [
+     64.17,
+     0.0
+    ],
+    [
+     78.33,
+     0.0
+    ],
+    [
+     92.5,
+     0.0
+    ],
+    [
+     106.67,
+     0.0
+    ],
+    [
+     120.83,
+     0.0
+    ],
+    [
+     135.0,
+     0.0
+    ],
+    [
+     149.17,
+     0.0
+    ],
+    [
+     163.33,
+     0.0
+    ],
+    [
+     177.5,
+     0.0
+    ]
+   ],
+   "speed": 5.3,
+   "hold_end": false
+  },
+  {
+   "cls": "vehicle",
+   "spawn_t": 3.8,
+   "path": [
+    [
+     115.5,
+     -55.0
+    ],
+    [
+     115.5,
+     -40.83
+    ],
+    [
+     115.5,
+     -26.67
+    ],
+    [
+     115.5,
+     -12.5
+    ],
+    [
+     115.5,
+     1.67
+    ],
+    [
+     115.5,
+     15.83
+    ],
+    [
+     115.5,
+     30.0
+    ],
+    [
+     115.5,
+     44.17
+    ],
+    [
+     115.5,
+     58.33
+    ],
+    [
+     115.5,
+     72.5
+    ]
+   ],
+   "speed": 5.7,
+   "hold_end": false
+  }
+ ],
+ "params": {},
+ "t_max": 35.0,
+ "encounters_verified": 2,
+ "provenance": {
+  "generator_commit": "07207c0",
+  "root_seed": 15527439,
+  "gen_seed": 15533439,
+  "attempt": 6,
+  "family": "high_dynamics_vehicles",
+  "params": {
+   "peds": 3,
+   "crossers": 2,
+   "vehicles": 4,
+   "contested": false,
+   "hard": true,
+   "split": "cal"
+  },
+  "map_seed": 3,
+  "block": "X",
+  "cluster": "f100_047_high_dynamics_vehicles",
+  "scenario_sha": "684dd79fb775f23f"
+ }
+}

@@ -1,0 +1,55 @@
+{
+ "slot": {
+  "slot_id": 28,
+  "name": "f100_028_single_timed_encounter",
+  "family": "single_timed_encounter",
+  "params": {
+   "peds": 4,
+   "crossers": 2,
+   "vehicles": 0,
+   "contested": true,
+   "hard": false
+  },
+  "root_seed": 47136764,
+  "map_seed": 11,
+  "block": "X",
+  "cluster": "f100_028_single_timed_encounter",
+  "out": "scenarios/final100/f100_028_single_timed_encounter.json",
+  "split": "cal"
+ },
+ "status": "ok",
+ "seed_used": 47141764,
+ "attempt": 5,
+ "rejects": [
+  {
+   "attempt": 0,
+   "seed": 47136764,
+   "reason": "pressure_1.76"
+  },
+  {
+   "attempt": 1,
+   "seed": 47137764,
+   "reason": "pressure_1.68"
+  },
+  {
+   "attempt": 2,
+   "seed": 47138764,
+   "reason": "no_safe_start"
+  },
+  {
+   "attempt": 3,
+   "seed": 47139764,
+   "reason": "pressure_1.75"
+  },
+  {
+   "attempt": 4,
+   "seed": 47140764,
+   "reason": "no_safe_start"
+  }
+ ],
+ "pressure": 1.03,
+ "encounters_verified": 1,
+ "scenario_sha": "4119a8d27c43f09c",
+ "stack_sha": "07207c0dd1d35263af3d77c821523195369db116",
+ "plan_sha": "52bd39b5208ff220"
+}

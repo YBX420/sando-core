@@ -1,0 +1,55 @@
+{
+ "slot": {
+  "slot_id": 29,
+  "name": "f100_029_high_dynamics_vehicles",
+  "family": "high_dynamics_vehicles",
+  "params": {
+   "peds": 3,
+   "crossers": 2,
+   "vehicles": 4,
+   "contested": false,
+   "hard": true
+  },
+  "root_seed": 54005491,
+  "map_seed": 29,
+  "block": "X",
+  "cluster": "f100_029_high_dynamics_vehicles",
+  "out": "scenarios/final100/f100_029_high_dynamics_vehicles.json",
+  "split": "cal"
+ },
+ "status": "ok",
+ "seed_used": 54010491,
+ "attempt": 5,
+ "rejects": [
+  {
+   "attempt": 0,
+   "seed": 54005491,
+   "reason": "no_true_encounter"
+  },
+  {
+   "attempt": 1,
+   "seed": 54006491,
+   "reason": "pressure_1.76"
+  },
+  {
+   "attempt": 2,
+   "seed": 54007491,
+   "reason": "no_true_encounter"
+  },
+  {
+   "attempt": 3,
+   "seed": 54008491,
+   "reason": "no_safe_start"
+  },
+  {
+   "attempt": 4,
+   "seed": 54009491,
+   "reason": "no_safe_start"
+  }
+ ],
+ "pressure": 1.17,
+ "encounters_verified": 1,
+ "scenario_sha": "f3a04aa1da8e37a2",
+ "stack_sha": "07207c0dd1d35263af3d77c821523195369db116",
+ "plan_sha": "52bd39b5208ff220"
+}
