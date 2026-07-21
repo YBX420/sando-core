@@ -95,9 +95,17 @@ def score_row(e, d, age, cls, sh):
     return e / max(b + v * d, B_MIN)
 
 
-def flight_sups(D, sh):
+def flight_sups(D, sh, universe=None):
+    """Per-flight sup scores. universe: optional {scn: [ep, ...]} registration (harvest_v3
+    universe.json) -- every REGISTERED episode enters the ranking, zero-row episodes at -inf.
+    (07-21 ruling: 'visible in the manifest' is not enough -- without this, ~20 of the 69 retired
+    scenarios silently vanished from the ranking universe because this function only enumerated
+    episodes that happened to have residual rows.)"""
     out = {}
-    for key in {(str(s), int(e)) for s, e in zip(D["scn"], D["ep"])}:
+    keys = {(str(s), int(e)) for s, e in zip(D["scn"], D["ep"])}
+    if universe is not None:
+        keys |= {(str(s), int(e)) for s, eps in universe.items() for e in eps}
+    for key in keys:
         m = (D["scn"] == key[0]) & (D["ep"] == key[1]) & (D["qual"] == 1) & (D["age"] >= 2)
         best = -np.inf
         for e, d, age, cls in zip(D["e"][m], D["d"][m], D["age"][m], D["cls"][m]):

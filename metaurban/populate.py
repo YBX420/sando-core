@@ -47,20 +47,24 @@ def _encounter_ok(scn, tol_s=1.0):
         if not m.get("_retimed"):
             continue
         path = np.asarray(m["path"], float)
+        spd = m["speed"] if not isinstance(m["speed"], dict) else m["speed"].get("v1", 5.0)
+        spd = max(0.3, float(spd) if not isinstance(spd, str) else 5.0)
         seg_off = 0.0
+        hit_ok = False
         for k in range(len(path) - 1):
+            # check EVERY corridor crossing, not just the first geometric one (07-21 ruling:
+            # a mover whose first crossing mistimes may still meet the drone at a later one)
             frac = _seg_cross(st, gl, path[k], path[k + 1])
-            if frac is None:
-                seg_off += float(np.linalg.norm(path[k + 1] - path[k]))
-                continue
-            cross = st + frac * (gl - st)
-            t_drone = frac * L / v_nom
-            spd = m["speed"] if not isinstance(m["speed"], dict) else m["speed"].get("v1", 5.0)
-            spd = max(0.3, float(spd) if not isinstance(spd, str) else 5.0)
-            t_mover = float(m["spawn_t"]) + (seg_off + float(np.linalg.norm(cross - path[k]))) / spd
-            if abs(t_mover - t_drone) <= tol_s:
-                n_ok += 1
-            break
+            if frac is not None:
+                cross = st + frac * (gl - st)
+                t_drone = frac * L / v_nom
+                t_mover = float(m["spawn_t"]) + (seg_off + float(np.linalg.norm(cross - path[k]))) / spd
+                if abs(t_mover - t_drone) <= tol_s:
+                    hit_ok = True
+                    break
+            seg_off += float(np.linalg.norm(path[k + 1] - path[k]))
+        if hit_ok:
+            n_ok += 1
     scn["encounters_verified"] = n_ok
     return n_ok >= 1
 
@@ -72,8 +76,11 @@ def _finalize_scn(scn, name, family, params, map_seed, block, gen_seed, cluster=
     for m in scn["movers"]:
         m.pop("_retimed", None)
     scn.pop("_v_nom", None)
+    used = int(scn.pop("_gen_seed_used", gen_seed))
+    att = int(scn.pop("_gen_attempt", 0))
     scn["name"] = name
-    scn["provenance"] = dict(generator_commit=_GEN_COMMIT, gen_seed=int(gen_seed),
+    scn["provenance"] = dict(generator_commit=_GEN_COMMIT,
+                             root_seed=int(gen_seed), gen_seed=used, attempt=att,
                              family=str(family), params=dict(params),
                              map_seed=int(map_seed), block=str(block),
                              cluster=str(cluster or name))
@@ -446,6 +453,13 @@ def _ensure_clear_start(scn, r_clear=3.0, t_window=3.0, max_back=16.0):
                 scn["description"] += " [REJECT: shifted encounter re-entered the takeoff window]"
                 print(f"[populate] REJECT {scn.get('name')}: retime shift broke the takeoff window", flush=True)
                 return None
+            w = min_pair_dist(scn)
+            if w is not None and w[2] < w[3]:
+                # 07-21 ruling: the spawn-t shift must RE-PASS the mover spacing floors too --
+                # the contest verified spacing at the OLD times; shifting can re-collide movers.
+                scn["description"] += " [REJECT: retime shift broke mover spacing]"
+                print(f"[populate] REJECT {scn.get('name')}: spawn shift broke min-pair spacing", flush=True)
+                return None
         else:
             print(f"[populate] {scn.get('name')}: start moved back {back:.0f} m for a clear takeoff zone")
     return back
@@ -479,6 +493,8 @@ def main():
         for attempt in range(6):                            # encounter-geometry filter: regenerate
             scn, stats = populate(env.engine, seed=seed + 1000 * attempt,
                                   n_walkers=nw, n_crossers=nc, n_vehicles=nv)
+            scn["_gen_seed_used"] = seed + 1000 * attempt   # provenance must record the ACTUAL
+            scn["_gen_attempt"] = attempt                   # attempt seed, not the root (07-21)
             scn["_engine"] = env.engine
             rng_a = np.random.default_rng(seed * 31 + 7 + attempt)
             if args.hard:
@@ -527,6 +543,12 @@ def main():
         for tier in ("busy", "rush"):
             for k in range(args.bench):
                 out = f"scenarios/bench/street_{tier}_s{k}.json"
+                if os.path.exists(out) and os.environ.get("POPULATE_FORCE") != "1":
+                    # 07-21 ruling: a chunked re-run restarted at k=0 and silently OVERWROTE the
+                    # existing street_* pool and MANIFEST -- never clobber a generated scenario
+                    print(f"[populate] REFUSE overwrite {out} (set POPULATE_FORCE=1 to override)",
+                          flush=True)
+                    continue
                 st = one(k, tier, out)
                 if st is None:
                     continue                                # rejected scene: no file, no manifest row
@@ -548,8 +570,13 @@ def main():
                     json.dump(scn, open(out2, "w"), indent=1)
                     manifest.append(dict(file=out2, tier=tier, seed=k, alt=ms,
                                          cluster=f"street_{tier}_s{k}"))
-        json.dump(manifest, open("scenarios/bench/MANIFEST.json", "w"), indent=1)
-        print(f"[populate] benchmark suite: {len(manifest)} scenes + MANIFEST.json")
+        mf = "scenarios/bench/MANIFEST.json"
+        if os.path.exists(mf):                              # 07-21: MERGE, never truncate the ledger
+            old_rows = json.load(open(mf))
+            new_files = {r["file"] for r in manifest}
+            manifest = [r for r in old_rows if r.get("file") not in new_files] + manifest
+        json.dump(manifest, open(mf, "w"), indent=1)
+        print(f"[populate] benchmark suite: {len(manifest)} scenes + MANIFEST.json (merged)")
     else:
         one(args.seed, args.tier, args.out)
     env.close()
