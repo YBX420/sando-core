@@ -254,6 +254,10 @@ def cert_clear(ego, cyl, tau=TAU, delta=None):
     d = tau if delta is None else delta
     if not _tail_covered(ego, cyl, tau, d):
         return False
+    _tw = min(tau, max(ego.duration() - 1e-6, 0.0))
+    #   EXPLICIT window clip (07-21 ruling): the C++ core now FAIL-CLOSES on under-covered
+    #   windows; the remainder [_tw, tau] is certified by the hover-tail law above, so the clip
+    #   is OURS with a sound completion -- the core never silently shrinks a window again.
     for ent in cyl:
         (c0, vv, aa, R, zc, veff) = ent[:6]
         cap = _cap_of(ent)
@@ -263,7 +267,7 @@ def cert_clear(ego, cyl, tau=TAU, delta=None):
             hb = True
             for s in _cap_grid(cap):
                 hs, _ = ego.certify_horizontal(obs_c0=c0, R=R, obs_vel=tuple(np.asarray(vv, float) * s),
-                                               obs_acc=(0, 0, 0), t_hi=tau, v_eff=veff, delta=d)
+                                               obs_acc=(0, 0, 0), t_hi=_tw, v_eff=veff, delta=d)
                 if not hs:
                     hb = False
                     break
@@ -274,14 +278,14 @@ def cert_clear(ego, cyl, tau=TAU, delta=None):
             ell = _ell_of(ent, ego)
             if ell is not None:
                 _k, _ux, _uy, _rw = ell
-                hp, _ = ego.certify_horizontal_aniso(obs_c0=c0, R=_rw, obs_vel=vv, obs_acc=aa, t_hi=tau,
+                hp, _ = ego.certify_horizontal_aniso(obs_c0=c0, R=_rw, obs_vel=vv, obs_acc=aa, t_hi=_tw,
                                                      v_eff=veff, delta=d, ux=_ux, uy=_uy, kappa=_k)
-                hc, _ = ego.certify_horizontal_aniso(obs_c0=c0, R=_rw, obs_vel=(0, 0, 0), t_hi=tau,
+                hc, _ = ego.certify_horizontal_aniso(obs_c0=c0, R=_rw, obs_vel=(0, 0, 0), t_hi=_tw,
                                                      v_eff=veff, delta=d, ux=_ux, uy=_uy, kappa=_k)
             else:
-                hp, _ = ego.certify_horizontal(obs_c0=c0, R=R, obs_vel=vv, obs_acc=aa, t_hi=tau, v_eff=veff, delta=d)
-                hc, _ = ego.certify_horizontal(obs_c0=c0, R=R, obs_vel=(0, 0, 0), t_hi=tau, v_eff=veff, delta=d)
-        vo, _ = ego.certify_above(z_clear=zc, t_hi=tau, v_eff_z=0.0, delta=d)
+                hp, _ = ego.certify_horizontal(obs_c0=c0, R=R, obs_vel=vv, obs_acc=aa, t_hi=_tw, v_eff=veff, delta=d)
+                hc, _ = ego.certify_horizontal(obs_c0=c0, R=R, obs_vel=(0, 0, 0), t_hi=_tw, v_eff=veff, delta=d)
+        vo, _ = ego.certify_above(z_clear=zc, t_hi=_tw, v_eff_z=0.0, delta=d)
         if not ((hp and hc) or vo):
             return False
     return True
@@ -301,6 +305,7 @@ def cert_verdict3(ego, cyl, tau=TAU, delta=None):
         if "certified" in (a, b): return "certified"
         return "refuted" if a == b == "refuted" else "unknown"
     d = tau if delta is None else delta
+    _tw = min(tau, max(ego.duration() - 1e-6, 0.0))   # explicit clip (07-21); diagnostic twin only
     overall = "certified"; details = []
     for ent in cyl:                                   # NB diagnostic twin stays ISOTROPIC for the ellipse
         (c0, vv, aa, R, zc, veff) = ent[:6]           # (conservative); CAPSULE movers get the pearl AND --
@@ -309,17 +314,17 @@ def cert_verdict3(ego, cyl, tau=TAU, delta=None):
             hs3 = "certified"
             for sg in _cap_grid(cap):
                 h3, _m3 = ego.certify_horizontal3(obs_c0=c0, R=R, obs_vel=tuple(np.asarray(vv, float) * sg),
-                                                  obs_acc=(0, 0, 0), t_hi=tau, v_eff=veff, delta=d)
+                                                  obs_acc=(0, 0, 0), t_hi=_tw, v_eff=veff, delta=d)
                 hs3 = _and(hs3, h3)
-            vo3, mv3 = ego.certify_above3(z_clear=zc, t_hi=tau, v_eff_z=0.0, delta=d)
+            vo3, mv3 = ego.certify_above3(z_clear=zc, t_hi=_tw, v_eff_z=0.0, delta=d)
             mover = _or(hs3, vo3)
             details.append(dict(horiz_pred=hs3, horiz_cur=hs3, above=vo3, verdict=mover,
                                 margins=(0.0, 0.0, round(float(mv3), 4))))
             overall = _and(overall, mover)
             continue
-        hp, mp = ego.certify_horizontal3(obs_c0=c0, R=R, obs_vel=vv, obs_acc=aa, t_hi=tau, v_eff=veff, delta=d)
-        hc, mc = ego.certify_horizontal3(obs_c0=c0, R=R, obs_vel=(0, 0, 0), t_hi=tau, v_eff=veff, delta=d)
-        vo, mv = ego.certify_above3(z_clear=zc, t_hi=tau, v_eff_z=0.0, delta=d)
+        hp, mp = ego.certify_horizontal3(obs_c0=c0, R=R, obs_vel=vv, obs_acc=aa, t_hi=_tw, v_eff=veff, delta=d)
+        hc, mc = ego.certify_horizontal3(obs_c0=c0, R=R, obs_vel=(0, 0, 0), t_hi=_tw, v_eff=veff, delta=d)
+        vo, mv = ego.certify_above3(z_clear=zc, t_hi=_tw, v_eff_z=0.0, delta=d)
         mover = _or(_and(hp, hc), vo)
         details.append(dict(horiz_pred=hp, horiz_cur=hc, above=vo, verdict=mover,
                             margins=(round(mp, 4), round(mc, 4), round(mv, 4))))
@@ -488,6 +493,8 @@ def cert_clear_warp(ego, cyl, s, tau=TAU, delta=None):
     s = float(s)
     if not _tail_covered(ego, cyl, tau, d, warp=s):
         return False
+    _tws = min(s * tau, max(ego.duration() - 1e-6, 0.0))
+    #   explicit SPLINE-time window clip (07-21): remainder covered by the hover-tail law above
     for ent in cyl:
         (c0, vv, aa, R, zc, veff) = ent[:6]
         cap = _cap_of(ent)
@@ -495,7 +502,7 @@ def cert_clear_warp(ego, cyl, s, tau=TAU, delta=None):
             hp = True
             for sg in _cap_grid(cap):
                 hs, _ = ego.certify_horizontal(obs_c0=c0, R=R, obs_vel=tuple(np.asarray(vv, float) * sg / s),
-                                               obs_acc=(0, 0, 0), t_hi=s * tau, v_eff=veff / s, delta=d * s)
+                                               obs_acc=(0, 0, 0), t_hi=_tws, v_eff=veff / s, delta=d * s)
                 if not hs:
                     hp = False
                     break
@@ -506,12 +513,12 @@ def cert_clear_warp(ego, cyl, s, tau=TAU, delta=None):
             if ell is not None:                 # retime and the constant whitening map commute:
                 _k, _ux, _uy, _rw = ell         # slip identity + ellipse compose soundly
                 hp, _ = ego.certify_horizontal_aniso(obs_c0=c0, R=_rw, obs_vel=tuple(np.asarray(vv, float) / s),
-                                                     obs_acc=(0, 0, 0), t_hi=s * tau, v_eff=veff / s, delta=d * s,
+                                                     obs_acc=(0, 0, 0), t_hi=_tws, v_eff=veff / s, delta=d * s,
                                                      ux=_ux, uy=_uy, kappa=_k)
             else:
                 hp, _ = ego.certify_horizontal(obs_c0=c0, R=R, obs_vel=tuple(np.asarray(vv, float) / s),
-                                               obs_acc=(0, 0, 0), t_hi=s * tau, v_eff=veff / s, delta=d * s)
-        vo, _ = ego.certify_above(z_clear=zc, t_hi=s * tau, v_eff_z=0.0, delta=d * s)
+                                               obs_acc=(0, 0, 0), t_hi=_tws, v_eff=veff / s, delta=d * s)
+        vo, _ = ego.certify_above(z_clear=zc, t_hi=_tws, v_eff_z=0.0, delta=d * s)
         if not (hp or vo):
             return False
     return True
@@ -521,6 +528,7 @@ def cert_clear_margin(ego, cyl, tau=TAU, delta=None):
     """Margin sister of cert_clear: (ok, m) where m ~ metres of surplus clearance beyond the
     certified floor (min over movers; deficit-squared margins normalised by 2R). inf when no cyl."""
     d = tau if delta is None else delta
+    _tw = min(tau, max(ego.duration() - 1e-6, 0.0))   # explicit clip (07-21); tiebreak scorer only
     ok_all, m_min = True, float("inf")
     for ent in cyl:
         (c0, vv, aa, R, zc, veff) = ent[:6]
@@ -530,7 +538,7 @@ def cert_clear_margin(ego, cyl, tau=TAU, delta=None):
             hp = hc = True; mp = mc = float("inf")
             for sg in _cap_grid(cap):
                 hs, ms = ego.certify_horizontal(obs_c0=c0, R=R, obs_vel=tuple(np.asarray(vv, float) * sg),
-                                                obs_acc=(0, 0, 0), t_hi=tau, v_eff=veff, delta=d)
+                                                obs_acc=(0, 0, 0), t_hi=_tw, v_eff=veff, delta=d)
                 mp = mc = min(mp, float(ms))
                 if not hs:
                     hp = hc = _cap_behind(ent, ego, tau, d)
@@ -539,15 +547,15 @@ def cert_clear_margin(ego, cyl, tau=TAU, delta=None):
                     break
         elif ell is not None:
             _k, _ux, _uy, _rw = ell             # margins in the warped metric, normalised by 2*R_warp
-            hp, mp = ego.certify_horizontal_aniso(obs_c0=c0, R=_rw, obs_vel=vv, obs_acc=aa, t_hi=tau,
+            hp, mp = ego.certify_horizontal_aniso(obs_c0=c0, R=_rw, obs_vel=vv, obs_acc=aa, t_hi=_tw,
                                                   v_eff=veff, delta=d, ux=_ux, uy=_uy, kappa=_k)
-            hc, mc = ego.certify_horizontal_aniso(obs_c0=c0, R=_rw, obs_vel=(0, 0, 0), t_hi=tau,
+            hc, mc = ego.certify_horizontal_aniso(obs_c0=c0, R=_rw, obs_vel=(0, 0, 0), t_hi=_tw,
                                                   v_eff=veff, delta=d, ux=_ux, uy=_uy, kappa=_k)
             R = _rw
         else:
-            hp, mp = ego.certify_horizontal(obs_c0=c0, R=R, obs_vel=vv, obs_acc=aa, t_hi=tau, v_eff=veff, delta=d)
-            hc, mc = ego.certify_horizontal(obs_c0=c0, R=R, obs_vel=(0, 0, 0), t_hi=tau, v_eff=veff, delta=d)
-        vo, mv = ego.certify_above(z_clear=zc, t_hi=tau, v_eff_z=0.0, delta=d)
+            hp, mp = ego.certify_horizontal(obs_c0=c0, R=R, obs_vel=vv, obs_acc=aa, t_hi=_tw, v_eff=veff, delta=d)
+            hc, mc = ego.certify_horizontal(obs_c0=c0, R=R, obs_vel=(0, 0, 0), t_hi=_tw, v_eff=veff, delta=d)
+        vo, mv = ego.certify_above(z_clear=zc, t_hi=_tw, v_eff_z=0.0, delta=d)
         ok = (hp and hc) or vo
         ok_all &= ok
         if not ok:
@@ -561,6 +569,7 @@ def cert_clear_warp_margin(ego, cyl, s, tau=TAU, delta=None):
     """Margin sister of cert_clear_warp (retime margins x s back to world scale)."""
     d = (tau if delta is None else delta)
     s = float(s)
+    _tws = min(s * tau, max(ego.duration() - 1e-6, 0.0))   # explicit clip (07-21); scorer only
     m_min = float("inf")
     for ent in cyl:
         (c0, vv, aa, R, zc, veff) = ent[:6]
@@ -570,7 +579,7 @@ def cert_clear_warp_margin(ego, cyl, s, tau=TAU, delta=None):
             hp = True; mp = float("inf")
             for sg in _cap_grid(cap):
                 hs, ms = ego.certify_horizontal(obs_c0=c0, R=R, obs_vel=tuple(np.asarray(vv, float) * sg / s),
-                                                obs_acc=(0, 0, 0), t_hi=s * tau, v_eff=veff / s, delta=d * s)
+                                                obs_acc=(0, 0, 0), t_hi=_tws, v_eff=veff / s, delta=d * s)
                 mp = min(mp, float(ms))
                 if not hs:
                     hp = _cap_behind(ent, ego, tau, d, warp=s)
@@ -580,13 +589,13 @@ def cert_clear_warp_margin(ego, cyl, s, tau=TAU, delta=None):
         elif ell is not None:
             _k, _ux, _uy, _rw = ell
             hp, mp = ego.certify_horizontal_aniso(obs_c0=c0, R=_rw, obs_vel=tuple(np.asarray(vv, float) / s),
-                                                  obs_acc=(0, 0, 0), t_hi=s * tau, v_eff=veff / s, delta=d * s,
+                                                  obs_acc=(0, 0, 0), t_hi=_tws, v_eff=veff / s, delta=d * s,
                                                   ux=_ux, uy=_uy, kappa=_k)
             R = _rw
         else:
             hp, mp = ego.certify_horizontal(obs_c0=c0, R=R, obs_vel=tuple(np.asarray(vv, float) / s),
-                                            obs_acc=(0, 0, 0), t_hi=s * tau, v_eff=veff / s, delta=d * s)
-        vo, mv = ego.certify_above(z_clear=zc, t_hi=s * tau, v_eff_z=0.0, delta=d * s)
+                                            obs_acc=(0, 0, 0), t_hi=_tws, v_eff=veff / s, delta=d * s)
+        vo, mv = ego.certify_above(z_clear=zc, t_hi=_tws, v_eff_z=0.0, delta=d * s)
         if not (hp or vo):
             return False, -1.0
         m_min = min(m_min, s * max(float(mp), float(mv)) / max(2.0 * float(R), 1e-6))
