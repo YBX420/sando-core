@@ -57,6 +57,15 @@ _ENVS = {}
 def get_env(map_seed, block):
     key = (int(map_seed), str(block))
     if key not in _ENVS:
+        # MetaUrban's engine is a SINGLETON: building a second env in one process without
+        # closing the first asserts ('Can not call this API after engine initialization!' --
+        # caught live on the first campaign chunk, 07-21). Sequential single worker, so
+        # close-on-switch is safe and each chunk may span several map seeds.
+        for k in list(_ENVS):
+            try:
+                _ENVS.pop(k).close()
+            except Exception:
+                pass
         from scenario_designer3d import build_env
         _ENVS[key] = build_env(int(map_seed), interactive=False, block_str=str(block))
     return _ENVS[key]
