@@ -297,11 +297,70 @@ def _seg_cross(p0, p1, q0, q1):
     return t if (0.0 <= t <= 1.0 and 0.0 <= u <= 1.0) else None
 
 
+def _retime_markers(scn, v_nom):
+    """EXACT re-time of the marked encounter movers against the FINAL corridor (07-21 campaign
+    forensic: the +back/v_nom spawn shift was exact for pure backoff, but lateral start probes
+    BEND the corridor -- t_drone at the crossing moves by up to ~1.7 s, blowing the +-1.0 s
+    encounter gate for single-anchor scenes). Recompute each marker's crossing against the final
+    start->goal segment and set spawn_t = max(0, t_drone - t_travel). Returns markers re-timed."""
+    st = np.asarray(scn["drone"]["start"][:2], float)
+    gl = np.asarray(scn["drone"]["goal"][:2], float)
+    L = float(np.linalg.norm(gl - st))
+    n = 0
+    for m in scn["movers"]:
+        if not m.get("_retimed"):
+            continue
+        path = np.asarray(m["path"], float)
+        spd = m["speed"] if not isinstance(m["speed"], dict) else m["speed"].get("v1", 5.0)
+        spd = max(0.3, float(spd) if not isinstance(spd, str) else 5.0)
+        seg_off = 0.0
+        for k in range(len(path) - 1):
+            frac = _seg_cross(st, gl, path[k], path[k + 1])
+            if frac is not None:
+                cross = st + frac * (gl - st)
+                t_drone = frac * L / float(v_nom)
+                t_travel = (seg_off + float(np.linalg.norm(cross - path[k]))) / spd
+                m["spawn_t"] = round(max(0.0, t_drone - t_travel), 1)
+                n += 1
+                break
+            seg_off += float(np.linalg.norm(path[k + 1] - path[k]))
+    return n
+
+
 def _contest(scn, rng, crossers, n_anchor=3, occlude=True, veh_align=True, L=36.0, v_nom=2.4):
+    """Anchor-level CORRIDOR retry wrapper (07-21 campaign forensic): a retime-legal anchor whose
+    corridor then fails the clear-start law used to kill the WHOLE attempt -- the contested
+    families went 0/6 on that; the hard families survived only via multi-anchor luck. Rotate the
+    anchor list and try the next corridor on a fresh copy instead."""
+    import copy as _cp
+    eng = scn.get("_engine")
+    if not crossers:
+        return scn
+    idxs = []
+    for c in crossers:
+        for j, m in enumerate(scn["movers"]):
+            if m is c:
+                idxs.append(j)
+                break
+    base = {k: v for k, v in scn.items() if k != "_engine"}
+    for rot in range(len(idxs)):
+        trial = _cp.deepcopy(base)
+        trial["_engine"] = eng
+        anchors = [trial["movers"][j] for j in (idxs[rot:] + idxs[:rot])]
+        out = _contest_try(trial, rng, anchors, n_anchor, occlude, veh_align, L, v_nom)
+        if out is not None:
+            return out
+    scn["_reject"] = True
+    return scn
+
+
+def _contest_try(scn, rng, crossers, n_anchor=3, occlude=True, veh_align=True, L=36.0, v_nom=2.4):
     """HARD contested: primary anchor fixes the corridor; then up to n_anchor crossers AND every
     corridor-crossing vehicle are re-timed to meet the drone at their own crossing points (staggered
     gauntlet, not one encounter); optional legal-band advertising boards occlude crosser origins
-    (late reveal). Every single retime is spacing-verified and reverted on breach."""
+    (late reveal). Every single retime is spacing-verified and reverted on breach.
+    Returns scn on success, None when the chosen corridor fails the clear-start law (the _contest
+    wrapper then rotates to the next anchor's corridor)."""
     eng = scn.get("_engine")
     timed = False
     for anchor in crossers:
@@ -385,7 +444,7 @@ def _contest(scn, rng, crossers, n_anchor=3, occlude=True, veh_align=True, L=36.
                            if timed else
                            " CONTESTED(spatial): no anchor could retime within spacing floors.")
     if _ensure_clear_start(scn) is None:
-        scn["_reject"] = True                             # 07-20: no safe start / broken retime = REJECT
+        return None                                       # corridor failed: wrapper rotates anchors
     return scn
 
 
@@ -453,14 +512,10 @@ def _ensure_clear_start(scn, r_clear=3.0, t_window=3.0, max_back=32.0):
         # point by back/v_nom -- shift the retimed movers' spawn_t by the same amount, then
         # re-verify the launch window (a shifted mover may now conflict with takeoff).
         v_nom = float(scn.get("_v_nom", 2.4))
-        n_shift = 0
-        for m in scn["movers"]:
-            if m.get("_retimed"):
-                m["spawn_t"] = round(float(m["spawn_t"]) + back / v_nom, 1)
-                n_shift += 1
+        n_shift = _retime_markers(scn, v_nom)   # EXACT re-time vs the FINAL corridor (07-21)
         if n_shift:
-            print(f"[populate] {scn.get('name')}: start moved back {back:.0f} m; "
-                  f"{n_shift} retimed movers shifted +{back / v_nom:.1f}s to keep the encounter", flush=True)
+            print(f"[populate] {scn.get('name')}: start moved (back {back:.0f} m, lat {lat:+.0f} m); "
+                  f"{n_shift} markers re-timed exactly against the final corridor", flush=True)
             st2 = np.asarray(d["start"][:2], float)
             tracks[:] = [SLB.compile_mover(m, float(scn.get("t_max", 30.0))) for m in scn["movers"]]
             if not clear(st2):
