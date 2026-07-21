@@ -389,7 +389,7 @@ def _contest(scn, rng, crossers, n_anchor=3, occlude=True, veh_align=True, L=36.
     return scn
 
 
-def _ensure_clear_start(scn, r_clear=3.0, t_window=3.0, max_back=16.0):
+def _ensure_clear_start(scn, r_clear=3.0, t_window=3.0, max_back=32.0):
     """SAFE TAKEOFF: the drone start must be clear of every mover during the launch window
     (t in [0, t_window]) and of every static, by r_clear beyond body radii. If not, walk the
     start BACKWARD along the corridor axis (goal fixed, corridor grows) until it is."""
@@ -424,16 +424,30 @@ def _ensure_clear_start(scn, r_clear=3.0, t_window=3.0, max_back=16.0):
                     return False
         return True
 
-    back = 0.0
-    while back <= max_back and not clear(st - axis * back):
+    # 07-21 campaign fix: backward-only search starved dense worlds (165/300 attempts died on
+    # 'takeoff zone NOT clear' -- the OLD generator merely WARNED and launched inside traffic).
+    # The standard stays strict; the SEARCH widens: backoff to 32 m with lateral +-2/+-4 m probes
+    # at each step. Any start move is later re-validated by the spacetime encounter check on the
+    # FINAL geometry, so the probe cannot fake an encounter.
+    perp = np.array([-axis[1], axis[0]])
+    back, lat = 0.0, 0.0
+    found = False
+    while back <= max_back:
+        for lat in (0.0, 2.0, -2.0, 4.0, -4.0):
+            if clear(st - axis * back + perp * lat):
+                found = True
+                break
+        if found:
+            break
         back += 2.0
-    if back > max_back:
-        scn["description"] += " [REJECT: no clear takeoff spot within 16 m backoff]"
-        print(f"[populate] REJECT {scn.get('name')}: takeoff zone NOT clear after {max_back} m backoff")
+    if not found:
+        scn["description"] += f" [REJECT: no clear takeoff spot within {max_back:.0f} m backoff]"
+        print(f"[populate] REJECT {scn.get('name')}: takeoff zone NOT clear after {max_back} m "
+              f"backoff (+-4 m lateral)")
         return None                                        # 07-20 generator fix: no safe start = REJECT
-    if back > 0:
-        d["start"] = [round(float(st[0] - axis[0] * back), 2),
-                      round(float(st[1] - axis[1] * back), 2), d["start"][2]]
+    if back > 0 or abs(lat) > 0:
+        st_new = st - axis * back + perp * lat
+        d["start"] = [round(float(st_new[0]), 2), round(float(st_new[1]), 2), d["start"][2]]
         # RE-TIME after the pushback (07-20 generator fix): every retimed encounter was aligned to
         # the ORIGINAL start; moving the start back by `back` delays the drone at every crossing
         # point by back/v_nom -- shift the retimed movers' spawn_t by the same amount, then
