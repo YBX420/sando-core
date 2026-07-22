@@ -40,6 +40,12 @@ namespace ego_planner
     void setMovingObstacles(const std::vector<BsplineOptimizer::MovingObs> &obs, double lambda) {
       bspline_optimizer_rebound_->setMovingObstacles(obs, lambda);
     }
+    // GUIDE PATH (north-star arm, 2026-07-22): a polyline reference the NEXT reboundReplan uses as
+    // its INITIAL point set (replacing the polynomial / previous-trajectory init). The rebound
+    // optimizer then deforms it only where the (static) occupancy demands -- "plan along this
+    // KF-corrected reference line" instead of steering EGO by walls and sub-goal carrots.
+    // Empty vector = cleared = byte-identical legacy init. Persists until replaced or cleared.
+    void setGuidePath(const std::vector<Eigen::Vector3d> &pts) { guide_path_ = pts; }
 
     PlanParameters pp_;
     LocalTrajData local_data_;
@@ -50,6 +56,8 @@ namespace ego_planner
     /* main planning algorithms & modules */
 
     BsplineOptimizer::Ptr bspline_optimizer_rebound_;
+
+    std::vector<Eigen::Vector3d> guide_path_;   // north-star guide (empty = legacy init)
 
     int continous_failures_count_{0};
 

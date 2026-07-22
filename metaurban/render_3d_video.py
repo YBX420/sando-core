@@ -1644,6 +1644,11 @@ MAN_DEADBAND = 0.5    # hysteresis: keep the CURRENT maneuver unless another cer
 _MAN_STATE = {"kind": None}
 _V3_ST = {}          # CPL-v3 (EGO_DECIDE=v3, stage-3 render wiring): warm-start incumbent primitive
 _V3_PLAN = [None]    # the committed composite plan for the executor to fly via local_lattice.plan_eval
+_GUIDE_ST = {}       # north-star guide arm (EGO_DECIDE=guide): sticky sides + profile + last-ok guide
+_GUIDE_WARN = [0]
+GUIDE_BAND = float(os.environ.get("GUIDE_BAND", "0.25"))   # guide aims at cert radius + this band
+#   (plan-once-certify-once: a guide that clears exactly the cert radius plans splines the cert
+#    kills on jitter -- the old kill->hold chain; the band buys the comfortable pass)
 _SPAWNDBG = [0]   # MAN_SPAWNDBG=1: dump the spawn occupancy (360 static vs native forward cone) for the first calls
 
 
@@ -1895,7 +1900,10 @@ def ego_maneuver_replan(p_d, v_d, a_d, cur_wp, t_sim):
     cam_heading = float(quad.yaw)
     _VD_NOW[0] = np.asarray(v_d, float)                    # drawing-side TTC reads the real drone velocity
     movers = kf_movers(p_d, t_sim, cam_heading)            # cone-DETECTED movers + their KF prediction (the safety layer)
-    _mc = _man_cloud(p_d, cam_heading, t_sim, movers)
+    # NORTH-STAR GUIDE ARM (EGO_DECIDE=guide, 2026-07-22 ruling): movers NEVER enter EGO's
+    # occupancy -- prediction reaches the planner ONLY through the guide line (predictive_guide).
+    # Walls made of futures were the s17 prison; the static map stays.
+    _mc = _man_cloud(p_d, cam_heading, t_sim, [] if EGO_DECIDE == "guide" else movers)
     ego.update_cloud(_mc, p_d)
     if _FPRINT is not None:
         # stage fingerprints: movers (KF/oracle output) | occupancy cloud | drone state. First stage
@@ -1904,7 +1912,12 @@ def ego_maneuver_replan(p_d, v_d, a_d, cur_wp, t_sim):
                     for v in (c3[0], c3[1], c3[2], vel[0], vel[1], r_obs, _ds)])
         _fpr_write(f"t={t_sim:.3f} movers[{len(movers)}]={_fm} oids={'|'.join(str(_o) for (_o, *_r) in movers)} "
                    f"cloud={_fpx(_mc)} state={_fpx([*p_d, *v_d, *a_d, quad.yaw])}")
-    if EGO_TDYN:                                           # feed mover polys to the solver's time-aligned term
+    if EGO_TDYN and EGO_DECIDE == "guide":
+        if _GUIDE_WARN[0] == 0:
+            _GUIDE_WARN[0] = 1
+            print("[guide] EGO_TDYN ignored on the guide arm (one prediction inlet only: the guide line)",
+                  flush=True)
+    elif EGO_TDYN:                                         # feed mover polys to the solver's time-aligned term
         # hinge radius must reach CERT scale (r + per-class d_safe + pad), not the ring's r+0.45: the
         # tournament keeps the drone ~1.5m off movers, so a smaller hinge never activates (verified:
         # 728/728 replans byte-identical with the small radius)
@@ -2047,6 +2060,90 @@ def ego_maneuver_replan(p_d, v_d, a_d, cur_wp, t_sim):
     def _straight_clear():
         return (ego.replan(p_d, v_d, a_d, np.array([p_d[0] + gdir[0] * L, p_d[1] + gdir[1] * L, CRUISE_Z]))
                 and ego.duration() > 1e-3 and cert_clear() and static_clear() and mover_clear_flown())
+
+    if EGO_DECIDE == "guide":
+        # ---- NORTH-STAR ARM (2026-07-22 ruling): predict -> ONE stable guide line -> EGO plans
+        # along it -> certificate judges. NO maneuver primitives, NO speed warp, NO walls, NO
+        # recovery overrides. hold survives only as the counted fail-closed last resort.
+        import predictive_guide as _PG
+        _gmv = []                                        # (oid, xy, v_xy, CERT-scale keep-out + band)
+        for (_oid, c3, vel, r_obs, d_safe) in movers:
+            q_c, _veff_c = PERCLASS_CONF.get(d_safe, (MAN_QCONF, MAN_VEFF))
+            _gmv.append((_oid, (float(c3[0]), float(c3[1])), (float(vel[0]), float(vel[1])),
+                         r_obs + MAN_DSAFE + q_c + MAN_TRACK + GUIDE_BAND))
+        _cyl = []                                        # cert keep-outs, SAME law as the v2 arm
+        for (_oid, c3, vel, r_obs, d_safe) in movers:
+            q_c, veff_c = PERCLASS_CONF.get(d_safe, (MAN_QCONF, MAN_VEFF))
+            _cyl.append((np.asarray(c3, float), np.array([float(vel[0]), float(vel[1]), 0.0]),
+                         np.zeros(3), r_obs + MAN_DSAFE + q_c + MAN_TRACK,
+                         2.0 * float(c3[2]) + MAN_REACH_PAD + MAN_DSAFE_V + q_c + MAN_TRACK, veff_c))
+        _eta = None                                      # natural ETA along the CURRENT committed
+        _dur0 = ego.duration()                           # trajectory (ruling #5: never a cruise guess)
+        if _dur0 > 1e-3:
+            _us = np.linspace(0.0, max(_dur0 - 1e-3, 1e-3), 25)
+            _ppts = [np.asarray(ego.eval(float(_uu))[0][:2], float) for _uu in _us]
+            _arc = np.concatenate([[0.0], np.cumsum([float(np.linalg.norm(_ppts[k + 1] - _ppts[k]))
+                                                     for k in range(len(_ppts) - 1)])])
+            _vtail = max(float(np.hypot(v_d[0], v_d[1])), 1.0)
+
+            def _eta(s, _arc=_arc, _us=_us, _vtail=_vtail):
+                if s <= _arc[-1]:
+                    return float(np.interp(s, _arc, _us))
+                return float(_us[-1] + (s - _arc[-1]) / _vtail)
+        _carrot = p_d[:2] + gdir * L
+        _gpts, _gmeta = _PG.build_guide(p_d, v_d, _carrot, _gmv, _GUIDE_ST,
+                                        cruise_z=CRUISE_Z, eta=_eta)
+        _MAN_V2["guide_held"] = False
+
+        def _accept(tag, extra=None):
+            _MAN_V2["receipt"] = _SL.make_receipt(tag, 1.0, True, ego, _cyl, _tau_now(), REPLAN_DT,
+                                                  gates=dict(guide=True, **(extra or {})))
+            _MAN_V2["receipt"]["guide"] = _gmeta
+            _dur = ego.duration()
+            _p24 = [ego.eval(_uu)[0] for _uu in np.linspace(0, _dur, 24)]
+            return "guide", _p24, 1.0
+
+        ego.set_guide_path(_gpts)
+        _ok = ego.replan(p_d, v_d, a_d, np.array([_gpts[-1][0], _gpts[-1][1], CRUISE_Z])) \
+            and ego.duration() > 1e-3
+        if _ok and static_clear() and mover_clear_flown() \
+                and _SL.cert_clear(ego, _cyl, tau=_tau_now(), delta=REPLAN_DT):
+            _GUIDE_ST["last_ok"] = np.asarray(_gpts, float).copy()
+            return _accept("guide", dict(off=round(float(_gmeta["off_max"]), 2)))
+        # ROLLBACK 1: re-issue the last ACCEPTED guide (fresh replan from current state)
+        _last = _GUIDE_ST.get("last_ok")
+        if _last is not None:
+            ego.set_guide_path(_last)
+            if ego.replan(p_d, v_d, a_d, np.array([_last[-1][0], _last[-1][1], CRUISE_Z])) \
+                    and ego.duration() > 1e-3 and static_clear() and mover_clear_flown() \
+                    and _SL.cert_clear(ego, _cyl, tau=_tau_now(), delta=REPLAN_DT):
+                return _accept("guide_roll", dict(roll=1))
+        # ROLLBACK 2: keep flying the spline IN HAND deeper (u-offset re-cert, exact global clock)
+        _u0 = float(_MAN_V2.get("t_ego_now", 0.0))
+        if ego.duration() > _u0 + 0.2:
+            try:
+                import st_cert as _STC
+                _okr, _mr = _STC.certify_profile(ego, _cyl, [(_tau_now(), 1.0)], _tau_now(),
+                                                 REPLAN_DT, u_start=_u0)
+            except Exception as _e:
+                print(f"[guide] roll2 certify_profile error: {type(_e).__name__}: {_e}", flush=True)
+                _okr = False
+            if _okr and static_clear() and mover_clear_flown():
+                _MAN_V2["guide_held"] = True             # executor: keep t_ego accumulating
+                _MAN_V2["receipt"] = _SL.make_receipt("guide_roll", 1.0, True, ego, _cyl,
+                                                      _tau_now(), REPLAN_DT,
+                                                      gates=dict(guide=True, roll=2, u0=round(_u0, 2)))
+                _MAN_V2["receipt"]["guide"] = _gmeta
+                return "guide", None, 1.0
+        # FAIL-CLOSED: hold -- a counted north-star failure, never a normal move
+        _MAN_V2["receipt"] = _SL.make_receipt("evade", 0.0, False, ego, _cyl, _tau_now(), REPLAN_DT,
+                                              gates=dict(guide=True))
+        _MAN_V2["receipt"]["guide"] = _gmeta
+        if _SL.hover_clear(p_d, _cyl, _tau_now(), delta=REPLAN_DT):
+            _MAN_V2["receipt"] = _SL.make_receipt("hold_cert", 0.0, True, ego, _cyl, _tau_now(),
+                                                  REPLAN_DT, gates=dict(hover=True, guide=True))
+            _MAN_V2["receipt"]["guide"] = _gmeta
+        return "hold", None, 1.0
 
     if EGO_DECIDE == "v3":
         # CPL-v3 (stage-3): plan a certified LOCAL composite INSIDE the certified set (no discrete
@@ -2663,6 +2760,7 @@ while not quit_now:
     #   for BOTH arms so lap-done lines stay byte-comparable)
     _sw_lr = 0; _sw_sa = 0; _sw_oth = 0; _sp_hist = []   # thrash instrumentation: classify switches + speed-history cost
     _KF.clear()                                          # fresh mover trackers per lap (no stale cross-lap KF state)
+    _GUIDE_ST.clear()                                    # guide arm: no stale sides/profile across laps
     if _PFE is not None:
         _PFE.tracks.clear()                              # realistic front-end: no stale cross-lap tracks either
         _PFE_MEMO["t"] = None                            # and no stale same-t memo across laps
@@ -2715,6 +2813,7 @@ while not quit_now:
             man_kind = None; man_g = 1.0
             if args.maneuver:
                 # NO-HOLD cylinder fastest-safe tournament (fly over / around / climb); leaves EGO holding the winner
+                _MAN_V2["t_ego_now"] = t_ego     # guide arm roll-2: how deep the executor is into the held spline
                 t0 = time.perf_counter(); man_kind, ego_traj_pts2, man_g = ego_maneuver_replan(p_d, v_d, a_d, cur_wp, t)
                 last_rt = time.perf_counter() - t0
                 ego_dur = ego.duration(); ego_ok = ego_dur > 1e-3
@@ -2726,9 +2825,9 @@ while not quit_now:
                 last_rt = time.perf_counter() - t0
                 ego_dur = ego.duration()                   # EGO retains the last good traj even when replan fails
             if ego_ok and ego_dur > 1e-3:
-                if EGO_STC and _MAN_V2.get("stc_held"):
-                    ego_stuck = 0                          # M3 held commit: same spline, keep flying
-                    #   DEEPER into it -- t_ego accumulates, matching decide's u0 integrator
+                if (EGO_STC and _MAN_V2.get("stc_held")) or _MAN_V2.get("guide_held"):
+                    ego_stuck = 0                          # M3 held commit / guide roll-2: same spline,
+                    #   keep flying DEEPER into it -- t_ego accumulates (roll-2 certified from u0)
                 else:
                     ego_stuck = 0; t_ego = 0.0             # fresh plan -> restart from its head
                     ego_traj_pts = [ego.eval(s)[0] for s in np.linspace(0, ego_dur, 24)]   # the REAL EGO B-spline
@@ -2787,7 +2886,7 @@ while not quit_now:
                     #   the schedule is one-notch-slew legal by DP construction, smooth by design)
                 elif MAN_GAPSPEED and g_raw > 1.001 and g_raw > ego_g_prev:
                     ego_speed_g = g_raw          # certified reachable sprint: no artificial slow-release
-                elif EGO_DECIDE == "v2":
+                elif EGO_DECIDE in ("v2", "guide"):
                     # fly the tournament gear VERBATIM (audit finding #1): v2 paces release itself
                     # (one-grid-step per tick, dwell-gated, each step CERTIFIED at that gear). The
                     # old EGO_G_RELEASE low-pass on top produced OFF-GRID gears no certificate ever
@@ -2905,7 +3004,10 @@ while not quit_now:
                         nv = float(np.linalg.norm(sp_vel)); na = float(np.linalg.norm(sp_acc))
                         lat = float(np.linalg.norm(np.cross(sp_vel, sp_acc))) / max(nv, 1e-3)   # centripetal = kappa*v^2
                         _track_rows.append((int(iters), float(np.linalg.norm(quad.p - sp_pos)), nv, na, lat))
-                elif ego_stuck < 3:
+                elif ego_stuck < 3 or EGO_DECIDE == "guide":
+                    # guide arm: recovery overrides are OUT of the north-star main arm (07-22
+                    # ruling #6) -- an uncertified climb is exactly the flown!=certified branch
+                    # the arm exists to abolish; fail-closed = hover, booked as failure.
                     _vq = float(np.linalg.norm(quad.v[:2]))
                     if os.environ.get("HOLD_DECEL", "0") == "1" and _vq > 0.4:
                         # BRAKING REFERENCE FIELD (graceful stop): the physical stop path is momentum-
