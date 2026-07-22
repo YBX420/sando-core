@@ -71,7 +71,45 @@ namespace ego_planner
       start_end_derivatives.clear();
       flag_regenerate = false;
 
-      if (flag_first_call || flag_polyInit || flag_force_polynomial /*|| ( start_pt - local_target_pt ).norm() < 1.0*/) // Initial path generated from a min-snap traj by order.
+      if (guide_path_.size() >= 2)
+      {
+        // GUIDE INIT (north-star arm, 2026-07-22): the initial point set IS the guide polyline,
+        // resampled at ~ctrl_pt_dist arc spacing. The rebound optimizer then deforms this
+        // reference only where the occupancy demands -- "plan along this KF-corrected line"
+        // instead of being steered by prediction walls + sub-goal carrots.
+        double spacing = pp_.ctrl_pt_dist;
+        for (int tries = 0; tries < 5 && (int)point_set.size() < 7; ++tries)
+        {
+          point_set.clear();
+          point_set.push_back(guide_path_.front());
+          double acc_since = 0.0;
+          for (size_t k = 1; k < guide_path_.size(); ++k)
+          {
+            Eigen::Vector3d a = guide_path_[k - 1], b = guide_path_[k];
+            double seg = (b - a).norm();
+            if (seg < 1e-9)
+              continue;
+            Eigen::Vector3d dir = (b - a) / seg;
+            double off = spacing - acc_since;
+            while (off <= seg)
+            {
+              point_set.push_back(a + dir * off);
+              off += spacing;
+            }
+            acc_since = seg - (off - spacing);
+          }
+          point_set.push_back(guide_path_.back());
+          spacing *= 0.5;
+        }
+        point_set.front() = start_pt;            // exact boundary conditions
+        point_set.back() = local_target_pt;
+        start_end_derivatives.push_back(start_vel);
+        start_end_derivatives.push_back(local_target_vel);
+        start_end_derivatives.push_back(start_acc);
+        start_end_derivatives.push_back(Eigen::Vector3d::Zero());
+        flag_first_call = false;
+      }
+      else if (flag_first_call || flag_polyInit || flag_force_polynomial /*|| ( start_pt - local_target_pt ).norm() < 1.0*/) // Initial path generated from a min-snap traj by order.
       {
         flag_first_call = false;
         flag_force_polynomial = false;

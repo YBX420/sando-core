@@ -62,6 +62,18 @@ void ego_set_params(void* h, double max_vel, double max_acc, double max_jerk, do
   m->setOptParams(l1, l2, l3, l4, dist0, max_vel, max_acc, order);
 }
 
+void ego_set_guide_path(void* h, double* pts, int n) {
+  // north-star guide (2026-07-22): polyline the NEXT replan uses as its INITIAL point set
+  // (rebound deforms it only where occupancy demands). n==0 clears -> legacy init, byte-identical.
+  auto* m = (EGOPlannerManager*)h;
+  std::vector<Eigen::Vector3d> g;
+  if (n > 0 && pts) {
+    g.reserve(n);
+    for (int i = 0; i < n; ++i) g.emplace_back(pts[3 * i], pts[3 * i + 1], pts[3 * i + 2]);
+  }
+  m->setGuidePath(g);
+}
+
 void ego_set_moving_obstacles(void* h, double* rows, int n, double lambda) {
   // rows: n x 8 [c0x c0y c0z vx vy vz r_clear z_top]; obstacle polys are aligned to the NEXT replan's
   // t=0 (feed current KF/GT state right before ego_replan). n=0 or lambda=0 -> term off (default path).

@@ -63,6 +63,10 @@ try:    # TIME-AWARE moving obstacles (EGO-Swarm-style solver term, 2026-07); ab
     _set_moving = _sig("ego_set_moving_obstacles", None, C.c_void_p, _d, C.c_int, C.c_double)
 except AttributeError:
     _set_moving = None
+try:    # GUIDE PATH init (north-star arm, 2026-07-22); absent in a stale .so
+    _set_guide = _sig("ego_set_guide_path", None, C.c_void_p, _d, C.c_int)
+except AttributeError:
+    _set_guide = None
 try:    # READONLY Bernstein-segment dump (M2-3 piecewise-warp cert, 2026-07-17); absent in a stale .so
     _get_bsegs = _sig("ego_get_bsegs", C.c_int, C.c_void_p, _d, _d, _d, C.c_int)
 except AttributeError:
@@ -92,6 +96,20 @@ class EGOPlanner:
         cloud = np.ascontiguousarray(np.asarray(cloud_xyz, np.float64).reshape(-1, 3))
         n = cloud.shape[0]; cp = cloud.ctypes.data_as(_d) if n else _d()
         _c, cam = _p(cam_pos); _update_cloud(self._h, cp, int(n), cam)
+
+    def set_guide_path(self, pts):
+        """North-star guide (2026-07-22): polyline the NEXT replan uses as its INITIAL path --
+        the rebound optimizer deforms it only where the occupancy demands, so EGO plans ALONG the
+        KF-corrected reference instead of being herded by prediction walls + sub-goal carrots.
+        pts=None/empty clears -> legacy init (byte-identical). Raises LOUDLY on a stale .so."""
+        if _set_guide is None:
+            raise RuntimeError("ego_capi.so is stale: rebuild it (missing ego_set_guide_path; "
+                               "the north-star guide arm cannot exist without it)")
+        if pts is None or len(pts) == 0:
+            _set_guide(self._h, None, 0)
+            return
+        p = np.ascontiguousarray(np.asarray(pts, np.float64).reshape(-1, 3))
+        _set_guide(self._h, p.ctypes.data_as(_d), int(p.shape[0]))
 
     def set_moving_obstacles(self, rows, lam):
         """rows: (n, 8) [c0x c0y c0z vx vy vz r_clear z_top], time-aligned to the next replan's t=0.
