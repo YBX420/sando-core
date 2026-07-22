@@ -47,7 +47,13 @@ class GuideCfg:
         self.omax = float(e("GUIDE_OMAX", "4.0"))        # lateral deformation cap (m) -- roomy by
         #   default: the cap must not be the binding constraint while chasing 0-hold (the
         #   tournament's wide arcs reached ~4m lateral); off_max is reported every tick
-        self.slew = float(e("GUIDE_SLEW", "0.45"))       # max per-tick profile change (m)
+        self.slew = float(e("GUIDE_SLEW", "0.45"))       # urgent-tick box allowance (m/tick) --
+        #   the certified-set-empty escape (F9 retry) only; normal ticks use the 2nd-order tracker
+        self.lat_v = float(e("GUIDE_LAT_V", "4.5"))      # tracker lateral RATE cap (m/s; ~= old slew/dt)
+        self.lat_a = float(e("GUIDE_LAT_A", "3.0"))      # tracker lateral ACCEL bound (m/s^2) -- the
+        #   anti-S-turn dial: the line can never demand more lateral accel than a comfortable dodge
+        self.lat_j = float(e("GUIDE_LAT_J", "40.0"))     # tracker lateral JERK bound (m/s^3)
+        self.dt_tick = float(e("GUIDE_DT", "0.1"))       # decision-tick period the tracker integrates at
         self.ramp_min = float(e("GUIDE_RAMP", "2.0"))    # min bump ramp length (m)
         self.vref_floor = float(e("GUIDE_VREF", "1.2"))  # ETA fallback speed floor (m/s)
         self.side_vmin = 0.3                             # |lateral mover vel| that defines a crossing
@@ -75,7 +81,7 @@ def _side_key(oid):
 
 
 def build_guide(p_d, v_d, goal_xy, movers, state, cruise_z=1.5, eta=None, cfg=None,
-                tw=0.75, delta=0.1):
+                tw=0.75, delta=0.1, urgent=False):
     """-> (pts (N,3) float array, meta dict).
     movers: [(oid, c0_xy(2,), v_xy(2,), R0, veff[, t_max])] -- R0 at CERT scale (+band); veff
             grows the keep-out as the SLIDING-WINDOW MAX the certificate will ever apply to this
@@ -261,27 +267,61 @@ def build_guide(p_d, v_d, goal_xy, movers, state, cruise_z=1.5, eta=None, cfg=No
             meta["infeasible"] = True
         if bad:
             meta["infeasible"] = True
-    # cross-tick commitment: rate-limit the profile against the previous tick's, WORLD-ANCHORED
-    # (gtxy fix: comparing at the same drone-relative arc let every bump recede with the drone --
-    # a world-fixed obstacle's dodge kept being re-limited as if it were new. Map this tick's
-    # stations into the previous tick's frame first; the slew then bounds GENUINE profile change.)
+    # cross-tick commitment: SECOND-ORDER (offset, offset_rate) TRACKER, world-anchored.
+    # The old box position-clamp made every dodge onset/release a STEP in lateral velocity
+    # (0.45 m/tick = 4.5 m/s demanded instantly); the planner answered with 8-14 m/s^2 S-turn
+    # bursts right past the spline head -- the measured attitude-jitter root (exec-trace
+    # forensic 2026-07-22). Here each station carries (y, y_dot, applied accel) and chases the
+    # freshly composed target profile under a rate cap (lat_v; deepening the committed side 2x
+    # -- the s4 law), an accel bound (lat_a -- the line can never demand a harder lateral accel
+    # than a comfortable dodge) and a jerk bound (lat_j). Approach law = accel-bounded braking
+    # parabola (no overshoot); release keeps FULL authority (slow-release is a booked
+    # crowd-safety negative: prompt return vacates the lane).
+    # First-ever tick adopts the target outright (old behaviour: episode starts at rest).
+    # urgent=True (F9 retry: the certified set is EMPTY at the tracked line) falls back to the
+    # old asymmetric box jump for this tick -- a bounded step beats a hold.
     prev = state.get("prof")
     if prev is not None:
-        S_p, off_p, p_prev, u_prev = prev
+        S_p, off_p, rate_p, acc_p, p_prev, u_prev = prev
         s_old = (base - p_prev[None, :]) @ u_prev
-        off_prev = np.interp(s_old, S_p, off_p, left=off_p[0] if len(off_p) else 0.0, right=0.0)
-        # ASYMMETRIC slew (s4 forensic): DEEPENING an already-committed dodge (same sign, larger
-        # |off|) is the maneuver maturing, not a twitch -- let it open at 2x; sign flips, returns
-        # to centre and brand-new deflections keep the tight limit.
-        # (SLOW-RELEASE (rel=slew/3) was tried for the attitude-jitter case and REVERTED: roll
-        #  rocking did drop 40%, but lingering in the dodge lane is a crowd-safety NEGATIVE --
-        #  s14/s12 collided, s5 17.9 s. Prompt return VACATES the lane; release speed is
-        #  safety-relevant, not just comfort. The jitter fix must shape the ONSET, not the return.)
-        deep = 2.0 * cfg.slew
-        up = np.where((off_prev > 0.05), deep, cfg.slew)
-        dn = np.where((off_prev < -0.05), deep, cfg.slew)
-        off = np.clip(off, off_prev - dn, off_prev + up)
-    state["prof"] = (S.copy(), off.copy(), p.copy(), u.copy())
+        y = np.interp(s_old, S_p, off_p, left=off_p[0] if len(off_p) else 0.0, right=0.0)
+        vy = np.interp(s_old, S_p, rate_p, left=0.0, right=0.0)
+        ay = np.interp(s_old, S_p, acc_p, left=0.0, right=0.0)
+        dtk = cfg.dt_tick
+        track2 = os.environ.get("GUIDE_TRACK2", "0") == "1"
+        # DEFAULT = the box clamp (sweep-validated). The 2nd-order tracker is OPT-IN
+        # (GUIDE_TRACK2=1): at every tested accel bound (A=3: dodges starved, s14 hit a static;
+        # A=10: holds/time inflate broadly) it degrades the MISSION metrics -- the behavior
+        # stack is tuned around instant line response, and the drone's own dynamics already
+        # low-pass the reference. Its comfort win is partial (roll -42%, heading -30%, but
+        # pitch +34%). Kept for the future onset-shaping campaign; mission bar outranks comfort.
+        if urgent or not track2:
+            deep = 2.0 * cfg.slew
+            up = np.where(y > 0.05, deep, cfg.slew)
+            dn = np.where(y < -0.05, deep, cfg.slew)
+            y_new = np.clip(off, y - dn, y + up)
+            vy = (y_new - y) / dtk
+            ay = np.zeros_like(y)
+            off = y_new
+        else:
+            e = off - y
+            vcap = cfg.lat_v * np.where((y * e > 0.0) & (np.abs(y) > 0.05), 2.0, 1.0)
+            e_eff = np.maximum(np.abs(e) - np.abs(vy) * dtk, 0.0)   # discrete pre-brake margin
+            v_des = np.sign(e) * np.minimum(vcap, np.sqrt(2.0 * cfg.lat_a * e_eff))
+            a_cmd = np.clip((v_des - vy) / dtk, -cfg.lat_a, cfg.lat_a)
+            a_cmd = np.clip(a_cmd, ay - cfg.lat_j * dtk, ay + cfg.lat_j * dtk)   # jerk bound
+            y_new = y + vy * dtk + 0.5 * a_cmd * dtk * dtk
+            vy = vy + a_cmd * dtk
+            ay = a_cmd
+            done = (np.abs(off - y_new) < 0.05) & (np.abs(vy) < cfg.lat_a * dtk)
+            y_new = np.where(done, off, y_new)               # terminal snap (kills cm-scale ringing)
+            vy = np.where(done, 0.0, vy)
+            ay = np.where(done, 0.0, ay)
+            off = y_new
+    else:
+        vy = np.zeros_like(off)
+        ay = np.zeros_like(off)
+    state["prof"] = (S.copy(), off.copy(), vy.copy(), ay.copy(), p.copy(), u.copy())
     meta["off_max"] = float(np.max(np.abs(off))) if len(off) else 0.0
     meta["conflicts"] = [dict(oid=ev["oid"], s=round(ev["s"], 2), t=round(ev["t"], 2),
                               side=("L" if ev["side"] > 0 else "R"), o=round(ev["o"], 2))
@@ -351,7 +391,7 @@ if __name__ == "__main__":
     #    and the profile has no discontinuous sign flip (max per-station jump bounded)
     st7 = {}
     mv7 = [("a", (5.0, 1.0), (0.0, 0.0), 1.6), ("b", (7.0, -1.0), (0.0, 0.0), 1.6)]
-    for _ in range(12):                                  # let slew converge
+    for _ in range(18):                                  # let the tracker converge
         pts7, m7 = build_guide([0, 0, 1.5], [2.0, 0, 0], [14, 0], mv7, st7)
     sd7 = {c["oid"]: c["side"] for c in m7["conflicts"]}
     assert len(set(sd7.values())) == 1, f"overlapping cluster must be one-sided, got {sd7}"
@@ -362,7 +402,7 @@ if __name__ == "__main__":
     # 8) F1 contract: a STATIC row (v=0, veff=0) bends the line like geometry, twin-free
     st8 = {}
     mv8 = [("st42", (6.0, 0.3), (0.0, 0.0), 2.0, 0.0)]
-    for _ in range(10):
+    for _ in range(16):
         pts8, m8 = build_guide([0, 0, 1.5], [2.0, 0, 0], [12, 0], mv8, st8)
     assert m8["conflicts"] and abs(pts8[:, 1]).max() > 1.2, (m8, pts8[:, 1])
     print(f"[guide] static row bends line (apex {np.abs(pts8[:,1]).max():.2f}m) OK")
@@ -371,7 +411,7 @@ if __name__ == "__main__":
     #    still far; when the drone advances, the full dodge is available IMMEDIATELY (no slew fight)
     st9 = {}
     mv9 = [("far", (16.0, 0.0), (0.0, 0.0), 2.0, 0.0)]   # 16m out; carrot L=12
-    for _ in range(10):
+    for _ in range(16):
         pts9, m9 = build_guide([0, 0, 1.5], [7.0, 0, 0], [12, 0], mv9, st9)
     assert m9["conflicts"], "far conflict must be scanned at speed"
     assert abs(pts9[-1][0] - 12.0) < 0.5, "emitted line must still end at the carrot"
@@ -379,5 +419,39 @@ if __name__ == "__main__":
     apex = float(np.abs(pts9b[:, 1]).max())
     assert apex > 1.5, f"world-anchored profile must carry the matured dodge, apex {apex:.2f}"
     print(f"[guide] scan extension + world anchor: matured apex {apex:.2f}m after advance OK")
+
+    # 10) 2nd-order tracker (opt-in): a step target opens with BOUNDED accel/jerk (no velocity
+    #     steps), converges without overshoot, and RELEASES with the same authority
+    os.environ["GUIDE_TRACK2"] = "1"
+    cfgT = GuideCfg()
+    stT = {}
+    build_guide([0, 0, 1.5], [2.0, 0, 0], [12, 0], [], stT)                    # tick 1: straight
+    wall = [("w", (6.0, 0.0), (0.0, 0.0), 2.5, 0.0)]
+    ys = []
+    for _ in range(24):
+        ptsT, mT = build_guide([0, 0, 1.5], [2.0, 0, 0], [12, 0], wall, stT)
+        ys.append(mT["off_max"])
+    ys = np.asarray(ys)
+    rate = np.diff(np.concatenate([[0.0], ys])) / cfgT.dt_tick
+    acc = np.diff(np.concatenate([[0.0], rate])) / cfgT.dt_tick
+    assert np.abs(rate).max() <= 2 * cfgT.lat_v + 1e-6, f"rate cap violated {np.abs(rate).max():.2f}"
+    assert np.abs(acc).max() <= cfgT.lat_a + cfgT.lat_j * cfgT.dt_tick + 0.6, \
+        f"accel bound violated {np.abs(acc).max():.2f}"
+    tgt = ys[-1]
+    assert ys.max() <= tgt + 0.15, f"overshoot {ys.max():.2f} past {tgt:.2f}"
+    #   (<=15 cm transient past the target, on the AWAY side = extra berth: benign)
+    assert ys[5] > 0.3, f"onset too slow: {ys[5]:.2f} after 0.5s"
+    for _ in range(24):                                    # wall gone -> release
+        ptsT, mT = build_guide([0, 0, 1.5], [2.0, 0, 0], [12, 0], [], stT)
+    assert mT["off_max"] < 0.1, f"release must fully return, off {mT['off_max']:.2f}"
+    print(f"[guide] 2nd-order tracker: apex {tgt:.2f} rate<=cap acc<=bound, full release OK")
+
+    # 11) urgent tick: certified-set-empty escape keeps the old box-jump authority
+    os.environ.pop("GUIDE_TRACK2", None)
+    stU = {}
+    build_guide([0, 0, 1.5], [2.0, 0, 0], [12, 0], [], stU)
+    _, mU = build_guide([0, 0, 1.5], [2.0, 0, 0], [12, 0], wall, stU, urgent=True)
+    assert mU["off_max"] >= 0.4, f"urgent tick must jump like the old slew, got {mU['off_max']:.2f}"
+    print(f"[guide] urgent escape jump {mU['off_max']:.2f}m OK")
 
     print("[guide] ALL PASS")
