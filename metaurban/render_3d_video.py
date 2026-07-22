@@ -2334,7 +2334,9 @@ def ego_maneuver_replan(p_d, v_d, a_d, cur_wp, t_sim):
             _gmv = _build_gmv()
             _gpts2, _gmeta2 = _PG.build_guide(p_d, v_d, _carrot, _gmv, _GUIDE_ST,
                                               cruise_z=CRUISE_Z, eta=_eta, tw=_tw_g,
-                                              delta=REPLAN_DT)
+                                              delta=REPLAN_DT, urgent=True)
+            #   ^ urgent: the certified set is EMPTY at the tracked line -- the retry may take
+            #     the old box jump (a bounded step beats a hold); normal ticks are 2nd-order
             _s_ok = _try("guide2", _gpts2)
             if _s_ok is not None:
                 _gmeta = _gmeta2
