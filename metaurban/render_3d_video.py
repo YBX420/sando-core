@@ -2066,11 +2066,19 @@ def ego_maneuver_replan(p_d, v_d, a_d, cur_wp, t_sim):
         # along it -> certificate judges. NO maneuver primitives, NO speed warp, NO walls, NO
         # recovery overrides. hold survives only as the counted fail-closed last resort.
         import predictive_guide as _PG
-        _gmv = []                                        # (oid, xy, v_xy, CERT-scale keep-out + band)
+        _tw_g = _tau_now()
+        _gmv = []          # (oid, xy, v_xy, R0+band, veff[, t_max]) -- cert-law radii incl. GROWTH
         for (_oid, c3, vel, r_obs, d_safe) in movers:
             q_c, _veff_c = PERCLASS_CONF.get(d_safe, (MAN_QCONF, MAN_VEFF))
+            _R0g = r_obs + MAN_DSAFE + q_c + MAN_TRACK + GUIDE_BAND
             _gmv.append((_oid, (float(c3[0]), float(c3[1])), (float(vel[0]), float(vel[1])),
-                         r_obs + MAN_DSAFE + q_c + MAN_TRACK + GUIDE_BAND))
+                         _R0g, float(_veff_c)))
+            if float(np.hypot(vel[0], vel[1])) > 0.1:
+                # FROZEN-CONJUNCT twin (acid-1 lesson): inside the certificate window the strict
+                # pair also forbids the mover's CURRENT disc -- the guide must clear it too, but
+                # only on the window-reachable arc (beyond, future ticks re-judge a moved disc).
+                _gmv.append((f"{_oid}#frz", (float(c3[0]), float(c3[1])), (0.0, 0.0),
+                             _R0g, float(_veff_c), 1.4 * _tw_g))
         _cyl = []                                        # cert keep-outs, SAME law as the v2 arm
         for (_oid, c3, vel, r_obs, d_safe) in movers:
             q_c, veff_c = PERCLASS_CONF.get(d_safe, (MAN_QCONF, MAN_VEFF))
@@ -2092,57 +2100,84 @@ def ego_maneuver_replan(p_d, v_d, a_d, cur_wp, t_sim):
                 return float(_us[-1] + (s - _arc[-1]) / _vtail)
         _carrot = p_d[:2] + gdir * L
         _gpts, _gmeta = _PG.build_guide(p_d, v_d, _carrot, _gmv, _GUIDE_ST,
-                                        cruise_z=CRUISE_Z, eta=_eta)
+                                        cruise_z=CRUISE_Z, eta=_eta, tw=_tw_g, delta=REPLAN_DT)
         _MAN_V2["guide_held"] = False
+        _gfail = []                                      # failure trail: which stage killed what
+
+        def _gwrite(win, s_out):
+            if not os.environ.get("EXPLAIN_LOG"):
+                return
+            _r = _MAN_V2.get("receipt") or {}
+            with open(os.environ["EXPLAIN_LOG"], "a") as _fx:
+                _fx.write(json.dumps(dict(
+                    t=round(float(t_sim), 2),
+                    p=[round(float(p_d[0]), 2), round(float(p_d[1]), 2), round(float(p_d[2]), 2)],
+                    v=round(float(np.hypot(v_d[0], v_d[1])), 2), win=win, s=s_out,
+                    ncyl=len(_cyl), cert_id=_r.get("cert_id"), certified=_r.get("certified"),
+                    guide=_gmeta, fail=_gfail)) + "\n")
 
         def _accept(tag, extra=None):
-            _MAN_V2["receipt"] = _SL.make_receipt(tag, 1.0, True, ego, _cyl, _tau_now(), REPLAN_DT,
+            _MAN_V2["receipt"] = _SL.make_receipt(tag, 1.0, True, ego, _cyl, _tw_g, REPLAN_DT,
                                                   gates=dict(guide=True, **(extra or {})))
             _MAN_V2["receipt"]["guide"] = _gmeta
             _dur = ego.duration()
             _p24 = [ego.eval(_uu)[0] for _uu in np.linspace(0, _dur, 24)]
+            _gwrite(tag, 1.0)
             return "guide", _p24, 1.0
 
-        ego.set_guide_path(_gpts)
-        _ok = ego.replan(p_d, v_d, a_d, np.array([_gpts[-1][0], _gpts[-1][1], CRUISE_Z])) \
-            and ego.duration() > 1e-3
-        if _ok and static_clear() and mover_clear_flown() \
-                and _SL.cert_clear(ego, _cyl, tau=_tau_now(), delta=REPLAN_DT):
+        def _try(tag, gpts):
+            """replan to a guide + full gate/cert stack; appends the kill stage to _gfail."""
+            ego.set_guide_path(gpts)
+            if not (ego.replan(p_d, v_d, a_d, np.array([gpts[-1][0], gpts[-1][1], CRUISE_Z]))
+                    and ego.duration() > 1e-3):
+                _gfail.append(dict(at=tag, leg="replan")); return False
+            if not static_clear():
+                _gfail.append(dict(at=tag, leg="static")); return False
+            if not mover_clear_flown():
+                _gfail.append(dict(at=tag, leg="flown")); return False
+            _w = []
+            if not _SL.cert_clear(ego, _cyl, tau=_tw_g, delta=REPLAN_DT, why=_w):
+                _gfail.append(dict(at=tag, leg="cert", why=_w)); return False
+            return True
+
+        if _try("guide", _gpts):
             _GUIDE_ST["last_ok"] = np.asarray(_gpts, float).copy()
             return _accept("guide", dict(off=round(float(_gmeta["off_max"]), 2)))
         # ROLLBACK 1: re-issue the last ACCEPTED guide (fresh replan from current state)
         _last = _GUIDE_ST.get("last_ok")
-        if _last is not None:
-            ego.set_guide_path(_last)
-            if ego.replan(p_d, v_d, a_d, np.array([_last[-1][0], _last[-1][1], CRUISE_Z])) \
-                    and ego.duration() > 1e-3 and static_clear() and mover_clear_flown() \
-                    and _SL.cert_clear(ego, _cyl, tau=_tau_now(), delta=REPLAN_DT):
-                return _accept("guide_roll", dict(roll=1))
+        if _last is not None and _try("roll1", _last):
+            return _accept("guide_roll", dict(roll=1))
         # ROLLBACK 2: keep flying the spline IN HAND deeper (u-offset re-cert, exact global clock)
         _u0 = float(_MAN_V2.get("t_ego_now", 0.0))
         if ego.duration() > _u0 + 0.2:
             try:
                 import st_cert as _STC
-                _okr, _mr = _STC.certify_profile(ego, _cyl, [(_tau_now(), 1.0)], _tau_now(),
+                _okr, _mr = _STC.certify_profile(ego, _cyl, [(_tw_g, 1.0)], _tw_g,
                                                  REPLAN_DT, u_start=_u0)
             except Exception as _e:
-                print(f"[guide] roll2 certify_profile error: {type(_e).__name__}: {_e}", flush=True)
+                _gfail.append(dict(at="roll2", leg="err", e=f"{type(_e).__name__}"))
                 _okr = False
             if _okr and static_clear() and mover_clear_flown():
                 _MAN_V2["guide_held"] = True             # executor: keep t_ego accumulating
                 _MAN_V2["receipt"] = _SL.make_receipt("guide_roll", 1.0, True, ego, _cyl,
-                                                      _tau_now(), REPLAN_DT,
+                                                      _tw_g, REPLAN_DT,
                                                       gates=dict(guide=True, roll=2, u0=round(_u0, 2)))
                 _MAN_V2["receipt"]["guide"] = _gmeta
+                _gwrite("guide_roll2", 1.0)
                 return "guide", None, 1.0
+            elif _okr:
+                _gfail.append(dict(at="roll2", leg="gate"))
+            else:
+                _gfail.append(dict(at="roll2", leg="cert"))
         # FAIL-CLOSED: hold -- a counted north-star failure, never a normal move
-        _MAN_V2["receipt"] = _SL.make_receipt("evade", 0.0, False, ego, _cyl, _tau_now(), REPLAN_DT,
+        _MAN_V2["receipt"] = _SL.make_receipt("evade", 0.0, False, ego, _cyl, _tw_g, REPLAN_DT,
                                               gates=dict(guide=True))
         _MAN_V2["receipt"]["guide"] = _gmeta
-        if _SL.hover_clear(p_d, _cyl, _tau_now(), delta=REPLAN_DT):
-            _MAN_V2["receipt"] = _SL.make_receipt("hold_cert", 0.0, True, ego, _cyl, _tau_now(),
+        if _SL.hover_clear(p_d, _cyl, _tw_g, delta=REPLAN_DT):
+            _MAN_V2["receipt"] = _SL.make_receipt("hold_cert", 0.0, True, ego, _cyl, _tw_g,
                                                   REPLAN_DT, gates=dict(hover=True, guide=True))
             _MAN_V2["receipt"]["guide"] = _gmeta
+        _gwrite("hold", 0.0)
         return "hold", None, 1.0
 
     if EGO_DECIDE == "v3":
