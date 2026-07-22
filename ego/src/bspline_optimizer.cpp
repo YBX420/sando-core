@@ -1109,6 +1109,43 @@ namespace ego_planner
     return flag_safe;
   }
 
+  void BsplineOptimizer::calcGuideAttractCost(const Eigen::MatrixXd &q, double &cost, Eigen::MatrixXd &gradient)
+  {
+    // GUIDE ATTRACTION (north-star guide arm): hinge^2 pull of each interior control point toward
+    // its nearest point on the guide polyline, active only beyond guide_tol_. XY-only (the guide
+    // rides the cruise plane; z stays owned by smoothness/feasibility). Keeps the plan ON the
+    // deformation line the guide computed at gate scale -- init-only guides let the rebound relax
+    // centimetres into the static gate's margin, the s14 tree-gate hold cluster.
+    cost = 0.0;
+    if (guide_attract_.size() < 2)
+      return;
+    int end_idx = q.cols() - order_;
+    for (auto i = order_; i < end_idx; ++i)
+    {
+      Eigen::Vector2d p(q(0, i), q(1, i));
+      double best = 1e18;
+      Eigen::Vector2d cl(0.0, 0.0);
+      for (size_t k = 1; k < guide_attract_.size(); ++k)
+      {
+        Eigen::Vector2d a = guide_attract_[k - 1].head<2>(), b = guide_attract_[k].head<2>();
+        Eigen::Vector2d ab = b - a;
+        double L2 = ab.squaredNorm();
+        double s = L2 > 1e-12 ? std::min(1.0, std::max(0.0, (p - a).dot(ab) / L2)) : 0.0;
+        Eigen::Vector2d c = a + s * ab;
+        double d2 = (p - c).squaredNorm();
+        if (d2 < best) { best = d2; cl = c; }
+      }
+      double d = std::sqrt(best);
+      double err = d - guide_tol_;
+      if (err <= 0.0 || d < 1e-6)
+        continue;
+      cost += err * err;
+      Eigen::Vector2d g = 2.0 * err * (p - cl) / d;
+      gradient(0, i) += g(0);
+      gradient(1, i) += g(1);
+    }
+  }
+
   void BsplineOptimizer::combineCostRebound(const double *x, double *grad, double &f_combine, const int n)
   {
 
@@ -1137,6 +1174,14 @@ namespace ego_planner
       calcMovingObstacleCost(cps_.points, f_moving, g_moving);
       f_combine += lambda_moving_ * f_moving;
       grad_3D += lambda_moving_ * g_moving;
+    }
+    if (lambda_guide_ > 0.0 && guide_attract_.size() >= 2)
+    {
+      double f_guide = 0.0;
+      Eigen::MatrixXd g_guide = Eigen::MatrixXd::Zero(3, cps_.size);
+      calcGuideAttractCost(cps_.points, f_guide, g_guide);
+      f_combine += lambda_guide_ * f_guide;
+      grad_3D += lambda_guide_ * g_guide;
     }
     memcpy(grad, grad_3D.data() + 3 * order_, n * sizeof(grad[0]));
   }

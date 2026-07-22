@@ -67,6 +67,10 @@ try:    # GUIDE PATH init (north-star arm, 2026-07-22); absent in a stale .so
     _set_guide = _sig("ego_set_guide_path", None, C.c_void_p, _d, C.c_int)
 except AttributeError:
     _set_guide = None
+try:    # GUIDE ATTRACTION (optimizer stiffness toward the guide line, gtxy 0-hold campaign)
+    _set_guide_attract = _sig("ego_set_guide_attract", None, C.c_void_p, C.c_double, C.c_double)
+except AttributeError:
+    _set_guide_attract = None
 try:    # READONLY Bernstein-segment dump (M2-3 piecewise-warp cert, 2026-07-17); absent in a stale .so
     _get_bsegs = _sig("ego_get_bsegs", C.c_int, C.c_void_p, _d, _d, _d, C.c_int)
 except AttributeError:
@@ -110,6 +114,17 @@ class EGOPlanner:
             return
         p = np.ascontiguousarray(np.asarray(pts, np.float64).reshape(-1, 3))
         _set_guide(self._h, p.ctypes.data_as(_d), int(p.shape[0]))
+
+    def set_guide_attract(self, lam, tol=0.1):
+        """Optimizer-level stiffness toward the set_guide_path polyline (hinge^2 beyond tol).
+        lam=0 = init-only guide (legacy). Raises LOUDLY on a stale .so when lam>0 -- an arm that
+        counts on adherence must not silently fly the relaxed planner."""
+        if _set_guide_attract is None:
+            if float(lam) != 0.0:
+                raise RuntimeError("ego_capi.so is stale: rebuild it (missing ego_set_guide_attract; "
+                                   "the guide arm's adherence term would silently vanish)")
+            return
+        _set_guide_attract(self._h, float(lam), float(tol))
 
     def set_moving_obstacles(self, rows, lam):
         """rows: (n, 8) [c0x c0y c0z vx vy vz r_clear z_top], time-aligned to the next replan's t=0.

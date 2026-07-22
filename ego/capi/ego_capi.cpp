@@ -74,6 +74,12 @@ void ego_set_guide_path(void* h, double* pts, int n) {
   m->setGuidePath(g);
 }
 
+void ego_set_guide_attract(void* h, double lambda, double tol) {
+  // guide-arm optimizer stiffness: hinge^2 pull toward the set_guide_path polyline beyond tol.
+  // lambda 0 (default) = init-only guide, byte-identical for every other arm.
+  ((EGOPlannerManager*)h)->setGuideAttract(lambda, tol);
+}
+
 void ego_set_moving_obstacles(void* h, double* rows, int n, double lambda) {
   // rows: n x 8 [c0x c0y c0z vx vy vz r_clear z_top]; obstacle polys are aligned to the NEXT replan's
   // t=0 (feed current KF/GT state right before ego_replan). n=0 or lambda=0 -> term off (default path).
