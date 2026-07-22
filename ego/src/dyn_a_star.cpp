@@ -239,10 +239,14 @@ bool AStar::AstarSearch(const double step_size, Vector3d start_pt, Vector3d end_
                         neighborPtr->fScore = tentative_gScore + getHeu(neighborPtr, endPtr);
                     }
                 }
-        ros::Time time_2 = ros::Time::now();
-        if ((time_2 - time_1).toSec() > 0.2)
+        // DETERMINISTIC search budget (gtxy 0-hold campaign, 2026-07-22): the original 0.2 s
+        // WALL-CLOCK abort made every replan depend on machine load -- the same seed flipped
+        // between clean laps and hold storms run to run (the "GT-face nondeterminism" case).
+        // 100k expansions ≈ the same effective budget at nominal speed, but identical on every
+        // run and immune to parallel load.
+        if (num_iter > 100000)
         {
-            ROS_WARN("Failed in A star path searching !!! 0.2 seconds time limit exceeded.");
+            ROS_WARN("Failed in A star path searching !!! 100k iteration budget exceeded.");
             return false;
         }
     }

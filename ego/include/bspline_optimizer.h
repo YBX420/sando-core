@@ -82,6 +82,15 @@ namespace ego_planner
       moving_obs_ = obs; lambda_moving_ = lambda;
     }
 
+    // GUIDE ATTRACTION (north-star guide arm, 2026-07-22): hinge^2 pull of every control point
+    // toward the guide polyline beyond a tolerance band. The guide-INIT alone lets the rebound
+    // relax ~0.35 m off the line; in gate-scale pinches the corridor slack is ~0.25 m, so the
+    // flown path kept losing to the static gate by centimetres. lambda = 0 or an empty polyline
+    // -> cost path untouched (byte-identical default; only the guide arm sets it).
+    void setGuideAttract(const std::vector<Eigen::Vector3d> &pts, double lambda, double tol) {
+      guide_attract_ = pts; lambda_guide_ = lambda; guide_tol_ = tol;
+    }
+
     void optimize();
 
     Eigen::MatrixXd getControlPoints();
@@ -127,6 +136,9 @@ namespace ego_planner
     double lambda4_;               // curve fitting
     std::vector<MovingObs> moving_obs_;   // time-aware mover polys (traj-start-aligned)
     double lambda_moving_{0.0};           // moving-obstacle weight; 0 = term off
+    std::vector<Eigen::Vector3d> guide_attract_;  // guide polyline for the attraction hinge
+    double lambda_guide_{0.0};            // guide-attraction weight; 0 = term off
+    double guide_tol_{0.1};               // attraction dead-band (m)
 
     int a;
     //
@@ -153,6 +165,7 @@ namespace ego_planner
                              Eigen::MatrixXd &gradient);
     void calcDistanceCostRebound(const Eigen::MatrixXd &q, double &cost, Eigen::MatrixXd &gradient, int iter_num, double smoothness_cost);
     void calcMovingObstacleCost(const Eigen::MatrixXd &q, double &cost, Eigen::MatrixXd &gradient);
+    void calcGuideAttractCost(const Eigen::MatrixXd &q, double &cost, Eigen::MatrixXd &gradient);
     void calcFitnessCost(const Eigen::MatrixXd &q, double &cost, Eigen::MatrixXd &gradient);
     bool check_collision_and_rebound(void);
 

@@ -641,7 +641,17 @@ EGO_SLIP_DSAFE = float(os.environ.get("EGO_SLIPDSAFE", 0.2))   # SLIP standoff: 
                                                               # it, so never collides). User-tunable; only no-collision matters.
 if args.ego:
     _zsz = float(os.environ.get("OVER_Z", 0)) + 1.0 if os.environ.get("OVER_Z") else 8.0
-    ego = EGOPlanner(map_origin=(-200, -200, -1), map_size=(400, 400, max(8.0, _zsz)), res=0.2, inflation=0.3)
+    # gtxy 0-hold F5: on the guide arm EGO's OWN static berth must exceed the flown-path gate
+    # (drone_r 0.25 + EGO_STATIC_BUF 0.45 = 0.70 m to the surface). At inflation 0.3 the grid
+    # dilates ceil(0.3/0.2)=2 cells = 0.40 m and dist0 pushes 0.45 soft -- the optimizer relaxes
+    # to ~0.75 m nominal, chord-cutting + quad overshoot land the flown path at 0.64-0.70 m and
+    # the gate kills by CENTIMETRES, every tick (s6 STATICDBG forensic: sd 0.64-0.70 vs 0.70).
+    # inflation 0.5 -> 3 cells = 0.60 m dilation; plans sit ~0.9-1.05 m out and the gate passes.
+    # Other arms keep 0.3 (byte-identical) -- their tournament escapes what the guide must avoid.
+    _EGO_INFL = float(os.environ.get("EGO_INFL",
+                                     "0.5" if os.environ.get("EGO_DECIDE") == "guide" else "0.3"))
+    ego = EGOPlanner(map_origin=(-200, -200, -1), map_size=(400, 400, max(8.0, _zsz)), res=0.2,
+                     inflation=_EGO_INFL)
     # EGO_VMAX env override: lower v_max so the drone does not OUTRUN its forward cone (8m cone / 8 m/s = ~1s lookahead
     # -> fast-flight-into-late-detected-obstacle collisions). A reaction-feasible cap is the stable global half of the
     # speed-FOV coupling (the per-tick _path_free_dist warp is the dynamic half).
@@ -653,6 +663,14 @@ if args.ego:
                    max_acc=float(PLN.get("a_max", 10.0)),
                    ctrl_pt_dist=0.5, horizon=EGO_HOR,
                    l_collision=0.8, dist0=max(0.4, float(par.drone_radius) + 0.2))
+    if os.environ.get("EGO_DECIDE") == "guide" and float(os.environ.get("GUIDE_ATTRACT", "0")) > 0:
+        # gtxy F10 (default OFF after A/B: lam 2.0 made the optimizer FAIL where line and grid
+        # disagreed -- replan-leg holds 4->11 on s14; lam 0.5 was noise. The mechanism stays for
+        # a future calibrated stiffness): hinge^2 adherence to the guide line beyond a tol band.
+        ego.set_guide_attract(float(os.environ.get("GUIDE_ATTRACT", "0")),
+                              float(os.environ.get("GUIDE_ATTRACT_TOL", "0.25")))
+        print(f"[3dv] guide attract on: lam={os.environ.get('GUIDE_ATTRACT')} "
+              f"tol={os.environ.get('GUIDE_ATTRACT_TOL', '0.25')}", flush=True)
     print(f"[3dv] --ego: EGO-Planner core active (depth-FOV: range {args.fov_range}m, +-{args.fov_deg}deg cone)", flush=True)
     if args.ego_safe:
         print("[3dv] --ego_safe: per-class certified mover safety wrapping EGO "
@@ -1542,8 +1560,14 @@ _min_static = [np.inf, None, None]   # [clearance, box_size, drone_pos] of the c
 MAN_STATIC_MARGIN = float(os.environ.get("EGO_STATICM", 0.70))  # reject a candidate whose PREDICTED-FLOWN path
 #   comes within this of KNOWN static. Because the gate now forward-sims the real quad (overshoot included), this is
 #   just the drone BODY radius + a small buffer -- the tracking tube is in the flown path, not the margin.
-MAN_STATIC_BUF = float(os.environ.get("EGO_STATIC_BUF", 0.45))  # static gate keep-out = drone_radius + this buffer
+MAN_STATIC_BUF = float(os.environ.get(
+    "EGO_STATIC_BUF", "0.30" if os.environ.get("EGO_DECIDE") == "guide" else "0.45"))
+#   static gate keep-out = drone_radius + this buffer
 #   (the gate now uses the cylinder-SDF, same model as GT clearance(); rmarg ~= 0.70 m matches the swept margin).
+#   guide arm default 0.30 (gtxy 0-hold F8): the gate boundary must sit BELOW EGO's own grid floor
+#   (inflation 0.5 -> 0.6 m dilation), else every EGO-standard plan is a 2 cm coin flip at the gate
+#   (s6 forensic: kills at sd 0.68 vs 0.70 forever). The flown-path sim already carries the tracking
+#   overshoot, so 0.55 m to the surface = body + 0.30 m of asserted air on the SIMULATED flight.
 MAN_STATIC_HZ = float(os.environ.get("EGO_STATIC_HZ", 1.20))   # forward-sim LOOKAHEAD (s) for the static gate. Longer =
 #   the drone starts avoiding static sooner so its inertia doesn't carry it into a building it only reacts to late
 #   (the 2026-06-27 diagnosis: most ours collisions are MODERATE-speed static grazes the short-horizon gate missed).
@@ -1647,6 +1671,8 @@ _V3_PLAN = [None]    # the committed composite plan for the executor to fly via 
 _GUIDE_ST = {}       # north-star guide arm (EGO_DECIDE=guide): sticky sides + profile + last-ok guide
 _GUIDE_WARN = [0]
 GUIDE_BAND = float(os.environ.get("GUIDE_BAND", "0.25"))   # guide aims at cert radius + this band
+GUIDE_SBAND = float(os.environ.get("GUIDE_SBAND", "0.25"))  # static rows: berth past the flown-gate
+#   margin (drone_r + EGO_STATIC_BUF) so the plan the guide produces passes static_clear comfortably
 #   (plan-once-certify-once: a guide that clears exactly the cert radius plans splines the cert
 #    kills on jitter -- the old kill->hold chain; the band buys the comfortable pass)
 _SPAWNDBG = [0]   # MAN_SPAWNDBG=1: dump the spawn occupancy (360 static vs native forward cone) for the first calls
@@ -1905,6 +1931,8 @@ def ego_maneuver_replan(p_d, v_d, a_d, cur_wp, t_sim):
     # Walls made of futures were the s17 prison; the static map stays.
     _mc = _man_cloud(p_d, cam_heading, t_sim, [] if EGO_DECIDE == "guide" else movers)
     ego.update_cloud(_mc, p_d)
+    # (F9b "learned berths as occupancy rings" was tried and REVERTED: rings + grid sealed the
+    #  pinches outright -> replan-leg holds; the guide-side margin REQUIREMENT owns this now)
     if _FPRINT is not None:
         # stage fingerprints: movers (KF/oracle output) | occupancy cloud | drone state. First stage
         # whose fingerprint diverges between the probe-off / probe-on runs = where the flip leaks in.
@@ -1991,7 +2019,17 @@ def ego_maneuver_replan(p_d, v_d, a_d, cur_wp, t_sim):
         # M3 held-spline commitment: mid-commit the drone is u0 DEEP into the committed spline;
         # gates must sim tracking from there, not from the head (backwards-flying sim = garbage)
         u0 = float(_MAN_V2.get("stc_u0", 0.0)) if (EGO_STC and _MAN_V2.get("stc")) else 0.0
-        hz = min(d - u0, MAN_STATIC_HZ)                    # static-gate forward-sim lookahead (>= the flown-per-tick dist)
+        hz_cap = MAN_STATIC_HZ
+        if EGO_DECIDE == "guide":
+            # gtxy 0-hold F6: BRAKE-SAFETY gate horizon (the TAU_SPEED law, flown-gate edition).
+            # The drone flies 0.1 s of each plan; a marginal graze predicted 1.1 s ahead must shape
+            # the NEXT plan, not freeze this one (s6 forensic: creeping at 0.2 m/s, every plan
+            # killed by a 56th-sample 0.66 m tree pass). Cover one tick + the stop from the
+            # CURRENT speed (a_eff 5 m/s^2 conservative): each tick certifies [now, stop] clear,
+            # so worst case the drone can always brake before known static -- same induction as
+            # the mover cert's speed-scaled trust window. Other arms keep the fixed 1.2 s.
+            hz_cap = min(MAN_STATIC_HZ, float(np.hypot(v_d[0], v_d[1])) / 5.0 + 0.45)
+        hz = min(d - u0, hz_cap)                           # static-gate forward-sim lookahead (>= the flown-per-tick dist)
         if args.pointmass:                                # diagnostic: flown == planned
             return np.array([ego.eval(u0 + s)[0] for s in np.linspace(0, max(hz, 1e-3), 16)])
         q = copy.deepcopy(quad)                           # current REAL state + params
@@ -2012,21 +2050,50 @@ def ego_maneuver_replan(p_d, v_d, a_d, cur_wp, t_sim):
     # surface; the maneuver then detours or HOLDs rather than grazing known static. loc_obs = local static cylinders.
     # filter by SURFACE distance (center_dist - radius), NOT center distance: a huge building's centre can be 20 m away
     # while its wall is right beside the drone -- a center-distance filter would wrongly drop it (seed 55 graze bug).
-    loc_obs = [(np.asarray(c3, float), 0.5 * float(sz[0]), 0.5 * float(sz[2]))
-               for (_c, c3, sz) in STATIC_FED
+    loc_obs = [(np.asarray(c3, float), 0.5 * float(sz[0]), 0.5 * float(sz[2]), _si)
+               for _si, (_c, c3, sz) in enumerate(STATIC_FED)
                if float(np.hypot(*(np.asarray(c3)[:2] - p_d[:2]))) - 0.5 * float(sz[0]) <= EGO_HOR + 6.0]
     _ST_RMARG = float(par.drone_radius) + MAN_STATIC_BUF   # body radius + buffer, matches GT clearance() drone radius
+    _gate_kill = []   # ("st", fed_idx) | ("mv", oid) of the object whose gate refusal killed the
+    #   last candidate this tick -- the guide branch turns it into learned per-object berth (F9)
+
+    def _static_sd(qp, who=None):
+        sd_min = np.inf
+        for (c3, R, hh, _si) in loc_obs:
+            d = qp - c3
+            dr_out = max(float(np.hypot(d[0], d[1])) - R, 0.0); dz_out = max(abs(float(d[2])) - hh, 0.0)
+            sd = np.hypot(dr_out, dz_out) if (dr_out > 0 or dz_out > 0) else -min(R - float(np.hypot(d[0], d[1])), hh - abs(float(d[2])))
+            if sd < sd_min:
+                sd_min = sd
+                if who is not None:
+                    who[:] = [c3, R, hh, _si]
+        return sd_min
 
     def static_clear():
         if ego.duration() <= 1e-3 or not loc_obs:
             return True
-        for qp in flown_samples():
-            for (c3, R, hh) in loc_obs:
-                d = qp - c3
-                dr_out = max(float(np.hypot(d[0], d[1])) - R, 0.0); dz_out = max(abs(float(d[2])) - hh, 0.0)
-                sd = np.hypot(dr_out, dz_out) if (dr_out > 0 or dz_out > 0) else -min(R - float(np.hypot(d[0], d[1])), hh - abs(float(d[2])))
-                if sd < _ST_RMARG:                          # flown body within margin of this cylinder surface
-                    return False
+        thresh = _ST_RMARG
+        if EGO_DECIDE == "guide":
+            # gtxy 0-hold F7: EGRESS rule. The hold BRAKE is momentum-driven (ungated) -- a drone
+            # that skids inside the 0.70 m margin (s6: parked at 0.49 m from a tree) would have
+            # every plan's first samples in violation and hold FOREVER. Judge against
+            # min(margin, current clearance - eps) with a hard floor at the body radius + 5 cm:
+            # plans that do not worsen the pocket (and so can LEAVE it) pass; diving deeper stays
+            # forbidden; the floor never authorises contact. As the drone exits, the threshold
+            # recovers to the full margin. Other arms keep the fixed gate (byte-identical).
+            sd_now = _static_sd(p_d)
+            if sd_now < _ST_RMARG:
+                thresh = max(min(_ST_RMARG, sd_now - 0.05), float(par.drone_radius) + 0.05)
+        for qi, qp in enumerate(flown_samples()):
+            _w = []
+            sd = _static_sd(qp, who=_w)
+            if sd < thresh:                                 # flown body within margin of a cylinder surface
+                if _w:
+                    _gate_kill.append(("st", int(_w[3])))
+                if _w and os.environ.get("STATICDBG") == "1":
+                    print(f"[STATICDBG] kill@sample{qi} qp={np.round(qp,2)} sd={sd:.2f}<{thresh:.2f} "
+                          f"cyl c={np.round(_w[0],2)} R={_w[1]:.2f} hh={_w[2]:.2f}", flush=True)
+                return False
         return True
 
     def mover_clear_flown():
@@ -2045,6 +2112,7 @@ def ego_maneuver_replan(p_d, v_d, a_d, cur_wp, t_sim):
                 R = r_obs + MAN_DSAFE + MAN_QCONF           # tracking already in the flown path; q covers KF pred error
                 ztop = 2.0 * float(c3[2]) + MAN_REACH_PAD + MAN_DSAFE_V + MAN_QCONF
                 if dh < R and float(qp[2]) < ztop:          # inside the cylinder horizontally AND not above its top
+                    _gate_kill.append(("mv", _oid))
                     return False
         return True
 
@@ -2067,18 +2135,50 @@ def ego_maneuver_replan(p_d, v_d, a_d, cur_wp, t_sim):
         # recovery overrides. hold survives only as the counted fail-closed last resort.
         import predictive_guide as _PG
         _tw_g = _tau_now()
-        _gmv = []          # (oid, xy, v_xy, R0+band, veff[, t_max]) -- cert-law radii incl. GROWTH
-        for (_oid, c3, vel, r_obs, d_safe) in movers:
-            q_c, _veff_c = PERCLASS_CONF.get(d_safe, (MAN_QCONF, MAN_VEFF))
-            _R0g = r_obs + MAN_DSAFE + q_c + MAN_TRACK + GUIDE_BAND
-            _gmv.append((_oid, (float(c3[0]), float(c3[1])), (float(vel[0]), float(vel[1])),
-                         _R0g, float(_veff_c)))
-            if float(np.hypot(vel[0], vel[1])) > 0.1:
-                # FROZEN-CONJUNCT twin (acid-1 lesson): inside the certificate window the strict
-                # pair also forbids the mover's CURRENT disc -- the guide must clear it too, but
-                # only on the window-reachable arc (beyond, future ticks re-judge a moved disc).
-                _gmv.append((f"{_oid}#frz", (float(c3[0]), float(c3[1])), (0.0, 0.0),
-                             _R0g, float(_veff_c), 1.4 * _tw_g))
+        # F9 learned berth: the GATE teaches the guide. EGO's emergent voxel wall is object-shape
+        # noisy (boundary voxel-centre shrinkage), so no single band aligns plan and gate for
+        # every object (0.70 gate killed at trees, 0.55 at a hedge -- whack-a-mole). Whenever a
+        # gate refusal names an object, that object's guide radius grows (+0.3, cap +1.5) and the
+        # guide is re-issued once within the tick; unused extras decay. Self-tuning, local,
+        # bounded -- the plan the guide produces converges to what the gates accept.
+        _extra = _GUIDE_ST.setdefault("extra", {})
+        for _k in list(_extra):
+            _extra[_k] -= 0.02
+            if _extra[_k] <= 0.0:
+                _extra.pop(_k, None)
+
+        def _build_gmv():
+            gmv = []
+            for (_oid, c3, vel, r_obs, d_safe) in movers:
+                q_c, _veff_c = PERCLASS_CONF.get(d_safe, (MAN_QCONF, MAN_VEFF))
+                _R0g = (r_obs + MAN_DSAFE + q_c + MAN_TRACK + GUIDE_BAND
+                        + _extra.get(("mv", _oid), 0.0))
+                gmv.append((_oid, (float(c3[0]), float(c3[1])), (float(vel[0]), float(vel[1])),
+                            _R0g, float(_veff_c)))
+                if float(np.hypot(vel[0], vel[1])) > 0.1:
+                    # FROZEN-CONJUNCT twin (acid-1 lesson): inside the certificate window the
+                    # strict pair also forbids the mover's CURRENT disc -- the guide must clear
+                    # it too, but only on the window-reachable arc.
+                    gmv.append((f"{_oid}#frz", (float(c3[0]), float(c3[1])), (0.0, 0.0),
+                                _R0g, float(_veff_c), 1.4 * _tw_g))
+            if os.environ.get("GUIDE_STATIC", "1") == "1":
+                # gtxy 0-hold F1: the guide routes around STATICS at gate scale too. The v2 arm's
+                # ±25/±50° carrot fan was the accidental static escape; with the fan gone, a
+                # static corridor block became a chronic replan -> static-gate-kill -> hold storm
+                # (s3/s5/s6: 411 of the matrix's 443 holds, all three DNFs). One line carries ALL
+                # routing: statics enter as v=0 conflicts at cyl_r + (drone_r + static_buf) +
+                # band; objects low enough that the flown-sim gate clears them overhead stay out.
+                for _si, (_c, _sc3, _ssz) in enumerate(STATIC_FED):
+                    _sr = 0.5 * float(_ssz[0]); _sh = float(_ssz[2])
+                    if _sh <= CRUISE_Z - _ST_RMARG - 0.25:   # overflyable at cruise (margined)
+                        continue
+                    if float(np.hypot(_sc3[0] - p_d[0], _sc3[1] - p_d[1])) - _sr > EGO_HOR + 8.0:
+                        continue
+                    gmv.append((f"st{_si}", (float(_sc3[0]), float(_sc3[1])), (0.0, 0.0),
+                                _sr + _ST_RMARG + GUIDE_SBAND + _extra.get(("st", _si), 0.0),
+                                0.0))
+            return gmv
+        _gmv = _build_gmv()
         _cyl = []                                        # cert keep-outs, SAME law as the v2 arm
         for (_oid, c3, vel, r_obs, d_safe) in movers:
             q_c, veff_c = PERCLASS_CONF.get(d_safe, (MAN_QCONF, MAN_VEFF))
@@ -2143,6 +2243,35 @@ def ego_maneuver_replan(p_d, v_d, a_d, cur_wp, t_sim):
         if _try("guide", _gpts):
             _GUIDE_ST["last_ok"] = np.asarray(_gpts, float).copy()
             return _accept("guide", dict(off=round(float(_gmeta["off_max"]), 2)))
+        # F9 RETRY: a gate refusal that NAMES an object widens that object's learned berth and
+        # re-issues the guide once -- the adaptive answer to EGO's object-shape-noisy voxel wall.
+        _kill_key = None
+        if _gfail and _gfail[-1].get("at") == "guide":
+            _leg = _gfail[-1].get("leg")
+            if _leg in ("static", "flown") and _gate_kill:
+                _kill_key = _gate_kill[-1]
+            elif _leg == "cert":
+                _wl = _gfail[-1].get("why") or []
+                if _wl and isinstance(_wl[-1], dict) and "m" in _wl[-1] \
+                        and int(_wl[-1]["m"]) < len(movers):
+                    _kill_key = ("mv", movers[int(_wl[-1]["m"])][0])
+        if _kill_key is not None:
+            _extra[_kill_key] = min(_extra.get(_kill_key, 0.0) + 0.3, 1.5)
+            _gmv = _build_gmv()
+            _gpts2, _gmeta2 = _PG.build_guide(p_d, v_d, _carrot, _gmv, _GUIDE_ST,
+                                              cruise_z=CRUISE_Z, eta=_eta, tw=_tw_g,
+                                              delta=REPLAN_DT)
+            if _try("guide2", _gpts2):
+                _gmeta = _gmeta2
+                _GUIDE_ST["last_ok"] = np.asarray(_gpts2, float).copy()
+                return _accept("guide", dict(off=round(float(_gmeta2["off_max"]), 2),
+                                             learn=str(_kill_key[0])))
+            # the retry's own killer still TEACHES (no third replan; next tick starts wiser)
+            if _gfail and _gfail[-1].get("at") == "guide2" \
+                    and _gfail[-1].get("leg") in ("static", "flown") and _gate_kill:
+                _k2 = _gate_kill[-1]
+                if _k2 != _kill_key:
+                    _extra[_k2] = min(_extra.get(_k2, 0.0) + 0.3, 1.5)
         # ROLLBACK 1: re-issue the last ACCEPTED guide (fresh replan from current state)
         _last = _GUIDE_ST.get("last_ok")
         if _last is not None and _try("roll1", _last):

@@ -46,6 +46,8 @@ namespace ego_planner
     // KF-corrected reference line" instead of steering EGO by walls and sub-goal carrots.
     // Empty vector = cleared = byte-identical legacy init. Persists until replaced or cleared.
     void setGuidePath(const std::vector<Eigen::Vector3d> &pts) { guide_path_ = pts; }
+    // guide-attraction dial (0 = init-only guide, byte-identical legacy behaviour)
+    void setGuideAttract(double lambda, double tol) { guide_lambda_ = lambda; guide_tol_ = tol; }
 
     PlanParameters pp_;
     LocalTrajData local_data_;
@@ -58,6 +60,7 @@ namespace ego_planner
     BsplineOptimizer::Ptr bspline_optimizer_rebound_;
 
     std::vector<Eigen::Vector3d> guide_path_;   // north-star guide (empty = legacy init)
+    double guide_lambda_{0.0}, guide_tol_{0.1}; // optimizer attraction toward guide_path_
 
     int continous_failures_count_{0};
 
