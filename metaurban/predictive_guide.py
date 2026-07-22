@@ -52,9 +52,14 @@ def _bump(S, s0, s1, ramp):
     return w
 
 
-def build_guide(p_d, v_d, goal_xy, movers, state, cruise_z=1.5, eta=None, cfg=None):
+def build_guide(p_d, v_d, goal_xy, movers, state, cruise_z=1.5, eta=None, cfg=None,
+                tw=0.75, delta=0.1):
     """-> (pts (N,3) float array, meta dict).
-    movers: [(oid, c0_xy(2,), v_xy(2,), R_keepout)] -- R at CERT scale (+band), caller-built.
+    movers: [(oid, c0_xy(2,), v_xy(2,), R0, veff[, t_max])] -- R0 at CERT scale (+band); veff
+            grows the keep-out as the SLIDING-WINDOW MAX the certificate will ever apply to this
+            conflict: R(s) = R0 + veff*(min(tau(s), tw) + delta)  (the M3 grid law -- a guide that
+            ignores the growth plans into a tube the cert then kills = the acid-1 hold storm).
+            t_max (optional): conflict only binds while tau(s) <= t_max (frozen-conjunct twins).
     state:  caller-persisted dict across ticks (sides / previous profile); {} to start fresh.
     eta:    callable s -> seconds (natural ETA along the CURRENT committed trajectory);
             None -> s / max(|v_d|, vref_floor)."""
@@ -78,17 +83,22 @@ def build_guide(p_d, v_d, goal_xy, movers, state, cruise_z=1.5, eta=None, cfg=No
     sides = state.setdefault("side", {})
     side_age = state.setdefault("side_age", {})
     events = []
-    for (oid, c0, mv, R) in movers:
+    for row in movers:
+        (oid, c0, mv, R0), veff = row[:4], (float(row[4]) if len(row) > 4 else 0.0)
+        t_max = float(row[5]) if len(row) > 5 and row[5] is not None else None
         c0 = np.asarray(c0, float)[:2]
         mv = np.asarray(mv, float)[:2]
         cpos = c0[None, :] + tau[:, None] * mv[None, :]        # mover centre when the DRONE is at s
+        R = R0 + veff * (np.minimum(tau, tw) + delta)          # sliding-window MAX tube (per-s array)
         d = np.linalg.norm(base - cpos, axis=1)
         hit = d < R
+        if t_max is not None:
+            hit &= (tau <= t_max)
         if not hit.any():
             continue
         idx = np.where(hit)[0]
         s0, s1 = float(S[idx[0]]), float(S[idx[-1]])
-        k_star = int(idx[np.argmin(d[idx])])
+        k_star = int(idx[np.argmin((d - R)[idx])])
         s_star, t_star = float(S[k_star]), float(tau[k_star])
         side = sides.get(oid)
         if side is None:
@@ -104,12 +114,12 @@ def build_guide(p_d, v_d, goal_xy, movers, state, cruise_z=1.5, eta=None, cfg=No
         o_need = cfg.omax
         for o in np.arange(cfg.o_step, cfg.omax + 1e-9, cfg.o_step):
             gpt = base[idx] + (side * o) * n[None, :]
-            if float(np.min(np.linalg.norm(gpt - cpos[idx], axis=1))) >= R:
+            if float(np.min(np.linalg.norm(gpt - cpos[idx], axis=1) - R[idx])) >= 0.0:
                 o_need = float(o)
                 break
         ramp = max(cfg.ramp_min, 0.5 * (s1 - s0))
         events.append(dict(oid=oid, s0=s0, s1=s1, s=s_star, t=t_star, side=float(side),
-                           o=o_need, ramp=ramp, R=float(R), c0=c0, v=mv))
+                           o=o_need, ramp=ramp, R=R, c0=c0, v=mv, idx=idx))
     for oid in list(side_age):
         if not any(ev["oid"] == oid for ev in events):
             side_age[oid] += 1
@@ -130,10 +140,10 @@ def build_guide(p_d, v_d, goal_xy, movers, state, cruise_z=1.5, eta=None, cfg=No
             off = np.where(oL >= oR, oL, -oR)           # squeeze: the DOMINANT side wins locally
             bad = False
             for ev in events:
-                m = (S >= ev["s0"]) & (S <= ev["s1"])
+                m = ev["idx"]
                 gpt = base[m] + off[m, None] * n[None, :]
                 cpos = ev["c0"][None, :] + tau[m][:, None] * ev["v"][None, :]
-                if float(np.min(np.linalg.norm(gpt - cpos, axis=1))) < ev["R"] - cfg.verify_pad:
+                if float(np.min(np.linalg.norm(gpt - cpos, axis=1) - ev["R"][m])) < -cfg.verify_pad:
                     ev["o"] = min(ev["o"] + 0.25, cfg.omax)
                     bad = True
             if not bad:
