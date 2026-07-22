@@ -31,7 +31,9 @@ class GuideCfg:
         e = os.environ.get
         self.ds = float(e("GUIDE_DS", "0.4"))            # conflict-scan arc step (m)
         self.out_ds = float(e("GUIDE_OUT_DS", "0.5"))    # emitted polyline spacing (m)
-        self.omax = float(e("GUIDE_OMAX", "2.6"))        # lateral deformation cap (m)
+        self.omax = float(e("GUIDE_OMAX", "4.0"))        # lateral deformation cap (m) -- roomy by
+        #   default: the cap must not be the binding constraint while chasing 0-hold (the
+        #   tournament's wide arcs reached ~4m lateral); off_max is reported every tick
         self.slew = float(e("GUIDE_SLEW", "0.45"))       # max per-tick profile change (m)
         self.ramp_min = float(e("GUIDE_RAMP", "2.0"))    # min bump ramp length (m)
         self.vref_floor = float(e("GUIDE_VREF", "1.2"))  # ETA fallback speed floor (m/s)
@@ -111,12 +113,22 @@ def build_guide(p_d, v_d, goal_xy, movers, state, cruise_z=1.5, eta=None, cfg=No
         sides[oid] = side
         side_age[oid] = 0
         # smallest lateral offset that clears this mover over its conflict window
-        o_need = cfg.omax
-        for o in np.arange(cfg.o_step, cfg.omax + 1e-9, cfg.o_step):
-            gpt = base[idx] + (side * o) * n[None, :]
-            if float(np.min(np.linalg.norm(gpt - cpos[idx], axis=1) - R[idx])) >= 0.0:
-                o_need = float(o)
-                break
+        def _o_need(sd):
+            for o in np.arange(cfg.o_step, cfg.omax + 1e-9, cfg.o_step):
+                gpt = base[idx] + (sd * o) * n[None, :]
+                if float(np.min(np.linalg.norm(gpt - cpos[idx], axis=1) - R[idx])) >= 0.0:
+                    return float(o)
+            return cfg.omax
+        o_need = _o_need(side)
+        if o_need >= cfg.omax - 1e-9:
+            # ESCAPE HATCH (gtxy 0-hold campaign): the committed side is CAPPED-infeasible --
+            # commitment must not ride a dead side into a hold; try the other side, switch if it
+            # actually clears. (The only sanctioned side switch: feasibility beats stickiness.)
+            o_alt = _o_need(-side)
+            if o_alt < cfg.omax - 1e-9:
+                side = -side
+                sides[oid] = side
+                o_need = o_alt
         ramp = max(cfg.ramp_min, 0.5 * (s1 - s0))
         events.append(dict(oid=oid, s0=s0, s1=s1, s=s_star, t=t_star, side=float(side),
                            o=o_need, ramp=ramp, R=R, c0=c0, v=mv, idx=idx))
