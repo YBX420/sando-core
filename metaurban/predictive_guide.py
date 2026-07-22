@@ -273,6 +273,10 @@ def build_guide(p_d, v_d, goal_xy, movers, state, cruise_z=1.5, eta=None, cfg=No
         # ASYMMETRIC slew (s4 forensic): DEEPENING an already-committed dodge (same sign, larger
         # |off|) is the maneuver maturing, not a twitch -- let it open at 2x; sign flips, returns
         # to centre and brand-new deflections keep the tight limit.
+        # (SLOW-RELEASE (rel=slew/3) was tried for the attitude-jitter case and REVERTED: roll
+        #  rocking did drop 40%, but lingering in the dodge lane is a crowd-safety NEGATIVE --
+        #  s14/s12 collided, s5 17.9 s. Prompt return VACATES the lane; release speed is
+        #  safety-relevant, not just comfort. The jitter fix must shape the ONSET, not the return.)
         deep = 2.0 * cfg.slew
         up = np.where((off_prev > 0.05), deep, cfg.slew)
         dn = np.where((off_prev < -0.05), deep, cfg.slew)

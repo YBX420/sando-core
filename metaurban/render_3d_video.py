@@ -662,6 +662,7 @@ if args.ego:
     ego.set_params(max_vel=_vmax_req,
                    max_acc=float(PLN.get("a_max", 10.0)),
                    ctrl_pt_dist=0.5, horizon=EGO_HOR,
+                   l_smooth=float(os.environ.get("EGO_LSMOOTH", "1.0")),
                    l_collision=0.8, dist0=max(0.4, float(par.drone_radius) + 0.2))
     if os.environ.get("EGO_DECIDE") == "guide" and float(os.environ.get("GUIDE_ATTRACT", "0")) > 0:
         # gtxy F10 (default OFF after A/B: lam 2.0 made the optimizer FAIL where line and grid
@@ -1408,6 +1409,10 @@ def _tau_now():
 
 
 _VD_NOW = [np.zeros(3)]   # drone velocity this tick (set in ego_maneuver_replan; drawing-side TTC reads)
+_A_CMD = [np.zeros(3)]    # last COMMANDED reference accel (executor writes; guide-arm replans use it
+#   as the accel boundary condition -- REFERENCE continuity. Feeding the measured quad.a recycled the
+#   attitude-wobble noise into every fresh spline head (cos 0.835, gain x1.3 = a sustained limit
+#   cycle: the cruise-jitter root, 2026-07-22 exec-trace forensic).
 _PD_NOW = [np.zeros(3)]   # drone position this tick (CAP_MEET's encounter-scale needs it at draw time)
 
 
@@ -2011,7 +2016,7 @@ def ego_maneuver_replan(p_d, v_d, a_d, cur_wp, t_sim):
                 return False
         return True
 
-    def flown_samples(gear=1.0):
+    def flown_samples(gear=1.0, u_from=None):
         """The path the REAL drone will actually FLY: forward-simulate a COPY of the quad tracking the committed
         B-spline over [0, TAU]. The planned point-path hides the tracking OVERSHOOT (inertia / tilt-to-accelerate);
         gating this predicted-flown tube is how we account for the real drone's dynamics, not just its radius.
@@ -2021,8 +2026,11 @@ def ego_maneuver_replan(p_d, v_d, a_d, cur_wp, t_sim):
         honestly at a lower gear (same forward-sim law the executor then flies)."""
         d = ego.duration()
         # M3 held-spline commitment: mid-commit the drone is u0 DEEP into the committed spline;
-        # gates must sim tracking from there, not from the head (backwards-flying sim = garbage)
+        # gates must sim tracking from there, not from the head (backwards-flying sim = garbage).
+        # u_from: the guide arm's held-spline paths (roll2 / commit probe) pass their own depth.
         u0 = float(_MAN_V2.get("stc_u0", 0.0)) if (EGO_STC and _MAN_V2.get("stc")) else 0.0
+        if u_from is not None:
+            u0 = float(u_from)
         hz_cap = MAN_STATIC_HZ
         if EGO_DECIDE == "guide":
             # gtxy 0-hold F6: BRAKE-SAFETY gate horizon (the TAU_SPEED law, flown-gate edition).
@@ -2074,7 +2082,7 @@ def ego_maneuver_replan(p_d, v_d, a_d, cur_wp, t_sim):
                     who[:] = [c3, R, hh, _si]
         return sd_min
 
-    def static_clear(gear=1.0):
+    def static_clear(gear=1.0, u_from=None):
         if ego.duration() <= 1e-3 or not loc_obs:
             return True
         thresh = _ST_RMARG
@@ -2089,7 +2097,7 @@ def ego_maneuver_replan(p_d, v_d, a_d, cur_wp, t_sim):
             sd_now = _static_sd(p_d)
             if sd_now < _ST_RMARG:
                 thresh = max(min(_ST_RMARG, sd_now - 0.05), float(par.drone_radius) + 0.05)
-        for qi, qp in enumerate(flown_samples(gear)):
+        for qi, qp in enumerate(flown_samples(gear, u_from)):
             _w = []
             sd = _static_sd(qp, who=_w)
             if sd < thresh:                                 # flown body within margin of a cylinder surface
@@ -2101,14 +2109,14 @@ def ego_maneuver_replan(p_d, v_d, a_d, cur_wp, t_sim):
                 return False
         return True
 
-    def mover_clear_flown(gear=1.0):
+    def mover_clear_flown(gear=1.0, u_from=None):
         """Forward-sim FLOWN-path gate vs the KF-PREDICTED mover cylinders (the analytic cert_clear has NO forward-sim,
         so a fast climb-over / tracking overshoot can graze a tall mover's roof -- e.g. the seed-56 van -- while the
         planned path certified). Cylinder disjunction per mover: clear iff horizontally outside r_obs+keep-out OR the
         flown body is above the mover top. Predicted mover pos = KF centre + vel*t at each flown sample time."""
         if ego.duration() <= 1e-3 or not movers:
             return True
-        fs = flown_samples(gear)
+        fs = flown_samples(gear, u_from)
         for k, qp in enumerate(fs):
             tk = k * DT
             for (_oid, c3, vel, r_obs, d_safe) in movers:
@@ -2230,6 +2238,32 @@ def ego_maneuver_replan(p_d, v_d, a_d, cur_wp, t_sim):
             _gwrite(tag, float(s))
             return "guide", _p24, float(s)
 
+        _ck = int(os.environ.get("GUIDE_COMMIT_K", "0"))
+        if _ck > 0 and _GUIDE_ST.get("cage", 0) < _ck:
+            # JITTER PROBE (default off): fly the spline IN HAND up to K ticks as long as the
+            # full gate/cert stack still passes at its current depth -- tests whether the 10 Hz
+            # re-anchor cycle (fresh spline head every tick -> v_ref direction jumps -> attitude
+            # slam) is the cruise-jitter root. Same guarantee window as every tick (roll2 law).
+            _u0c = float(_MAN_V2.get("t_ego_now", 0.0))
+            if ego.duration() > _u0c + 0.25:
+                import st_cert as _STCk
+                try:
+                    _okc, _mc2 = _STCk.certify_profile(ego, _cyl, [(_tw_g, 1.0)], _tw_g,
+                                                       REPLAN_DT, u_start=_u0c)
+                except Exception:
+                    _okc = False
+                if _okc and static_clear(1.0, u_from=_u0c) and mover_clear_flown(1.0, u_from=_u0c):
+                    _GUIDE_ST["cage"] = _GUIDE_ST.get("cage", 0) + 1
+                    _MAN_V2["guide_held"] = True
+                    _MAN_V2["receipt"] = _SL.make_receipt("guide_commit", 1.0, True, ego, _cyl,
+                                                          _tw_g, REPLAN_DT,
+                                                          gates=dict(guide=True, commit=True,
+                                                                     u0=round(_u0c, 2)))
+                    _MAN_V2["receipt"]["guide"] = _gmeta
+                    _gwrite("guide_commit", 1.0)
+                    return "guide", None, 1.0
+        _GUIDE_ST["cage"] = 0
+
         # 窄口减速 gear ladder (塔菲大人 ruling amendment, 2026-07-22 evening): the s14 verdict was
         # a corridor passable only at ±5 cm at full-speed wobble -- SLOW flight threads it. When
         # the full-speed gates refuse, re-judge the SAME spline at 0.6 / 0.3: the flown-sim gates
@@ -2334,7 +2368,7 @@ def ego_maneuver_replan(p_d, v_d, a_d, cur_wp, t_sim):
                 if not _okr:
                     _gfail.append(dict(at="roll2", leg="cert", s=_s2))
                     continue
-                if not (static_clear(_s2) and mover_clear_flown(_s2)):
+                if not (static_clear(_s2, u_from=_u0) and mover_clear_flown(_s2, u_from=_u0)):
                     _gfail.append(dict(at="roll2", leg="gate", s=_s2))
                     continue
                 _MAN_V2["guide_held"] = True             # executor: keep t_ego accumulating
@@ -3025,6 +3059,10 @@ while not quit_now:
             if args.maneuver:
                 # NO-HOLD cylinder fastest-safe tournament (fly over / around / climb); leaves EGO holding the winner
                 _MAN_V2["t_ego_now"] = t_ego     # guide arm roll-2: how deep the executor is into the held spline
+                #   (REFERENCE-accel boundary (_A_CMD) was tried for the jitter case and REVERTED:
+                #    a_ref p95 unmoved -- the accel bursts are the optimizer's own turn placement,
+                #    not recycled measurement noise -- and the trajectory shift flipped s12's
+                #    knife-edge into a collision. Booked negative.)
                 t0 = time.perf_counter(); man_kind, ego_traj_pts2, man_g = ego_maneuver_replan(p_d, v_d, a_d, cur_wp, t)
                 last_rt = time.perf_counter() - t0
                 ego_dur = ego.duration(); ego_ok = ego_dur > 1e-3
@@ -3180,6 +3218,7 @@ while not quit_now:
                     sp_pos, sp_vel, sp_acc = s; sp_pos = np.asarray(sp_pos, float).copy()
                     sp_vel = np.asarray(sp_vel, float) * ego_speed_g            # feed-forward vel matches the warp
                     sp_acc = np.asarray(sp_acc, float) * (ego_speed_g ** 2)
+                    _A_CMD[0] = np.asarray(sp_acc, float).copy()   # reference-accel continuity (guide replans)
                     if args.slip:                                              # SLIP g>1 (slip-ahead): hard-cap to limits
                         _vmx = float(PLN.get("v_max", 6.0)); _amx = float(PLN.get("a_max", 10.0))
                         _nv = float(np.linalg.norm(sp_vel)); _na = float(np.linalg.norm(sp_acc))
@@ -3211,6 +3250,14 @@ while not quit_now:
                                       yaw_ref=yaw_ref)
                     else:
                         quad.step(sp_pos, sp_vel, sp_acc, DT, yaw_ref=yaw_ref)   # quad tracks the EGO B-spline (slowed)
+                    if os.environ.get("EXEC_TRACE"):
+                        with open(os.environ["EXEC_TRACE"], "a") as _fx2:
+                            _fx2.write(json.dumps([round(float(t), 4), round(t_ego, 4),
+                                                   [round(float(v), 4) for v in sp_pos],
+                                                   [round(float(v), 4) for v in sp_vel],
+                                                   [round(float(v), 4) for v in sp_acc],
+                                                   [round(float(v), 4) for v in quad.p],
+                                                   [round(float(v), 4) for v in quad.v]]) + "\n")
                     if _TRACKH:   # HCT-D harvest: tracking error + hodograph covariates of THIS planned set-point
                         nv = float(np.linalg.norm(sp_vel)); na = float(np.linalg.norm(sp_acc))
                         lat = float(np.linalg.norm(np.cross(sp_vel, sp_acc))) / max(nv, 1e-3)   # centripetal = kappa*v^2
@@ -3230,6 +3277,7 @@ while not quit_now:
                                   yaw_ref=yaw_ref)
                     else:
                         quad.step(quad.p, np.zeros(3), np.zeros(3), DT, yaw_ref=yaw_ref)   # hover
+                    _A_CMD[0] = _A_CMD[0] * 0.5                    # hold: reference accel decays to rest
                 else:
                     # SUSTAINED stuck (surrounded / inside a tree): RECOVERY = climb to clear the canopy and ease
                     # toward the goal instead of freezing. Space above the voxel ceiling is free. Gentle climb.
