@@ -80,6 +80,18 @@ void ego_set_guide_attract(void* h, double lambda, double tol) {
   ((EGOPlannerManager*)h)->setGuideAttract(lambda, tol);
 }
 
+void ego_set_consistency(void* h, double lambda, double tau) {
+  // plan-to-plan consistency weight + decay horizon (s). 0 = legacy (term off).
+  ((EGOPlannerManager*)h)->setConsistency(lambda, tau);
+}
+
+void ego_snapshot_prev(void* h, double t_shift) {
+  // ONCE per decision tick, BEFORE any replan of that tick: snapshot the currently-FLOWN
+  // trajectory as the consistency target, time-aligned at t_shift (executor time already flown
+  // into it). All replans within the tick pull toward this one snapshot.
+  ((EGOPlannerManager*)h)->snapshotPrev(t_shift);
+}
+
 void ego_set_moving_obstacles(void* h, double* rows, int n, double lambda) {
   // rows: n x 8 [c0x c0y c0z vx vy vz r_clear z_top]; obstacle polys are aligned to the NEXT replan's
   // t=0 (feed current KF/GT state right before ego_replan). n=0 or lambda=0 -> term off (default path).
