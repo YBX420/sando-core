@@ -244,7 +244,12 @@ def build_guide(p_d, v_d, goal_xy, movers, state, cruise_z=1.5, eta=None, cfg=No
             off = np.where(oL >= oR, oL, -oR)           # disjoint clusters: dominant side, continuous
             bad = False
             for ev in events:
-                m = ev["idx"]
+                m = ev["idx"][S[ev["idx"]] >= 0.8]
+                #   ^ body-zone exemption (s14 pocket): stations inside the first 0.8 m are pinned
+                #     to the drone's position -- a ring the drone currently occupies can never
+                #     verify there, and escalating o for it is a trap. The gates own that zone.
+                if not len(m):
+                    continue
                 gpt = base[m] + off[m, None] * n[None, :]
                 cpos = ev["c0"][None, :] + tau[m][:, None] * ev["v"][None, :]
                 if float(np.min(np.linalg.norm(gpt - cpos, axis=1) - ev["R"][m])) < -cfg.verify_pad:
@@ -283,6 +288,9 @@ def build_guide(p_d, v_d, goal_xy, movers, state, cruise_z=1.5, eta=None, cfg=No
     if ks[-1] != n_emit - 1:
         ks.append(n_emit - 1)
     pts = np.array([[base[k][0] + off[k] * n[0], base[k][1] + off[k] * n[1], cruise_z] for k in ks])
+    #   (an emit-side egress taper (off * min(S/1.2, 1)) was tried and REVERTED: the planner
+    #    already pins the init start to the drone, so the taper only DELAYED active dodges --
+    #    s12 collided, s6 0->7. The body-zone verify exemption is the surviving egress fix.)
     return pts, meta
 
 

@@ -2011,10 +2011,14 @@ def ego_maneuver_replan(p_d, v_d, a_d, cur_wp, t_sim):
                 return False
         return True
 
-    def flown_samples():
+    def flown_samples(gear=1.0):
         """The path the REAL drone will actually FLY: forward-simulate a COPY of the quad tracking the committed
         B-spline over [0, TAU]. The planned point-path hides the tracking OVERSHOOT (inertia / tilt-to-accelerate);
-        gating this predicted-flown tube is how we account for the real drone's dynamics, not just its radius."""
+        gating this predicted-flown tube is how we account for the real drone's dynamics, not just its radius.
+        gear < 1 (窄口减速 ruling amendment, 2026-07-22 evening): sim the executor's slowed tracking
+        verbatim -- reference advances gear*DT per real DT, feed-forward vel*gear / acc*gear^2. The
+        slowed flight hugs the plan tighter, so a pinch that fails the gates at full speed can pass
+        honestly at a lower gear (same forward-sim law the executor then flies)."""
         d = ego.duration()
         # M3 held-spline commitment: mid-commit the drone is u0 DEEP into the committed spline;
         # gates must sim tracking from there, not from the head (backwards-flying sim = garbage)
@@ -2031,14 +2035,15 @@ def ego_maneuver_replan(p_d, v_d, a_d, cur_wp, t_sim):
             hz_cap = min(MAN_STATIC_HZ, float(np.hypot(v_d[0], v_d[1])) / 5.0 + 0.45)
         hz = min(d - u0, hz_cap)                           # static-gate forward-sim lookahead (>= the flown-per-tick dist)
         if args.pointmass:                                # diagnostic: flown == planned
-            return np.array([ego.eval(u0 + s)[0] for s in np.linspace(0, max(hz, 1e-3), 16)])
+            return np.array([ego.eval(u0 + s)[0] for s in np.linspace(0, max(gear * hz, 1e-3), 16)])
         q = copy.deepcopy(quad)                           # current REAL state + params
         n = max(1, int(hz / DT)); pts = [q.p.copy()]
         for k in range(1, n + 1):
-            r = ego.eval(min(u0 + k * DT, d - 1e-3))
+            r = ego.eval(min(u0 + gear * k * DT, d - 1e-3))
             if r is None:
                 break
             sp, sv, sa = (np.asarray(x, float) for x in r)
+            sv = sv * gear; sa = sa * (gear ** 2)
             yr = float(np.arctan2(sv[1], sv[0])) if np.linalg.norm(sv[:2]) > 1e-3 else q.yaw
             q.step(sp, sv, sa, DT, yaw_ref=yr)
             pts.append(q.p.copy())
@@ -2069,7 +2074,7 @@ def ego_maneuver_replan(p_d, v_d, a_d, cur_wp, t_sim):
                     who[:] = [c3, R, hh, _si]
         return sd_min
 
-    def static_clear():
+    def static_clear(gear=1.0):
         if ego.duration() <= 1e-3 or not loc_obs:
             return True
         thresh = _ST_RMARG
@@ -2084,26 +2089,26 @@ def ego_maneuver_replan(p_d, v_d, a_d, cur_wp, t_sim):
             sd_now = _static_sd(p_d)
             if sd_now < _ST_RMARG:
                 thresh = max(min(_ST_RMARG, sd_now - 0.05), float(par.drone_radius) + 0.05)
-        for qi, qp in enumerate(flown_samples()):
+        for qi, qp in enumerate(flown_samples(gear)):
             _w = []
             sd = _static_sd(qp, who=_w)
             if sd < thresh:                                 # flown body within margin of a cylinder surface
                 if _w:
                     _gate_kill.append(("st", int(_w[3])))
                 if _w and os.environ.get("STATICDBG") == "1":
-                    print(f"[STATICDBG] kill@sample{qi} qp={np.round(qp,2)} sd={sd:.2f}<{thresh:.2f} "
+                    print(f"[STATICDBG] kill@sample{qi} g={gear} qp={np.round(qp,2)} sd={sd:.2f}<{thresh:.2f} "
                           f"cyl c={np.round(_w[0],2)} R={_w[1]:.2f} hh={_w[2]:.2f}", flush=True)
                 return False
         return True
 
-    def mover_clear_flown():
+    def mover_clear_flown(gear=1.0):
         """Forward-sim FLOWN-path gate vs the KF-PREDICTED mover cylinders (the analytic cert_clear has NO forward-sim,
         so a fast climb-over / tracking overshoot can graze a tall mover's roof -- e.g. the seed-56 van -- while the
         planned path certified). Cylinder disjunction per mover: clear iff horizontally outside r_obs+keep-out OR the
         flown body is above the mover top. Predicted mover pos = KF centre + vel*t at each flown sample time."""
         if ego.duration() <= 1e-3 or not movers:
             return True
-        fs = flown_samples()
+        fs = flown_samples(gear)
         for k, qp in enumerate(fs):
             tk = k * DT
             for (_oid, c3, vel, r_obs, d_safe) in movers:
@@ -2216,33 +2221,60 @@ def ego_maneuver_replan(p_d, v_d, a_d, cur_wp, t_sim):
                     ncyl=len(_cyl), cert_id=_r.get("cert_id"), certified=_r.get("certified"),
                     guide=_gmeta, fail=_gfail)) + "\n")
 
-        def _accept(tag, extra=None):
-            _MAN_V2["receipt"] = _SL.make_receipt(tag, 1.0, True, ego, _cyl, _tw_g, REPLAN_DT,
-                                                  gates=dict(guide=True, **(extra or {})))
+        def _accept(tag, s=1.0, extra=None):
+            _MAN_V2["receipt"] = _SL.make_receipt(tag, float(s), True, ego, _cyl, _tw_g, REPLAN_DT,
+                                                  gates=dict(guide=True, s=float(s), **(extra or {})))
             _MAN_V2["receipt"]["guide"] = _gmeta
             _dur = ego.duration()
             _p24 = [ego.eval(_uu)[0] for _uu in np.linspace(0, _dur, 24)]
-            _gwrite(tag, 1.0)
-            return "guide", _p24, 1.0
+            _gwrite(tag, float(s))
+            return "guide", _p24, float(s)
 
-        def _try(tag, gpts):
-            """replan to a guide + full gate/cert stack; appends the kill stage to _gfail."""
+        # 窄口减速 gear ladder (塔菲大人 ruling amendment, 2026-07-22 evening): the s14 verdict was
+        # a corridor passable only at ±5 cm at full-speed wobble -- SLOW flight threads it. When
+        # the full-speed gates refuse, re-judge the SAME spline at 0.6 / 0.3: the flown-sim gates
+        # re-run at the slowed tracking law the executor will fly verbatim, and the mover cert is
+        # re-proved with the sound retime identity (cert_clear_warp; statics are warp-invariant).
+        # A certified slow pass through a pinch is flight, not an emergency -- holds stay the
+        # counted fail-closed last resort.
+        _GEARS = (1.0, 0.6, 0.3)   # validated by the full-20 sweep (17/20 clean). A denser
+        #   (1.0,0.6,0.45,0.3) ladder was tried and REVERTED: the 0.45 gear certified a plan whose
+        #   real flight grazed a static on s14 (min_clr -0.02) and s12 went 1->5 -- the flown-sim
+        #   braking transient is least trustworthy exactly in the mid-gear band. Do not densify.
+
+        def _gates(tag, s=1.0):
+            """Full gate/cert stack on the CURRENTLY-held spline at gear s; logs the kill stage."""
+            if not static_clear(s):
+                _gfail.append(dict(at=tag, leg="static", s=s)); return False
+            if not mover_clear_flown(s):
+                _gfail.append(dict(at=tag, leg="flown", s=s)); return False
+            _w = []
+            ok = (_SL.cert_clear(ego, _cyl, tau=_tw_g, delta=REPLAN_DT, why=_w) if s >= 0.999
+                  else _SL.cert_clear_warp(ego, _cyl, s, tau=_tw_g, delta=REPLAN_DT, why=_w))
+            if not ok:
+                _gfail.append(dict(at=tag, leg="cert", s=s, why=_w)); return False
+            return True
+
+        def _plan(tag, gpts):
             ego.set_guide_path(gpts)
             if not (ego.replan(p_d, v_d, a_d, np.array([gpts[-1][0], gpts[-1][1], CRUISE_Z]))
                     and ego.duration() > 1e-3):
                 _gfail.append(dict(at=tag, leg="replan")); return False
-            if not static_clear():
-                _gfail.append(dict(at=tag, leg="static")); return False
-            if not mover_clear_flown():
-                _gfail.append(dict(at=tag, leg="flown")); return False
-            _w = []
-            if not _SL.cert_clear(ego, _cyl, tau=_tw_g, delta=REPLAN_DT, why=_w):
-                _gfail.append(dict(at=tag, leg="cert", why=_w)); return False
             return True
 
-        if _try("guide", _gpts):
+        def _try(tag, gpts):
+            """replan to a guide, then the gear ladder: first gear whose gates+cert all pass wins."""
+            if not _plan(tag, gpts):
+                return None
+            for s in _GEARS:
+                if _gates(tag, s):
+                    return s
+            return None
+
+        _s_ok = _try("guide", _gpts)
+        if _s_ok is not None:
             _GUIDE_ST["last_ok"] = np.asarray(_gpts, float).copy()
-            return _accept("guide", dict(off=round(float(_gmeta["off_max"]), 2)))
+            return _accept("guide", _s_ok, dict(off=round(float(_gmeta["off_max"]), 2)))
         # F9 RETRY: a gate refusal that NAMES an object widens that object's learned berth and
         # re-issues the guide once -- the adaptive answer to EGO's object-shape-noisy voxel wall.
         _kill_key = None
@@ -2255,17 +2287,26 @@ def ego_maneuver_replan(p_d, v_d, a_d, cur_wp, t_sim):
                 if _wl and isinstance(_wl[-1], dict) and "m" in _wl[-1] \
                         and int(_wl[-1]["m"]) < len(movers):
                     _kill_key = ("mv", movers[int(_wl[-1]["m"])][0])
+        if _kill_key is not None and _kill_key[0] == "st" and _kill_key[1] < len(STATIC_FED):
+            # EGRESS GUARD: never grow the berth of a ring the drone currently occupies -- the
+            # inflated ring would demand an even larger instant offset at s=0 and deepen the
+            # pocket (s14: parked beside st430, learn loop trapped it for 3 s).
+            (_c3g, _sc3g, _sszg) = STATIC_FED[_kill_key[1]]
+            if float(np.hypot(_sc3g[0] - p_d[0], _sc3g[1] - p_d[1])) < \
+                    0.5 * float(_sszg[0]) + _ST_RMARG + GUIDE_SBAND + 0.2:
+                _kill_key = None
         if _kill_key is not None:
             _extra[_kill_key] = min(_extra.get(_kill_key, 0.0) + 0.3, 1.5)
             _gmv = _build_gmv()
             _gpts2, _gmeta2 = _PG.build_guide(p_d, v_d, _carrot, _gmv, _GUIDE_ST,
                                               cruise_z=CRUISE_Z, eta=_eta, tw=_tw_g,
                                               delta=REPLAN_DT)
-            if _try("guide2", _gpts2):
+            _s_ok = _try("guide2", _gpts2)
+            if _s_ok is not None:
                 _gmeta = _gmeta2
                 _GUIDE_ST["last_ok"] = np.asarray(_gpts2, float).copy()
-                return _accept("guide", dict(off=round(float(_gmeta2["off_max"]), 2),
-                                             learn=str(_kill_key[0])))
+                return _accept("guide", _s_ok, dict(off=round(float(_gmeta2["off_max"]), 2),
+                                                    learn=str(_kill_key[0])))
             # the retry's own killer still TEACHES (no third replan; next tick starts wiser)
             if _gfail and _gfail[-1].get("at") == "guide2" \
                     and _gfail[-1].get("leg") in ("static", "flown") and _gate_kill:
@@ -2274,30 +2315,36 @@ def ego_maneuver_replan(p_d, v_d, a_d, cur_wp, t_sim):
                     _extra[_k2] = min(_extra.get(_k2, 0.0) + 0.3, 1.5)
         # ROLLBACK 1: re-issue the last ACCEPTED guide (fresh replan from current state)
         _last = _GUIDE_ST.get("last_ok")
-        if _last is not None and _try("roll1", _last):
-            return _accept("guide_roll", dict(roll=1))
+        if _last is not None:
+            _s_ok = _try("roll1", _last)
+            if _s_ok is not None:
+                return _accept("guide_roll", _s_ok, dict(roll=1))
         # ROLLBACK 2: keep flying the spline IN HAND deeper (u-offset re-cert, exact global clock)
+        # -- same gear ladder: a slow continuation beats a stand-still
         _u0 = float(_MAN_V2.get("t_ego_now", 0.0))
         if ego.duration() > _u0 + 0.2:
-            try:
-                import st_cert as _STC
-                _okr, _mr = _STC.certify_profile(ego, _cyl, [(_tw_g, 1.0)], _tw_g,
-                                                 REPLAN_DT, u_start=_u0)
-            except Exception as _e:
-                _gfail.append(dict(at="roll2", leg="err", e=f"{type(_e).__name__}"))
-                _okr = False
-            if _okr and static_clear() and mover_clear_flown():
+            import st_cert as _STC
+            for _s2 in _GEARS:
+                try:
+                    _okr, _mr = _STC.certify_profile(ego, _cyl, [(_tw_g, _s2)], _tw_g,
+                                                     REPLAN_DT, u_start=_u0)
+                except Exception as _e:
+                    _gfail.append(dict(at="roll2", leg="err", s=_s2, e=f"{type(_e).__name__}"))
+                    break
+                if not _okr:
+                    _gfail.append(dict(at="roll2", leg="cert", s=_s2))
+                    continue
+                if not (static_clear(_s2) and mover_clear_flown(_s2)):
+                    _gfail.append(dict(at="roll2", leg="gate", s=_s2))
+                    continue
                 _MAN_V2["guide_held"] = True             # executor: keep t_ego accumulating
-                _MAN_V2["receipt"] = _SL.make_receipt("guide_roll", 1.0, True, ego, _cyl,
+                _MAN_V2["receipt"] = _SL.make_receipt("guide_roll", float(_s2), True, ego, _cyl,
                                                       _tw_g, REPLAN_DT,
-                                                      gates=dict(guide=True, roll=2, u0=round(_u0, 2)))
+                                                      gates=dict(guide=True, roll=2, s=float(_s2),
+                                                                 u0=round(_u0, 2)))
                 _MAN_V2["receipt"]["guide"] = _gmeta
-                _gwrite("guide_roll2", 1.0)
-                return "guide", None, 1.0
-            elif _okr:
-                _gfail.append(dict(at="roll2", leg="gate"))
-            else:
-                _gfail.append(dict(at="roll2", leg="cert"))
+                _gwrite("guide_roll2", float(_s2))
+                return "guide", None, float(_s2)
         # FAIL-CLOSED: hold -- a counted north-star failure, never a normal move
         _MAN_V2["receipt"] = _SL.make_receipt("evade", 0.0, False, ego, _cyl, _tw_g, REPLAN_DT,
                                               gates=dict(guide=True))
