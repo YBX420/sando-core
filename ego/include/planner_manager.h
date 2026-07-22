@@ -48,6 +48,18 @@ namespace ego_planner
     void setGuidePath(const std::vector<Eigen::Vector3d> &pts) { guide_path_ = pts; }
     // guide-attraction dial (0 = init-only guide, byte-identical legacy behaviour)
     void setGuideAttract(double lambda, double tol) { guide_lambda_ = lambda; guide_tol_ = tol; }
+    // plan-to-plan consistency dial (0 = legacy) + the per-tick snapshot of the FLOWN trajectory.
+    // snapshotPrev is called ONCE at tick start: several replans may run inside one decision tick
+    // (primary / retry / rollback) and every one must be tied to the trajectory the executor is
+    // actually flying, not to a sibling candidate solved a millisecond earlier.
+    void setConsistency(double lambda, double tau) { cons_lambda_ = lambda; cons_tau_ = tau; }
+    void snapshotPrev(double t_shift) {
+      if (cons_lambda_ > 0.0 && local_data_.duration_ > 1e-3)
+        bspline_optimizer_rebound_->snapshotPrevTraj(local_data_.position_traj_, t_shift,
+                                                     local_data_.duration_);
+      else
+        bspline_optimizer_rebound_->clearPrevTraj();
+    }
 
     PlanParameters pp_;
     LocalTrajData local_data_;
@@ -61,6 +73,7 @@ namespace ego_planner
 
     std::vector<Eigen::Vector3d> guide_path_;   // north-star guide (empty = legacy init)
     double guide_lambda_{0.0}, guide_tol_{0.1}; // optimizer attraction toward guide_path_
+    double cons_lambda_{0.0}, cons_tau_{0.5};   // plan-to-plan consistency dial
 
     int continous_failures_count_{0};
 

@@ -261,6 +261,7 @@ namespace ego_planner
     // guide attraction rides along EVERY rebound while a guide is set; empty guide / lambda 0
     // clears the term (stale polylines must never attract later guide-free replans)
     bspline_optimizer_rebound_->setGuideAttract(guide_path_, guide_lambda_, guide_tol_);
+    bspline_optimizer_rebound_->setConsistency(cons_lambda_, cons_tau_);
     bool flag_step_1_success = bspline_optimizer_rebound_->BsplineOptimizeTrajRebound(ctrl_pts, ts);
     cout << "first_optimize_step_success=" << flag_step_1_success << endl;
     if (!flag_step_1_success)

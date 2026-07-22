@@ -661,9 +661,16 @@ if args.ego:
         _vmax_req = min(_vmax_req, _SLc.v_cap(args.fov_range, PLN.get("a_max", 10.0), REPLAN_DT))
     ego.set_params(max_vel=_vmax_req,
                    max_acc=float(PLN.get("a_max", 10.0)),
-                   ctrl_pt_dist=0.5, horizon=EGO_HOR,
+                   ctrl_pt_dist=float(os.environ.get("EGO_CPD", "0.5")), horizon=EGO_HOR,
                    l_smooth=float(os.environ.get("EGO_LSMOOTH", "1.0")),
                    l_collision=0.8, dist0=max(0.4, float(par.drone_radius) + 0.2))
+    if os.environ.get("EGO_DECIDE") == "guide" and float(os.environ.get("GUIDE_CONS", "0")) > 0:
+        # jitter campaign: plan-to-plan consistency (tie each solve to the time-shifted FLOWN
+        # trajectory; decays down the horizon). Default OFF pending calibration.
+        ego.set_consistency(float(os.environ.get("GUIDE_CONS", "0")),
+                            float(os.environ.get("GUIDE_CONS_TAU", "0.5")))
+        print(f"[3dv] plan consistency on: lam={os.environ.get('GUIDE_CONS')} "
+              f"tau={os.environ.get('GUIDE_CONS_TAU', '0.5')}", flush=True)
     if os.environ.get("EGO_DECIDE") == "guide" and float(os.environ.get("GUIDE_ATTRACT", "0")) > 0:
         # gtxy F10 (default OFF after A/B: lam 2.0 made the optimizer FAIL where line and grid
         # disagreed -- replan-leg holds 4->11 on s14; lam 0.5 was noise. The mechanism stays for
@@ -2291,7 +2298,15 @@ def ego_maneuver_replan(p_d, v_d, a_d, cur_wp, t_sim):
 
         def _plan(tag, gpts):
             ego.set_guide_path(gpts)
-            if not (ego.replan(p_d, v_d, a_d, np.array([gpts[-1][0], gpts[-1][1], CRUISE_Z]))
+            # (carrot END-VELOCITY was tried for the ringing hypothesis and REVERTED: a_ref p95
+            #  12.9 -> 19.3 -- the v_end=0 "contradiction" is NOT the fuzz source. GUIDE_AD_CLAMP
+            #  below is the surviving lead: the fed BOUNDARY accel carries the quad's wobble.)
+            _ad = a_d
+            _adc = float(os.environ.get("GUIDE_AD_CLAMP", "-1"))
+            if _adc >= 0.0:
+                _an = float(np.hypot(a_d[0], a_d[1]))
+                _ad = a_d if _an <= _adc or _an < 1e-9 else                     np.array([a_d[0] * _adc / _an, a_d[1] * _adc / _an, a_d[2]], float)
+            if not (ego.replan(p_d, v_d, _ad, np.array([gpts[-1][0], gpts[-1][1], CRUISE_Z]))
                     and ego.duration() > 1e-3):
                 _gfail.append(dict(at=tag, leg="replan")); return False
             return True
@@ -3061,6 +3076,8 @@ while not quit_now:
             if args.maneuver:
                 # NO-HOLD cylinder fastest-safe tournament (fly over / around / climb); leaves EGO holding the winner
                 _MAN_V2["t_ego_now"] = t_ego     # guide arm roll-2: how deep the executor is into the held spline
+                if EGO_DECIDE == "guide":
+                    ego.snapshot_prev(t_ego)     # consistency target = the FLOWN spline, once per tick
                 #   (REFERENCE-accel boundary (_A_CMD) was tried for the jitter case and REVERTED:
                 #    a_ref p95 unmoved -- the accel bursts are the optimizer's own turn placement,
                 #    not recycled measurement noise -- and the trajectory shift flipped s12's

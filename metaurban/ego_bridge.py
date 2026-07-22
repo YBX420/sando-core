@@ -71,6 +71,11 @@ try:    # GUIDE ATTRACTION (optimizer stiffness toward the guide line, gtxy 0-ho
     _set_guide_attract = _sig("ego_set_guide_attract", None, C.c_void_p, C.c_double, C.c_double)
 except AttributeError:
     _set_guide_attract = None
+try:    # PLAN-TO-PLAN CONSISTENCY (jitter campaign: tie plan k+1 to the time-shifted flown plan k)
+    _set_consistency = _sig("ego_set_consistency", None, C.c_void_p, C.c_double, C.c_double)
+    _snapshot_prev = _sig("ego_snapshot_prev", None, C.c_void_p, C.c_double)
+except AttributeError:
+    _set_consistency = _snapshot_prev = None
 try:    # READONLY Bernstein-segment dump (M2-3 piecewise-warp cert, 2026-07-17); absent in a stale .so
     _get_bsegs = _sig("ego_get_bsegs", C.c_int, C.c_void_p, _d, _d, _d, C.c_int)
 except AttributeError:
@@ -125,6 +130,21 @@ class EGOPlanner:
                                    "the guide arm's adherence term would silently vanish)")
             return
         _set_guide_attract(self._h, float(lam), float(tol))
+
+    def set_consistency(self, lam, tau=0.5):
+        """Plan-to-plan consistency dial (0 = legacy). Raises LOUDLY on a stale .so when lam>0."""
+        if _set_consistency is None:
+            if float(lam) != 0.0:
+                raise RuntimeError("ego_capi.so is stale: rebuild it (missing ego_set_consistency)")
+            return
+        _set_consistency(self._h, float(lam), float(tau))
+
+    def snapshot_prev(self, t_shift):
+        """ONCE per decision tick, before that tick's replans: snapshot the FLOWN trajectory as
+        the consistency target, time-aligned at t_shift (executor time already flown into it)."""
+        if _snapshot_prev is None:
+            return
+        _snapshot_prev(self._h, float(t_shift))
 
     def set_moving_obstacles(self, rows, lam):
         """rows: (n, 8) [c0x c0y c0z vx vy vz r_clear z_top], time-aligned to the next replan's t=0.

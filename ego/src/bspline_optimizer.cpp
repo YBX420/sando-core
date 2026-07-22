@@ -1146,6 +1146,32 @@ namespace ego_planner
     }
   }
 
+  void BsplineOptimizer::calcConsistencyCost(const Eigen::MatrixXd &q, double &cost, Eigen::MatrixXd &gradient)
+  {
+    // PLAN-TO-PLAN consistency: pull control point i (living at t_i since traj start, the same
+    // glb_time convention as the moving-obstacle term) toward the PREVIOUS committed trajectory
+    // at global time cons_shift_ + t_i, weight exp(-t_i / cons_tau_). Matching consecutive
+    // points pins the second difference too -- the accel/curvature continuity the start-state
+    // boundary conditions never constrained. Beyond the previous plan's duration the target
+    // holds its endpoint (clamped eval) with the weight already negligible there.
+    cost = 0.0;
+    if (!cons_have_)
+      return;
+    int end_idx = q.cols() - order_;
+    for (auto i = order_; i < end_idx; ++i)
+    {
+      double t_i = ((double)(order_ - 1) / 2.0 + (i - order_ + 1)) * bspline_interval_;
+      double w = std::exp(-t_i / cons_tau_);
+      if (w < 1e-3)
+        break;
+      double tq = std::min(std::max(cons_shift_ + t_i, 0.0), cons_dur_ - 1e-4);
+      Eigen::Vector3d tgt = cons_prev_.evaluateDeBoorT(tq);
+      Eigen::Vector3d d = q.col(i) - tgt;
+      cost += w * d.squaredNorm();
+      gradient.col(i) += 2.0 * w * d;
+    }
+  }
+
   void BsplineOptimizer::combineCostRebound(const double *x, double *grad, double &f_combine, const int n)
   {
 
@@ -1182,6 +1208,14 @@ namespace ego_planner
       calcGuideAttractCost(cps_.points, f_guide, g_guide);
       f_combine += lambda_guide_ * f_guide;
       grad_3D += lambda_guide_ * g_guide;
+    }
+    if (lambda_cons_ > 0.0 && cons_have_)
+    {
+      double f_cons = 0.0;
+      Eigen::MatrixXd g_cons = Eigen::MatrixXd::Zero(3, cps_.size);
+      calcConsistencyCost(cps_.points, f_cons, g_cons);
+      f_combine += lambda_cons_ * f_cons;
+      grad_3D += lambda_cons_ * g_cons;
     }
     memcpy(grad, grad_3D.data() + 3 * order_, n * sizeof(grad[0]));
   }

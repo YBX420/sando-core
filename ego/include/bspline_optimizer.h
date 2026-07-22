@@ -91,6 +91,21 @@ namespace ego_planner
       guide_attract_ = pts; lambda_guide_ = lambda; guide_tol_ = tol;
     }
 
+    // PLAN-TO-PLAN CONSISTENCY (jitter campaign, 2026-07-22 evening): the smoothness term only
+    // shapes the CURRENT solve; nothing ties plan k+1 to the time-shifted plan k, so the flown
+    // head (the only segment ever executed) re-lands with 5-7 m/s^2 reference-accel steps at
+    // every 0.1 s replan boundary. This term pulls each control point toward the PREVIOUS
+    // COMMITTED trajectory evaluated at the same global time (t_shift = time already flown into
+    // it), with an exponentially DECAYING weight -- strong at the head (continuity), fading down
+    // the horizon (fresh information may still reshape the future). Matching three consecutive
+    // control points also pins the second difference = the accel/curvature delta the boundary
+    // conditions alone never constrained. lambda = 0 or no snapshot -> untouched default path.
+    void setConsistency(double lambda, double tau) { lambda_cons_ = lambda; cons_tau_ = tau; }
+    void snapshotPrevTraj(const UniformBspline &prev, double t_shift, double duration) {
+      cons_prev_ = prev; cons_shift_ = t_shift; cons_dur_ = duration; cons_have_ = duration > 1e-3;
+    }
+    void clearPrevTraj() { cons_have_ = false; }
+
     void optimize();
 
     Eigen::MatrixXd getControlPoints();
@@ -139,6 +154,11 @@ namespace ego_planner
     std::vector<Eigen::Vector3d> guide_attract_;  // guide polyline for the attraction hinge
     double lambda_guide_{0.0};            // guide-attraction weight; 0 = term off
     double guide_tol_{0.1};               // attraction dead-band (m)
+    UniformBspline cons_prev_;            // previous COMMITTED trajectory (per-tick snapshot)
+    bool cons_have_{false};
+    double cons_shift_{0.0}, cons_dur_{0.0};
+    double lambda_cons_{0.0};             // plan-to-plan consistency weight; 0 = term off
+    double cons_tau_{0.5};                // decay horizon (s) of the consistency weight
 
     int a;
     //
@@ -166,6 +186,7 @@ namespace ego_planner
     void calcDistanceCostRebound(const Eigen::MatrixXd &q, double &cost, Eigen::MatrixXd &gradient, int iter_num, double smoothness_cost);
     void calcMovingObstacleCost(const Eigen::MatrixXd &q, double &cost, Eigen::MatrixXd &gradient);
     void calcGuideAttractCost(const Eigen::MatrixXd &q, double &cost, Eigen::MatrixXd &gradient);
+    void calcConsistencyCost(const Eigen::MatrixXd &q, double &cost, Eigen::MatrixXd &gradient);
     void calcFitnessCost(const Eigen::MatrixXd &q, double &cost, Eigen::MatrixXd &gradient);
     bool check_collision_and_rebound(void);
 
