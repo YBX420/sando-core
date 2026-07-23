@@ -14,7 +14,7 @@ metadata:
 当前钦定焦点(07-22 晚):**只调 GT_XY 臂,目标 gtxy 0 hold**。
 北极星原话(07-22 更早):"没有任何额外机动,仅凭飞行和 KF 预判到达"(基线 0/20 双臂,见 [[sando-core-sweep21-2026-07-21]] 勘误节)。
 
-## 已建成(commit 6ab60f8 → 04a37c4 → 9324f31)
+## 已建成(commit 15fe723 → 9f87937 → a7ad1c5)
 1. **EGO 指导线入口(C++)**:`ego/include/planner_manager.h` setGuidePath+guide_path_ 成员;
    `ego/src/planner_manager.cpp` reboundReplan STEP1 新增 guide 分支(指导线按 ctrl_pt_dist 弧长重采样
    成初始点列,首尾钉到 start/target,rebound 只在占据要求处变形;空=遗留初始化字节不变);
@@ -34,7 +34,7 @@ metadata:
    fail 死因链{at∈guide|roll1|roll2 × leg∈replan|static|flown|cert(+why)}。
 
 ## 酸试判决(全在 out/sweep21/)
-- 酸一(guideOR_s17/guideKF_s0):双败——**病根=我漏了管子生长项**(修于 04a37c4)。
+- 酸一(guideOR_s17/guideKF_s0):双败——**病根=我漏了管子生长项**(修于 9f87937)。
 - 酸二:**s0 KF×guide 首胜** reached 12.9s/净空 0.892m(锦标赛同 seed 3cm+41 无证 hold),残余 hold×30;
   **s17 ORACLE×guide 诚实败**:44 拍 infeasible(横向 2.6 封顶解不开收敛人群,冲突压到 s≈0)→hold 暴露→t6.2 U 碰;
   抽搐灭绝(switches 37→1)。杀手榜:mover_clear_flown 门 + roll2 certify_profile(严格对策略)+ roll1。

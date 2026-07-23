@@ -8,7 +8,7 @@ metadata:
 # sweep21 战役(2026-07-21/22,塔菲大人令:"从头审查所有代码和 log,不断 render 测试出问题;render 和 log,和对比")
 
 **产物全在 `metaurban/out/sweep21/`**:CAMPAIGN.md(总档)/ final_triage.txt(40 行全表+分型)/
-audit_code_findings.md(=docs/code-audit-2026-07-21.md, commit 6d9c6a3)/ 每趟五件套(mp4+log+explain+attrib+账本)
+audit_code_findings.md(=docs/code-audit-2026-07-21.md, commit 6030281)/ 每趟五件套(mp4+log+explain+attrib+账本)
 / ab_s17_kf_vs_gt.mp4(核心 AB 成片)。驱动器与重触诊器在 scratchpad(sweep21.sh/wave2.sh/retriage.py,
 断点续跑,killR/killG/killC 分型判别子)。
 

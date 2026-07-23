@@ -1,6 +1,6 @@
 # 论文方法部分组织稿(2026-07-21,冻结栈 stack-freeze-m3off-2026-07-21)
 
-> 依据:tag `stack-freeze-m3off-2026-07-21`(7fa0240)+ 战役 commit 链至 `2e7703e`;
+> 依据:tag `stack-freeze-m3off-2026-07-21`(bbfdfd6)+ 战役 commit 链至 `85f7cb9`;
 > 一切数字出自封卷 artifact `out/conformal/calib_v6_final100.json` 与收据链,可逐字复核。
 
 ---
