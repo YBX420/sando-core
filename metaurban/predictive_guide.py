@@ -146,15 +146,22 @@ def build_guide(p_d, v_d, goal_xy, movers, state, cruise_z=1.5, eta=None, cfg=No
         events.append(dict(oid=oid, skey=skey, s0=s0, s1=s1, s=s_star, t=t_star,
                            side=float(side), o=None, ramp=ramp, R=R, c0=c0, v=mv, idx=idx))
 
+    _ogrid = np.arange(cfg.o_step, cfg.omax + 1e-9, cfg.o_step)   # shared offset candidates
+
     def _o_need(ev, sd, t_ahead=0.0):
         """Smallest lateral offset on side sd clearing ev over its conflict window (omax = capped).
         t_ahead > 0 evaluates the mover advanced by that many seconds -- the near-future demand.
+        cpos per (event, t_ahead) is cached: the cluster cost calls this 2 sides x now/ahead
+        (simplify 07-23: was 4 identical broadcasts per event per tick).
         (A speed-scaled static margin REQUIREMENT was tried here and reverted: like the o-pad it
         inflated every static demand at speed and cost more park holds than the knife-edge threads
         it refused -- s14 11->24 vs s6 5->1. The learned per-object berth stays the only inflater.)"""
-        cpos = (ev["c0"][None, :] + (tau[ev["idx"], None] + t_ahead) * ev["v"][None, :])
+        ck = "_cp0" if t_ahead == 0.0 else "_cp1"
+        cpos = ev.get(ck)
+        if cpos is None:
+            cpos = ev[ck] = (ev["c0"][None, :] + (tau[ev["idx"], None] + t_ahead) * ev["v"][None, :])
         gpt0 = base[ev["idx"]]
-        for o in np.arange(cfg.o_step, cfg.omax + 1e-9, cfg.o_step):
+        for o in _ogrid:
             gpt = gpt0 + (sd * o) * n[None, :]
             if float(np.min(np.linalg.norm(gpt - cpos, axis=1) - ev["R"][ev["idx"]])) >= 0.0:
                 return float(o)
@@ -163,6 +170,7 @@ def build_guide(p_d, v_d, goal_xy, movers, state, cruise_z=1.5, eta=None, cfg=No
     # ---- CLUSTER one-side law (gtxy F3): overlapping bump supports must agree on a side.
     # The per-station max(oL,oR) merge is kept for DISJOINT clusters only, where it is continuous.
     events.sort(key=lambda ev: ev["s0"] - ev["ramp"])
+    locks = state.setdefault("side_lock", {})
     clusters = []
     for ev in events:
         lo, hi = ev["s0"] - ev["ramp"], ev["s1"] + ev["ramp"]
@@ -184,7 +192,6 @@ def build_guide(p_d, v_d, goal_xy, movers, state, cruise_z=1.5, eta=None, cfg=No
             cap_pen = sum(100.0 for o in os_ + of_ if o >= cfg.omax - 1e-9)
             cost[sd] = (sum(os_) + sum(of_) + cap_pen, os_)
         cur = evs[0]["side"] if len({ev["side"] for ev in evs}) == 1 else None
-        locks = state.setdefault("side_lock", {})
         locked_sides = {ev["side"] for ev in evs if locks.get(ev["skey"], 0) > 0}
         if cur is None and len(locked_sides) == 1:
             # MIXED cluster with a locked member (s10 forensic): re-clustering (a new mover joins)
@@ -231,7 +238,6 @@ def build_guide(p_d, v_d, goal_xy, movers, state, cruise_z=1.5, eta=None, cfg=No
             if side_age[skey] > cfg.side_ttl:
                 side_age.pop(skey, None)
                 sides.pop(skey, None)
-    locks = state.get("side_lock", {})
     for skey in list(locks):
         locks[skey] -= 1
         if locks[skey] <= 0:
@@ -285,8 +291,6 @@ def build_guide(p_d, v_d, goal_xy, movers, state, cruise_z=1.5, eta=None, cfg=No
         S_p, off_p, rate_p, acc_p, p_prev, u_prev = prev
         s_old = (base - p_prev[None, :]) @ u_prev
         y = np.interp(s_old, S_p, off_p, left=off_p[0] if len(off_p) else 0.0, right=0.0)
-        vy = np.interp(s_old, S_p, rate_p, left=0.0, right=0.0)
-        ay = np.interp(s_old, S_p, acc_p, left=0.0, right=0.0)
         dtk = cfg.dt_tick
         track2 = os.environ.get("GUIDE_TRACK2", "0") == "1"
         # DEFAULT = the box clamp (sweep-validated). The 2nd-order tracker is OPT-IN
@@ -304,6 +308,8 @@ def build_guide(p_d, v_d, goal_xy, movers, state, cruise_z=1.5, eta=None, cfg=No
             ay = np.zeros_like(y)
             off = y_new
         else:
+            vy = np.interp(s_old, S_p, rate_p, left=0.0, right=0.0)   # tracker-only state
+            ay = np.interp(s_old, S_p, acc_p, left=0.0, right=0.0)
             e = off - y
             vcap = cfg.lat_v * np.where((y * e > 0.0) & (np.abs(y) > 0.05), 2.0, 1.0)
             e_eff = np.maximum(np.abs(e) - np.abs(vy) * dtk, 0.0)   # discrete pre-brake margin

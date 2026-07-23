@@ -122,6 +122,9 @@ if os.environ.get("THIN", "0") == "1":
     if os.environ.get("GT_ORACLE", "0") != "1":
         os.environ.setdefault("KF_SIGV_YOUNG", "0.5")
     os.environ.setdefault("CALIB_FILE_V6", os.path.join(os.path.dirname(_HERE), "out", "conformal", "calib_v6_thin.json"))
+EGO_DECIDE = os.environ.get("EGO_DECIDE", "v2")   # hoisted (simplify 07-23): needed by init-time
+#   dials below; the documented semantics live at the original definition site further down
+_CONS_ON = float(os.environ.get("GUIDE_CONS", "0")) > 0   # plan-consistency term armed?
 if args.maneuver:
     args.ego = True; args.ego_safe = False   # the no-HOLD tournament REPLACES the ego_safe HOLD wrapper
 if args.slip:
@@ -648,8 +651,7 @@ if args.ego:
     # the gate kills by CENTIMETRES, every tick (s6 STATICDBG forensic: sd 0.64-0.70 vs 0.70).
     # inflation 0.5 -> 3 cells = 0.60 m dilation; plans sit ~0.9-1.05 m out and the gate passes.
     # Other arms keep 0.3 (byte-identical) -- their tournament escapes what the guide must avoid.
-    _EGO_INFL = float(os.environ.get("EGO_INFL",
-                                     "0.5" if os.environ.get("EGO_DECIDE") == "guide" else "0.3"))
+    _EGO_INFL = float(os.environ.get("EGO_INFL", "0.5" if EGO_DECIDE == "guide" else "0.3"))
     ego = EGOPlanner(map_origin=(-200, -200, -1), map_size=(400, 400, max(8.0, _zsz)), res=0.2,
                      inflation=_EGO_INFL)
     # EGO_VMAX env override: lower v_max so the drone does not OUTRUN its forward cone (8m cone / 8 m/s = ~1s lookahead
@@ -664,21 +666,21 @@ if args.ego:
                    ctrl_pt_dist=float(os.environ.get("EGO_CPD", "0.5")), horizon=EGO_HOR,
                    l_smooth=float(os.environ.get("EGO_LSMOOTH", "1.0")),
                    l_collision=0.8, dist0=max(0.4, float(par.drone_radius) + 0.2))
-    if os.environ.get("EGO_DECIDE") == "guide" and float(os.environ.get("GUIDE_PACC", "0")) > 0:
+    if EGO_DECIDE == "guide" and float(os.environ.get("GUIDE_PACC", "0")) > 0:
         # jitter model fix: price PHYSICAL accel/jerk in the rebound objective (convex Tikhonov
         # term -- optimum deforms continuously in lambda, unlike the cpd discretisation swap)
         ego.set_phys_smooth(float(os.environ.get("GUIDE_PACC", "0")),
                             float(os.environ.get("GUIDE_PACC_TH", "6.0")))
         print(f"[3dv] phys comfort hinge on: la={os.environ.get('GUIDE_PACC', '0')} "
               f"ac={os.environ.get('GUIDE_PACC_TH', '6.0')}", flush=True)
-    if os.environ.get("EGO_DECIDE") == "guide" and float(os.environ.get("GUIDE_CONS", "0")) > 0:
+    if EGO_DECIDE == "guide" and _CONS_ON:
         # jitter campaign: plan-to-plan consistency (tie each solve to the time-shifted FLOWN
         # trajectory; decays down the horizon). Default OFF pending calibration.
         ego.set_consistency(float(os.environ.get("GUIDE_CONS", "0")),
                             float(os.environ.get("GUIDE_CONS_TAU", "0.5")))
         print(f"[3dv] plan consistency on: lam={os.environ.get('GUIDE_CONS')} "
               f"tau={os.environ.get('GUIDE_CONS_TAU', '0.5')}", flush=True)
-    if os.environ.get("EGO_DECIDE") == "guide" and float(os.environ.get("GUIDE_ATTRACT", "0")) > 0:
+    if EGO_DECIDE == "guide" and float(os.environ.get("GUIDE_ATTRACT", "0")) > 0:
         # gtxy F10 (default OFF after A/B: lam 2.0 made the optimizer FAIL where line and grid
         # disagreed -- replan-leg holds 4->11 on s14; lam 0.5 was noise. The mechanism stays for
         # a future calibrated stiffness): hinge^2 adherence to the guide line beyond a tol band.
@@ -1383,7 +1385,8 @@ PHI_MAN = np.radians(25.0)   # ground around-L/R deflection angle for the maneuv
 # (CCF itself was empirically retired 2026-06-30: froze 2/5 natural seeds; v2's carrot-release +
 # evade mapping + dwell probes address exactly that failure mode -- verified per-seed before the
 # default flip, see commit message).
-EGO_DECIDE = os.environ.get("EGO_DECIDE", "v2")   # unified tournament DEFAULT (stage-2 2026-07-07);
+EGO_DECIDE = os.environ.get("EGO_DECIDE", "v2")   # (re-statement; hoisted above for init-time dials)
+#   unified tournament DEFAULT (stage-2 2026-07-07);
 #   "v1" = frozen legacy tournament kept ONLY for A/B reproduction of pre-unification renders
 #   (one shared implementation with the headless benchmark; absorbs CCF/CRET/FOVCAP speed patches)
 import safety_layer as _SL
@@ -1435,21 +1438,20 @@ _RF = {"have": False}
 
 
 def _sg_kernels(w, order=3):
-    half = w // 2
-    x = np.arange(-half, half + 1, dtype=float) * _RF_DT
-    A = np.vander(x, order + 1, increasing=True)
-    P = np.linalg.pinv(A)                                  # row k -> coeff of x^k
-    k0 = P[0][::-1]                                        # smoothing kernel (convolution flips)
-    k1 = P[1][::-1]                                        # 1st derivative
-    k2 = (2.0 * P[2])[::-1]                                # 2nd derivative
-    return k0, k1, k2
+    # scipy's tested Savitzky-Golay coefficients (== the hand Vandermonde/pinv version to 1e-13;
+    # simplify 07-23). use='conv' pre-flips for np.convolve; delta scales the derivative kernels.
+    from scipy.signal import savgol_coeffs
+    return tuple(savgol_coeffs(w, order, deriv=d, delta=_RF_DT, use="conv") for d in (0, 1, 2))
 
 
-_RF_K = _sg_kernels(_RF_WIN if _RF_WIN % 2 == 1 else _RF_WIN + 1)
+_RF_K = None   # built lazily on first _rf_build (REF_FILT is opt-in; import stays free of it)
 
 
 def _rf_build(dur):
     """Sample the committed spline on a fine grid and SG-filter pos/vel/acc (zero phase)."""
+    global _RF_K
+    if _RF_K is None:
+        _RF_K = _sg_kernels(_RF_WIN if _RF_WIN % 2 == 1 else _RF_WIN + 1)
     T = min(float(dur) - 1e-3, 2.5)
     if T <= 3 * _RF_DT:
         _RF["have"] = False
@@ -1486,10 +1488,6 @@ def _rf_eval(u):
     i = min(int(u / _RF_DT), len(t) - 2)
     w = (u - t[i]) / _RF_DT
     return tuple((1 - w) * arr[i] + w * arr[i + 1] for arr in (_RF["P"], _RF["V"], _RF["A"]))
-_A_CMD = [np.zeros(3)]    # last COMMANDED reference accel (executor writes; guide-arm replans use it
-#   as the accel boundary condition -- REFERENCE continuity. Feeding the measured quad.a recycled the
-#   attitude-wobble noise into every fresh spline head (cos 0.835, gain x1.3 = a sustained limit
-#   cycle: the cruise-jitter root, 2026-07-22 exec-trace forensic).
 _PD_NOW = [np.zeros(3)]   # drone position this tick (CAP_MEET's encounter-scale needs it at draw time)
 
 
@@ -1643,7 +1641,7 @@ MAN_STATIC_MARGIN = float(os.environ.get("EGO_STATICM", 0.70))  # reject a candi
 #   comes within this of KNOWN static. Because the gate now forward-sims the real quad (overshoot included), this is
 #   just the drone BODY radius + a small buffer -- the tracking tube is in the flown path, not the margin.
 MAN_STATIC_BUF = float(os.environ.get(
-    "EGO_STATIC_BUF", "0.30" if os.environ.get("EGO_DECIDE") == "guide" else "0.45"))
+    "EGO_STATIC_BUF", "0.30" if EGO_DECIDE == "guide" else "0.45"))
 #   static gate keep-out = drone_radius + this buffer
 #   (the gate now uses the cylinder-SDF, same model as GT clearance(); rmarg ~= 0.70 m matches the swept margin).
 #   guide arm default 0.30 (gtxy 0-hold F8): the gate boundary must sit BELOW EGO's own grid floor
@@ -1753,6 +1751,8 @@ _V3_PLAN = [None]    # the committed composite plan for the executor to fly via 
 _GUIDE_ST = {}       # north-star guide arm (EGO_DECIDE=guide): sticky sides + profile + last-ok guide
 _GUIDE_WARN = [0]
 GUIDE_BAND = float(os.environ.get("GUIDE_BAND", "0.25"))   # guide aims at cert radius + this band
+GUIDE_STATIC_ON = os.environ.get("GUIDE_STATIC", "1") == "1"   # statics enter the guide (F1)
+GUIDE_AD_CLAMP = float(os.environ.get("GUIDE_AD_CLAMP", "-1"))  # booked-negative probe, default off
 GUIDE_SBAND = float(os.environ.get("GUIDE_SBAND", "0.25"))  # static rows: berth past the flown-gate
 #   margin (drone_r + EGO_STATIC_BUF) so the plan the guide produces passes static_clear comfortably
 #   (plan-once-certify-once: a guide that clears exactly the cert radius plans splines the cert
@@ -2093,6 +2093,10 @@ def ego_maneuver_replan(p_d, v_d, a_d, cur_wp, t_sim):
                 return False
         return True
 
+    _fs_memo = {}   # (gear, u_from) -> samples; static_clear + mover_clear_flown always run the
+    #   SAME pair per candidate, so one forward-sim serves both (simplify 07-23: -50% of the
+    #   dominant per-tick cost). Cleared on every replan (_plan) -- a fresh spline = fresh sims.
+
     def flown_samples(gear=1.0, u_from=None):
         """The path the REAL drone will actually FLY: forward-simulate a COPY of the quad tracking the committed
         B-spline over [0, TAU]. The planned point-path hides the tracking OVERSHOOT (inertia / tilt-to-accelerate);
@@ -2101,6 +2105,14 @@ def ego_maneuver_replan(p_d, v_d, a_d, cur_wp, t_sim):
         verbatim -- reference advances gear*DT per real DT, feed-forward vel*gear / acc*gear^2. The
         slowed flight hugs the plan tighter, so a pinch that fails the gates at full speed can pass
         honestly at a lower gear (same forward-sim law the executor then flies)."""
+        _key = None
+        if EGO_DECIDE == "guide":
+            # memo is guide-arm-only: there every replan goes through _plan (which clears it);
+            # the v2 arm replans inside safety_layer with no invalidation hook -> no caching there
+            _key = (round(float(gear), 4), None if u_from is None else round(float(u_from), 5))
+            _hit = _fs_memo.get(_key)
+            if _hit is not None:
+                return _hit
         d = ego.duration()
         # M3 held-spline commitment: mid-commit the drone is u0 DEEP into the committed spline;
         # gates must sim tracking from there, not from the head (backwards-flying sim = garbage).
@@ -2120,7 +2132,10 @@ def ego_maneuver_replan(p_d, v_d, a_d, cur_wp, t_sim):
             hz_cap = min(MAN_STATIC_HZ, float(np.hypot(v_d[0], v_d[1])) / 5.0 + 0.45)
         hz = min(d - u0, hz_cap)                           # static-gate forward-sim lookahead (>= the flown-per-tick dist)
         if args.pointmass:                                # diagnostic: flown == planned
-            return np.array([ego.eval(u0 + s)[0] for s in np.linspace(0, max(gear * hz, 1e-3), 16)])
+            _pm = np.array([ego.eval(u0 + s)[0] for s in np.linspace(0, max(gear * hz, 1e-3), 16)])
+            if _key is not None:
+                _fs_memo[_key] = _pm
+            return _pm
         q = copy.deepcopy(quad)                           # current REAL state + params
         n = max(1, int(hz / DT)); pts = [q.p.copy()]
         for k in range(1, n + 1):
@@ -2132,7 +2147,10 @@ def ego_maneuver_replan(p_d, v_d, a_d, cur_wp, t_sim):
             yr = float(np.arctan2(sv[1], sv[0])) if np.linalg.norm(sv[:2]) > 1e-3 else q.yaw
             q.step(sp, sv, sa, DT, yaw_ref=yr)
             pts.append(q.p.copy())
-        return np.array(pts)
+        out = np.array(pts)
+        if _key is not None:
+            _fs_memo[_key] = out
+        return out
 
     # PRECISE static gate: gate the PREDICTED-FLOWN path against the static obstacle CYLINDERS (same SDF as the GT
     # clearance() metric) instead of sparse cloud points -> catches grazes of large buildings the cloud-point gate
@@ -2140,24 +2158,30 @@ def ego_maneuver_replan(p_d, v_d, a_d, cur_wp, t_sim):
     # surface; the maneuver then detours or HOLDs rather than grazing known static. loc_obs = local static cylinders.
     # filter by SURFACE distance (center_dist - radius), NOT center distance: a huge building's centre can be 20 m away
     # while its wall is right beside the drone -- a center-distance filter would wrongly drop it (seed 55 graze bug).
-    loc_obs = [(np.asarray(c3, float), 0.5 * float(sz[0]), 0.5 * float(sz[2]), _si)
-               for _si, (_c, c3, sz) in enumerate(STATIC_FED)
-               if float(np.hypot(*(np.asarray(c3)[:2] - p_d[:2]))) - 0.5 * float(sz[0]) <= EGO_HOR + 6.0]
+    _lob_i = (np.where(np.hypot(_SF_C[:, 0] - p_d[0], _SF_C[:, 1] - p_d[1]) - _SF_R
+                       <= EGO_HOR + 6.0)[0] if len(_SF_C) else np.zeros(0, int))
+    loc_obs = [(_SF_C[i], float(_SF_R[i]), float(_SF_HH[i]), int(i)) for i in _lob_i]
+    _lob_C = _SF_C[_lob_i]; _lob_R = _SF_R[_lob_i]; _lob_H = _SF_HH[_lob_i]
     _ST_RMARG = float(par.drone_radius) + MAN_STATIC_BUF   # body radius + buffer, matches GT clearance() drone radius
     _gate_kill = []   # ("st", fed_idx) | ("mv", oid) of the object whose gate refusal killed the
     #   last candidate this tick -- the guide branch turns it into learned per-object berth (F9)
 
     def _static_sd(qp, who=None):
-        sd_min = np.inf
-        for (c3, R, hh, _si) in loc_obs:
-            d = qp - c3
-            dr_out = max(float(np.hypot(d[0], d[1])) - R, 0.0); dz_out = max(abs(float(d[2])) - hh, 0.0)
-            sd = np.hypot(dr_out, dz_out) if (dr_out > 0 or dz_out > 0) else -min(R - float(np.hypot(d[0], d[1])), hh - abs(float(d[2])))
-            if sd < sd_min:
-                sd_min = sd
-                if who is not None:
-                    who[:] = [c3, R, hh, _si]
-        return sd_min
+        # vectorized cylinder SDF over the culled set (simplify 07-23: was a Python loop of ~40
+        # scalar hypots per flown sample x ~60 samples x gears). np.argmin keeps the same
+        # first-occurrence winner the old strict-< running min picked.
+        if not len(_lob_C):
+            return np.inf
+        d = qp[None, :] - _lob_C
+        dh = np.hypot(d[:, 0], d[:, 1])
+        dz = np.abs(d[:, 2])
+        dr_out = np.maximum(dh - _lob_R, 0.0); dz_out = np.maximum(dz - _lob_H, 0.0)
+        sd = np.where((dr_out > 0) | (dz_out > 0), np.hypot(dr_out, dz_out),
+                      -np.minimum(_lob_R - dh, _lob_H - dz))
+        k = int(np.argmin(sd))
+        if who is not None:
+            who[:] = [_lob_C[k], float(_lob_R[k]), float(_lob_H[k]), int(_lob_i[k])]
+        return float(sd[k])
 
     def static_clear(gear=1.0, u_from=None):
         if ego.duration() <= 1e-3 or not loc_obs:
@@ -2251,22 +2275,21 @@ def ego_maneuver_replan(p_d, v_d, a_d, cur_wp, t_sim):
                     # it too, but only on the window-reachable arc.
                     gmv.append((f"{_oid}#frz", (float(c3[0]), float(c3[1])), (0.0, 0.0),
                                 _R0g, float(_veff_c), 1.4 * _tw_g))
-            if os.environ.get("GUIDE_STATIC", "1") == "1":
+            if GUIDE_STATIC_ON and len(_SF_C):
                 # gtxy 0-hold F1: the guide routes around STATICS at gate scale too. The v2 arm's
                 # ±25/±50° carrot fan was the accidental static escape; with the fan gone, a
                 # static corridor block became a chronic replan -> static-gate-kill -> hold storm
                 # (s3/s5/s6: 411 of the matrix's 443 holds, all three DNFs). One line carries ALL
                 # routing: statics enter as v=0 conflicts at cyl_r + (drone_r + static_buf) +
                 # band; objects low enough that the flown-sim gate clears them overhead stay out.
-                for _si, (_c, _sc3, _ssz) in enumerate(STATIC_FED):
-                    _sr = 0.5 * float(_ssz[0]); _sh = float(_ssz[2])
-                    if _sh <= CRUISE_Z - _ST_RMARG - 0.25:   # overflyable at cruise (margined)
-                        continue
-                    if float(np.hypot(_sc3[0] - p_d[0], _sc3[1] - p_d[1])) - _sr > EGO_HOR + 8.0:
-                        continue
-                    gmv.append((f"st{_si}", (float(_sc3[0]), float(_sc3[1])), (0.0, 0.0),
-                                _sr + _ST_RMARG + GUIDE_SBAND + _extra.get(("st", _si), 0.0),
-                                0.0))
+                _sm = np.where((_SF_TOP > CRUISE_Z - _ST_RMARG - 0.25)
+                               & (np.hypot(_SF_C[:, 0] - p_d[0], _SF_C[:, 1] - p_d[1]) - _SF_R
+                                  <= EGO_HOR + 8.0))[0]
+                for _si in _sm:
+                    gmv.append((f"st{_si}", (float(_SF_C[_si, 0]), float(_SF_C[_si, 1])),
+                                (0.0, 0.0),
+                                float(_SF_R[_si]) + _ST_RMARG + GUIDE_SBAND
+                                + _extra.get(("st", int(_si)), 0.0), 0.0))
             return gmv
         _gmv = _build_gmv()
         _cyl = []                                        # cert keep-outs, SAME law as the v2 arm
@@ -2368,11 +2391,12 @@ def ego_maneuver_replan(p_d, v_d, a_d, cur_wp, t_sim):
 
         def _plan(tag, gpts):
             ego.set_guide_path(gpts)
+            _fs_memo.clear()                     # a replan (even a failed one) may swap the spline
             # (carrot END-VELOCITY was tried for the ringing hypothesis and REVERTED: a_ref p95
             #  12.9 -> 19.3 -- the v_end=0 "contradiction" is NOT the fuzz source. GUIDE_AD_CLAMP
             #  below is the surviving lead: the fed BOUNDARY accel carries the quad's wobble.)
             _ad = a_d
-            _adc = float(os.environ.get("GUIDE_AD_CLAMP", "-1"))
+            _adc = GUIDE_AD_CLAMP
             if _adc >= 0.0:
                 _an = float(np.hypot(a_d[0], a_d[1]))
                 _ad = a_d if _an <= _adc or _an < 1e-9 else                     np.array([a_d[0] * _adc / _an, a_d[1] * _adc / _an, a_d[2]], float)
@@ -2976,6 +3000,13 @@ print(f"[3dv] {'SERVE http://localhost:%d' % args.port if args.serve else ('LIVE
       f"  view={args.view}  {'(ESC/q to quit)' if args.live else ''}", flush=True)
 
 STATIC_CLOUD, STATIC_XY, STATIC_OBJS, STATIC_FED = build_static_field()
+# parallel numpy views of STATIC_FED (immutable): one vectorized cull replaces the per-tick
+# Python scans in loc_obs / _build_gmv (simplify 07-23). Order == enumerate(STATIC_FED).
+_SF_C = (np.asarray([c3 for (_c, c3, _s) in STATIC_FED], float)
+         if STATIC_FED else np.zeros((0, 3)))
+_SF_R = np.asarray([0.5 * float(_s[0]) for (_c, _c3, _s) in STATIC_FED], float)
+_SF_HH = np.asarray([0.5 * float(_s[2]) for (_c, _c3, _s) in STATIC_FED], float)
+_SF_TOP = np.asarray([float(_s[2]) for (_c, _c3, _s) in STATIC_FED], float)
 print(f"[3dv] static field: {len(STATIC_CLOUD)} voxels / {len(STATIC_OBJS)} objects (full-3D up to {Z_CEIL:.1f}m)", flush=True)
 if os.environ.get("TREE_DBG") == "1":   # diagnostic: does WLH match the real mesh extent (getTightBounds)?
     from collections import Counter
@@ -3146,7 +3177,7 @@ while not quit_now:
             if args.maneuver:
                 # NO-HOLD cylinder fastest-safe tournament (fly over / around / climb); leaves EGO holding the winner
                 _MAN_V2["t_ego_now"] = t_ego     # guide arm roll-2: how deep the executor is into the held spline
-                if EGO_DECIDE == "guide":
+                if EGO_DECIDE == "guide" and _CONS_ON:
                     ego.snapshot_prev(t_ego)     # consistency target = the FLOWN spline, once per tick
                 #   (REFERENCE-accel boundary (_A_CMD) was tried for the jitter case and REVERTED:
                 #    a_ref p95 unmoved -- the accel bursts are the optimizer's own turn placement,
@@ -3313,7 +3344,6 @@ while not quit_now:
                     sp_pos, sp_vel, sp_acc = s; sp_pos = np.asarray(sp_pos, float).copy()
                     sp_vel = np.asarray(sp_vel, float) * ego_speed_g            # feed-forward vel matches the warp
                     sp_acc = np.asarray(sp_acc, float) * (ego_speed_g ** 2)
-                    _A_CMD[0] = np.asarray(sp_acc, float).copy()   # reference-accel continuity (guide replans)
                     if args.slip:                                              # SLIP g>1 (slip-ahead): hard-cap to limits
                         _vmx = float(PLN.get("v_max", 6.0)); _amx = float(PLN.get("a_max", 10.0))
                         _nv = float(np.linalg.norm(sp_vel)); _na = float(np.linalg.norm(sp_acc))
@@ -3372,7 +3402,6 @@ while not quit_now:
                                   yaw_ref=yaw_ref)
                     else:
                         quad.step(quad.p, np.zeros(3), np.zeros(3), DT, yaw_ref=yaw_ref)   # hover
-                    _A_CMD[0] = _A_CMD[0] * 0.5                    # hold: reference accel decays to rest
                 else:
                     # SUSTAINED stuck (surrounded / inside a tree): RECOVERY = climb to clear the canopy and ease
                     # toward the goal instead of freezing. Space above the voxel ceiling is free. Gentle climb.
