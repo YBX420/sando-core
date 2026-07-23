@@ -101,6 +101,15 @@ namespace ego_planner
     // control points also pins the second difference = the accel/curvature delta the boundary
     // conditions alone never constrained. lambda = 0 or no snapshot -> untouched default path.
     void setConsistency(double lambda, double tau) { lambda_cons_ = lambda; cons_tau_ = tau; }
+
+    // PHYSICAL smoothness pricing (jitter model fix, 2026-07-23): the legacy smoothness term is
+    // |d3q|^2 = |jerk|^2 * ts^6 -- at ts 0.075 the exchange rate to physical jerk is 2e-7, so
+    // +-15 m/s^2 ripples live on a zero-cost solution manifold and L-BFGS lands on a different
+    // member each tick (THE measured fuzz). These terms price |d2q/ts^2|^2 (m/s^2)^2 and
+    // |d3q/ts^3|^2 (m/s^3)^2 DIRECTLY -- a convex Tikhonov regulariser, so the optimum deforms
+    // CONTINUOUSLY in lambda (unlike changing ts/ctrl_pt_dist, which swaps the discretisation
+    // basis and reshuffles knife-edge seeds). 0 = legacy path untouched.
+    void setPhysSmooth(double la, double ac) { lambda_pacc_ = la; pacc_thresh_ = ac; }
     void snapshotPrevTraj(const UniformBspline &prev, double t_shift, double duration) {
       cons_prev_ = prev; cons_shift_ = t_shift; cons_dur_ = duration; cons_have_ = duration > 1e-3;
     }
@@ -159,6 +168,8 @@ namespace ego_planner
     double cons_shift_{0.0}, cons_dur_{0.0};
     double lambda_cons_{0.0};             // plan-to-plan consistency weight; 0 = term off
     double cons_tau_{0.5};                // decay horizon (s) of the consistency weight
+    double lambda_pacc_{0.0};             // physical-accel comfort-hinge weight; 0 = off
+    double pacc_thresh_{6.0};             // comfort ceiling a_c (m/s^2): below = free
 
     int a;
     //

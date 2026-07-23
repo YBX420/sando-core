@@ -53,6 +53,7 @@ namespace ego_planner
     // (primary / retry / rollback) and every one must be tied to the trajectory the executor is
     // actually flying, not to a sibling candidate solved a millisecond earlier.
     void setConsistency(double lambda, double tau) { cons_lambda_ = lambda; cons_tau_ = tau; }
+    void setPhysSmooth(double la, double ac) { pacc_lambda_ = la; pacc_th_ = ac; }
     void snapshotPrev(double t_shift) {
       if (cons_lambda_ > 0.0 && local_data_.duration_ > 1e-3)
         bspline_optimizer_rebound_->snapshotPrevTraj(local_data_.position_traj_, t_shift,
@@ -74,6 +75,7 @@ namespace ego_planner
     std::vector<Eigen::Vector3d> guide_path_;   // north-star guide (empty = legacy init)
     double guide_lambda_{0.0}, guide_tol_{0.1}; // optimizer attraction toward guide_path_
     double cons_lambda_{0.0}, cons_tau_{0.5};   // plan-to-plan consistency dial
+    double pacc_lambda_{0.0}, pacc_th_{6.0};  // physical accel comfort-hinge dial
 
     int continous_failures_count_{0};
 

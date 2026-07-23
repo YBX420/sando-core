@@ -1217,6 +1217,31 @@ namespace ego_planner
       f_combine += lambda_cons_ * f_cons;
       grad_3D += lambda_cons_ * g_cons;
     }
+    if (lambda_pacc_ > 0.0)
+    {
+      // COMFORT HINGE on physical accel: |d2q|/ts^2 above pacc_thresh_ pays (an-ac)^2; below is
+      // FREE (a flat quadratic taxed legitimate launch/dodge accel too -- s2 flew 18.9 s and even
+      // collided at lambda 0.005; the hinge prices only the ghost ripples the fuzz is made of).
+      double ts2 = bspline_interval_ * bspline_interval_;
+      double f_pa = 0.0;
+      Eigen::MatrixXd g_pa = Eigen::MatrixXd::Zero(3, cps_.size);
+      for (int i = 0; i < cps_.size - 2; ++i)
+      {
+        Eigen::Vector3d a = (cps_.points.col(i + 2) - 2.0 * cps_.points.col(i + 1)
+                             + cps_.points.col(i)) / ts2;
+        double an = a.norm();
+        double e = an - pacc_thresh_;
+        if (e <= 0.0 || an < 1e-9)
+          continue;
+        f_pa += e * e;
+        Eigen::Vector3d gd = 2.0 * e * (a / an) / ts2;
+        g_pa.col(i) += gd;
+        g_pa.col(i + 1) -= 2.0 * gd;
+        g_pa.col(i + 2) += gd;
+      }
+      f_combine += lambda_pacc_ * f_pa;
+      grad_3D += lambda_pacc_ * g_pa;
+    }
     memcpy(grad, grad_3D.data() + 3 * order_, n * sizeof(grad[0]));
   }
 

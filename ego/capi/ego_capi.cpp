@@ -80,6 +80,11 @@ void ego_set_guide_attract(void* h, double lambda, double tol) {
   ((EGOPlannerManager*)h)->setGuideAttract(lambda, tol);
 }
 
+void ego_set_phys_smooth(void* h, double la, double ac) {
+  // physical-accel COMFORT HINGE: accel above ac (m/s^2) pays lambda*(|a|-ac)^2; below is free.
+  ((EGOPlannerManager*)h)->setPhysSmooth(la, ac);
+}
+
 void ego_set_consistency(void* h, double lambda, double tau) {
   // plan-to-plan consistency weight + decay horizon (s). 0 = legacy (term off).
   ((EGOPlannerManager*)h)->setConsistency(lambda, tau);
