@@ -1423,6 +1423,69 @@ def _tau_now():
 
 
 _VD_NOW = [np.zeros(3)]   # drone velocity this tick (set in ego_maneuver_replan; drawing-side TTC reads)
+# ---- ZERO-PHASE REFERENCE FILTER (jitter denoise, 2026-07-23; REF_FILT=1, guide arm) ----
+# The solved spline's 13 Hz accel ripples are +-13 m/s^2 but only ~2 mm in POSITION; within a
+# tick the whole plan is KNOWN, so an acausal Savitzky-Golay smoother removes them exactly with
+# zero lag and millimetre path change (<< MAN_TRACK). The executor tracks the filtered samples;
+# gates/cert continue to judge the spline -- the filtered-vs-raw delta is logged and bounded.
+_REF_FILT = os.environ.get("REF_FILT", "0") == "1"
+_RF_DT = 0.02
+_RF_WIN = int(os.environ.get("REF_FILT_WIN", "25"))       # samples (0.5 s at 0.02): ~2 Hz pass
+_RF = {"have": False}
+
+
+def _sg_kernels(w, order=3):
+    half = w // 2
+    x = np.arange(-half, half + 1, dtype=float) * _RF_DT
+    A = np.vander(x, order + 1, increasing=True)
+    P = np.linalg.pinv(A)                                  # row k -> coeff of x^k
+    k0 = P[0][::-1]                                        # smoothing kernel (convolution flips)
+    k1 = P[1][::-1]                                        # 1st derivative
+    k2 = (2.0 * P[2])[::-1]                                # 2nd derivative
+    return k0, k1, k2
+
+
+_RF_K = _sg_kernels(_RF_WIN if _RF_WIN % 2 == 1 else _RF_WIN + 1)
+
+
+def _rf_build(dur):
+    """Sample the committed spline on a fine grid and SG-filter pos/vel/acc (zero phase)."""
+    T = min(float(dur) - 1e-3, 2.5)
+    if T <= 3 * _RF_DT:
+        _RF["have"] = False
+        return
+    ts = np.arange(0.0, T, _RF_DT)
+    P = np.asarray([ego.eval(float(u))[0] for u in ts], float)
+    half = len(_RF_K[0]) // 2
+    _r0 = ego.eval(0.0); _rT = ego.eval(float(ts[-1]))
+    p0, v0, a0 = (np.asarray(x, float) for x in _r0)
+    pT, vT, aT = (np.asarray(x, float) for x in _rT)
+    tp = (np.arange(1, half + 1, dtype=float) * _RF_DT)[:, None]
+    head = p0[None, :] - v0[None, :] * tp + 0.5 * a0[None, :] * tp * tp
+    tail = pT[None, :] + vT[None, :] * tp + 0.5 * aT[None, :] * tp * tp
+    Ppad = np.vstack([head[::-1], P, tail])
+    #   ^ C^2-consistent quadratic extrapolation from the spline's own boundary derivatives --
+    #     mirror padding flipped the curvature at the ends and the executor flies EXACTLY the
+    #     head half-window (a_ref exploded to 200 m/s^2 on the first attempt)
+    F = np.empty_like(P); V = np.empty_like(P); A = np.empty_like(P)
+    for c in range(3):
+        F[:, c] = np.convolve(Ppad[:, c], _RF_K[0], mode="valid")
+        V[:, c] = np.convolve(Ppad[:, c], _RF_K[1], mode="valid")
+        A[:, c] = np.convolve(Ppad[:, c], _RF_K[2], mode="valid")
+    _RF.update(have=True, t=ts, P=F, V=V, A=A,
+               dmax=float(np.max(np.linalg.norm(F - P, axis=1))))
+
+
+def _rf_eval(u):
+    """Filtered (pos, vel, acc) at spline time u; None if out of the filtered range."""
+    if not _RF.get("have"):
+        return None
+    t = _RF["t"]
+    if u < t[0] or u > t[-1]:
+        return None
+    i = min(int(u / _RF_DT), len(t) - 2)
+    w = (u - t[i]) / _RF_DT
+    return tuple((1 - w) * arr[i] + w * arr[i + 1] for arr in (_RF["P"], _RF["V"], _RF["A"]))
 _A_CMD = [np.zeros(3)]    # last COMMANDED reference accel (executor writes; guide-arm replans use it
 #   as the accel boundary condition -- REFERENCE continuity. Feeding the measured quad.a recycled the
 #   attitude-wobble noise into every fresh spline head (cos 0.835, gain x1.3 = a sustained limit
@@ -3106,6 +3169,8 @@ while not quit_now:
                 else:
                     ego_stuck = 0; t_ego = 0.0             # fresh plan -> restart from its head
                     ego_traj_pts = [ego.eval(s)[0] for s in np.linspace(0, ego_dur, 24)]   # the REAL EGO B-spline
+                    if _REF_FILT and EGO_DECIDE == "guide":
+                        _rf_build(ego_dur)                 # zero-phase denoise of the fresh plan
             else:
                 ego_stuck += 1                             # keep executing the last good plan; only recover if stuck
             fed = feed(None, _cache, t, p_d)
@@ -3235,6 +3300,10 @@ while not quit_now:
                 # g==0 -> ego_cert_hold -> s=None -> hover (already near-stopped, so no jerk), climb if stuck.
                 s = (ego.eval(min(t_ego + ego_speed_g * DT, max(ego_dur - 1e-3, 0.0)))
                      if (ego_dur > 1e-3 and not ego_cert_hold) else None)
+                if s is not None and _REF_FILT and EGO_DECIDE == "guide":
+                    _sf = _rf_eval(min(t_ego + ego_speed_g * DT, max(ego_dur - 1e-3, 0.0)))
+                    if _sf is not None:
+                        s = _sf
                 if s is not None:
                     _STALE_CNT[1] += 1
                     if t_ego > REPLAN_DT * 1.5:
