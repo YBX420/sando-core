@@ -76,6 +76,10 @@ try:    # PLAN-TO-PLAN CONSISTENCY (jitter campaign: tie plan k+1 to the time-sh
     _snapshot_prev = _sig("ego_snapshot_prev", None, C.c_void_p, C.c_double)
 except AttributeError:
     _set_consistency = _snapshot_prev = None
+try:    # PHYSICAL smoothness pricing (jitter model fix: |d2q/ts^2|^2 + |d3q/ts^3|^2 terms)
+    _set_phys_smooth = _sig("ego_set_phys_smooth", None, C.c_void_p, C.c_double, C.c_double)
+except AttributeError:
+    _set_phys_smooth = None
 try:    # READONLY Bernstein-segment dump (M2-3 piecewise-warp cert, 2026-07-17); absent in a stale .so
     _get_bsegs = _sig("ego_get_bsegs", C.c_int, C.c_void_p, _d, _d, _d, C.c_int)
 except AttributeError:
@@ -130,6 +134,15 @@ class EGOPlanner:
                                    "the guide arm's adherence term would silently vanish)")
             return
         _set_guide_attract(self._h, float(lam), float(tol))
+
+    def set_phys_smooth(self, la, ac=6.0):
+        """Physical-accel COMFORT HINGE in the rebound objective: accel above ac (m/s^2) pays
+        la*(|a|-ac)^2; below is free. 0 = legacy. Raises LOUDLY on a stale .so when nonzero."""
+        if _set_phys_smooth is None:
+            if float(la) != 0.0:
+                raise RuntimeError("ego_capi.so is stale: rebuild it (missing ego_set_phys_smooth)")
+            return
+        _set_phys_smooth(self._h, float(la), float(ac))
 
     def set_consistency(self, lam, tau=0.5):
         """Plan-to-plan consistency dial (0 = legacy). Raises LOUDLY on a stale .so when lam>0."""

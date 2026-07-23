@@ -664,6 +664,13 @@ if args.ego:
                    ctrl_pt_dist=float(os.environ.get("EGO_CPD", "0.5")), horizon=EGO_HOR,
                    l_smooth=float(os.environ.get("EGO_LSMOOTH", "1.0")),
                    l_collision=0.8, dist0=max(0.4, float(par.drone_radius) + 0.2))
+    if os.environ.get("EGO_DECIDE") == "guide" and float(os.environ.get("GUIDE_PACC", "0")) > 0:
+        # jitter model fix: price PHYSICAL accel/jerk in the rebound objective (convex Tikhonov
+        # term -- optimum deforms continuously in lambda, unlike the cpd discretisation swap)
+        ego.set_phys_smooth(float(os.environ.get("GUIDE_PACC", "0")),
+                            float(os.environ.get("GUIDE_PACC_TH", "6.0")))
+        print(f"[3dv] phys comfort hinge on: la={os.environ.get('GUIDE_PACC', '0')} "
+              f"ac={os.environ.get('GUIDE_PACC_TH', '6.0')}", flush=True)
     if os.environ.get("EGO_DECIDE") == "guide" and float(os.environ.get("GUIDE_CONS", "0")) > 0:
         # jitter campaign: plan-to-plan consistency (tie each solve to the time-shifted FLOWN
         # trajectory; decays down the horizon). Default OFF pending calibration.
